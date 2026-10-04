@@ -58,6 +58,29 @@ inline std::vector<OutlineEntry> outlineFromPlan(const std::string& text, const 
     return entries;
 }
 
+inline std::string vaultTabLabelForWidth(const std::string& text, float width,
+                                         const char* fontFamily, float fontSize) {
+    if (width <= 0.0f || text.empty()) return {};
+    const auto measure = [&](const std::string& value) {
+        return core::TextPrimitive::measureTextWidth(value, fontFamily, fontSize);
+    };
+    if (measure(text) <= width) return text;
+    const std::string ellipsis = "\xE2\x80\xA6";
+    if (measure(ellipsis) > width) return {};
+    std::string prefix;
+    for (std::size_t index = 0; index < text.size();) {
+        const unsigned char first = static_cast<unsigned char>(text[index]);
+        const std::size_t length = first < 0x80 ? 1 : (first & 0xE0) == 0xC0 ? 2
+            : (first & 0xF0) == 0xE0 ? 3 : (first & 0xF8) == 0xF0 ? 4 : 1;
+        const std::size_t next = std::min(text.size(), index + length);
+        const std::string candidate = prefix + text.substr(index, next - index) + ellipsis;
+        if (measure(candidate) > width) return prefix + ellipsis;
+        prefix.append(text, index, next - index);
+        index = next;
+    }
+    return text;
+}
+
 inline void vaultTabsView(eui::Ui& ui, AppState& state, float inner, float fontSize) {
     const float tabsHeight = fontSize + 20.0f;
     const float half = std::max(0.0f, (inner - 6.0f) * 0.5f);
@@ -76,13 +99,18 @@ inline void vaultTabsView(eui::Ui& ui, AppState& state, float inner, float fontS
                     state.vaultTab = i == 0 ? VaultTab::Files : VaultTab::Outline;
                     app::requestUpdate();
                 }).build();
-            const float labelWidth = fontSize*2;
-            const float labelX = x + (half-labelWidth-23)*.5f;
+            const std::string fullLabel = i == 0 ? i18n::tr("outline.files") : i18n::tr("outline.title");
+            const float maxLabelWidth = std::max(0.0f, half - 23.0f);
+            const std::string label = vaultTabLabelForWidth(fullLabel, maxLabelWidth, uiFontFamily(state), fontSize);
+            const float measuredLabelWidth = core::TextPrimitive::measureTextWidth(label, uiFontFamily(state), fontSize);
+            const float groupWidth = 16.0f + 7.0f + measuredLabelWidth;
+            const float groupX = x + (half - groupWidth) * 0.5f;
             iconView(ui, id + ".icon", i == 0 ? UiIcon::Folder : UiIcon::Outline,
-                     labelX, (tabsHeight-16)*.5f, 16, active ? editorColors().accent : editorColors().textMuted);
-            ui.text(id + ".label").position(labelX+23, 0).size(labelWidth, tabsHeight)
-                .text(i == 0 ? i18n::tr("outline.files") : i18n::tr("outline.title")).fontFamily(uiFontFamily(state)).fontSize(fontSize)
+                     groupX, (tabsHeight-16)*.5f, 16, active ? editorColors().accent : editorColors().textMuted);
+            ui.text(id + ".label").position(groupX + 23.0f, 0).size(measuredLabelWidth, tabsHeight)
+                .text(label).fontFamily(uiFontFamily(state)).fontSize(fontSize)
                 .color(active ? editorColors().text : editorColors().textMuted)
+                .horizontalAlign(eui::HorizontalAlign::Center)
                 .verticalAlign(eui::VerticalAlign::Center).build();
         }
     }).build();

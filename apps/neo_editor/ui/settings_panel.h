@@ -115,7 +115,7 @@ inline bool applyThemeFilePath(AppState& state, const std::string& path) {
     // 主题只覆盖 base 那一侧的配色，所以外观要跟着切过去，否则用户看不到自己选的主题。
     // （配色数据本体在 style_schema.h 的 activeTheme()，themeloader::load 刚写完它。）
     if (activeTheme().version == themeloader::kSchemaVersion) {
-        state.theme = activeTheme().baseLight ? ThemeMode::Light : ThemeMode::Dark;
+        applyTheme(state, activeTheme().baseLight ? ThemeMode::Light : ThemeMode::Dark);
     }
     // 清屏色与 applyTheme 同一条同步（启动后只在配置读一次）。
     mutableAppConfig().clearColorValue = editorColors().window;
@@ -1123,7 +1123,7 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                      0.0f, rowY, labelWidth, geometry);
             segmentedAt(ui, colors, "settings.theme",
                         controlX, rowY + plainRowControlY, controlWidth,
-                        {i18n::tr("settings.theme_system"), i18n::tr("settings.dark"), i18n::tr("settings.light")},
+                        {i18n::tr("settings.theme_system_short"), i18n::tr("settings.dark"), i18n::tr("settings.light")},
                         state.themeFollowSystem ? 0 : (state.theme == ThemeMode::Light ? 2 : 1), metrics.panelFontSize,
                         [&state](int index) {
                             if (index == 0) {

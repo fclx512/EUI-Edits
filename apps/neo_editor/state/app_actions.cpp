@@ -659,7 +659,7 @@ void rebuildRows(AppState& state) {
         state.rows.clear();
         return;
     }
-    if (state.filter.empty()) {
+    if (state.vaultPathInputMode || state.filter.empty()) {
         vault::flatten(*state.vaultScan, state.expanded, state.rows);
     } else {
         vault::flattenFiltered(*state.vaultScan, state.filter, state.rows);
@@ -1413,6 +1413,12 @@ void applyTheme(AppState& state, ThemeMode mode) {
 void applyFollowSystemTheme(AppState& state) {
     applyThemePreference(state, /*followSystem=*/true,
                          settings::systemThemePrefersLight() ? ThemeMode::Light : ThemeMode::Dark);
+}
+
+void refreshSystemTheme(AppState& state) {
+    if (!state.themeFollowSystem) return;
+    const auto mode = settings::systemThemePrefersLight() ? ThemeMode::Light : ThemeMode::Dark;
+    if (state.theme != mode) applyThemePreference(state, /*followSystem=*/true, mode);
 }
 
 void applyUiFontSize(AppState& state, float fontSize) {

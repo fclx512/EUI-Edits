@@ -39,8 +39,13 @@ inline void safetyDialog(eui::Ui& ui, AppState& state, const eui::Screen& screen
     messageStyle.fontSize = uiMetrics(state).panelFontSize;
     messageStyle.lineHeight = messageStyle.fontSize + 6;
     messageStyle.maxWidth = titleStyle.maxWidth; messageStyle.wrap = true;
-    const float titleHeight = core::TextPrimitive::measureTextSize(titleStyle).y;
-    const float messageHeight = core::TextPrimitive::measureTextSize(messageStyle).y;
+    // Text measurement returns line-box height, while fallback glyph ink can
+    // exceed that box slightly after raster-size rounding. Keep a font-relative
+    // inset around the ink when centering it inside the clipped viewport.
+    const float titleInkSafety = std::max(2.0f, titleStyle.fontSize * 0.25f);
+    const float messageInkSafety = std::max(2.0f, messageStyle.fontSize * 0.25f);
+    const float titleHeight = core::TextPrimitive::measureTextSize(titleStyle).y + titleInkSafety;
+    const float messageHeight = core::TextPrimitive::measureTextSize(messageStyle).y + messageInkSafety;
     const float contentHeight = titleHeight + 16 + messageHeight;
     const float height = std::min(std::clamp(contentHeight + 84, 160.0f, 320.0f),
                                   std::max(140.0f, screen.height - 48.0f));
@@ -81,14 +86,23 @@ inline void safetyDialog(eui::Ui& ui, AppState& state, const eui::Screen& screen
                 .content([&] {
                     ui.stack(id + ".body").size(width - 60, contentHeight).scrollContentFrom(scrollId)
                         .content([&] {
-                            ui.text(id + ".title").position(0, 0).size(width - 60, titleHeight)
+                            // The renderer places glyph bitmaps relative to the face ascent;
+                            // CJK fallback glyph ink can extend above the line-box origin.
+                            // Center the ink bounds in the measured line-box area so the
+                            // clipped scroll viewport cannot shave the title's top edge.
+                            ui.text(id + ".title")
+                                .position(0, 0).size(width - 60, titleHeight)
                                 .text(titleStyle.text).fontFamily(titleStyle.fontFamily).fontSize(titleStyle.fontSize)
                                 .lineHeight(titleStyle.lineHeight)
-                                .maxWidth(width - 60).wrap(true).color(colors.text).build();
-                            ui.text(id + ".message").position(0, titleHeight + 16).size(width - 60, messageHeight)
+                                .maxWidth(width - 60).wrap(true).color(colors.text)
+                                .verticalAlign(eui::VerticalAlign::Center).build();
+                            ui.text(id + ".message")
+                                .position(0, titleHeight + 16)
+                                .size(width - 60, messageHeight)
                                 .text(message).fontFamily(messageStyle.fontFamily).fontSize(messageStyle.fontSize)
                                 .lineHeight(messageStyle.lineHeight).maxWidth(width - 60)
-                                .wrap(true).color(colors.text).build();
+                                .wrap(true).color(colors.text)
+                                .verticalAlign(eui::VerticalAlign::Center).build();
                         }).build();
                 }).build();
             if (contentHeight > viewport) components::scroll(ui, id + ".scrollbar")

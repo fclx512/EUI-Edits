@@ -110,6 +110,8 @@ struct VaultContext {
     std::string vaultRowFocusedPath;
     std::string vaultFocusRestorePath;
     std::string filter;
+    // 路径跳转和库内筛选共享输入栏时，记录当前输入模式。
+    bool vaultPathInputMode = true;
     float vaultScroll = 0.0f;
     VaultTab vaultTab = VaultTab::Files;
     std::vector<OutlineEntry> outline;
@@ -287,7 +289,7 @@ struct AppState : DocumentSession {
     // 界面主题。落盘到 settings.ini 的 theme。
     ThemeMode theme = ThemeMode::Dark;
     // 主题偏好 = "跟随系统"（settings.ini 的 theme=2）：theme 字段此时存的是
-    // 启动/点击时解析出的实际模式，每次都按系统 AppsUseLightTheme 重新解析。
+    // 当前解析出的实际模式，启动/点击/系统外观变化时按 AppsUseLightTheme 更新。
     bool themeFollowSystem = false;
     // 当前生效的主题文件（UTF-8 路径，空 = 内置配色）。落盘到 last_theme_file，
     // 设置面板的"主题文件"行按它显示；配色数据本体在 model 层的 activeTheme()，

@@ -584,6 +584,7 @@ bool createDocumentTab(AppState& state) {
     VaultContext context;
     context.vaultRoot = state.vaultRoot;
     context.expanded = state.expanded; context.filter = state.filter;
+    context.vaultPathInputMode = state.vaultPathInputMode;
     context.vaultScroll = state.vaultScroll; context.vaultTab = state.vaultTab;
     context.vaultSelectedPath = state.vaultSelectedPath;
     captureDerivedCaches(state);

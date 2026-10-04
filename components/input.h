@@ -343,6 +343,9 @@ public:
         state.verticalScroll = display.verticalScroll;
         const bool empty = display.text.empty();
         const bool hasSelection = !layout.selectionRects.empty();
+        // 占位文案可在文本/布局不变时切换（语言或输入模式）。根子树与文字图元
+        // 各有 retained key，两处都必须包含它；有内容时不让无关占位变化重建文档。
+        const std::string placeholderKey = empty ? "|placeholder:" + placeholder_ : std::string{};
         // 注意 display.decorationRevision：框架把这个 key 当"内容签名"（key 相同就完全不更新
         // 图元文本），而光标移动只会改变装饰（活动块切换、标记显示与否）、不改 textRevision，
         // 所以装饰的版本号必须算进来，否则点了别处这一行仍画着旧文本。
@@ -356,7 +359,7 @@ public:
             "|" + std::to_string(static_cast<int>(std::lround(textWidth * 64.0f))) +
             "|" + std::to_string(static_cast<int>(std::lround(fontSize * 64.0f))) +
             (wordWrap_ ? "|wrap" : "|nowrap") +
-            (empty ? "|p" : "|v") + (hasComposition ? "|ime" : "");
+            (empty ? "|p" : "|v") + (hasComposition ? "|ime" : "") + placeholderKey;
         const float renderedTextHeight = multiline_ ? layout.contentHeight : textHeight;
         const float caretX = layout.clampedCursorX();
         const auto compositionRange = InputModel::selectionRange(state);
@@ -375,7 +378,7 @@ public:
             .dirtyKey(InputModel::makeDirtyKey(state, focused, layout) +
                       "|d" + std::to_string(display.decorationRevision) +
                       (wordWrap_ ? "|wrap" : "|nowrap") +
-                      (scrollbar_ ? "|bar" : "|no-bar"));
+                      (scrollbar_ ? "|bar" : "|no-bar") + placeholderKey);
         if (hasX_) {
             root.x(x_);
         }

@@ -12,6 +12,7 @@
 #include "state/session_writer.h"
 #include "state/vault_cache.h"
 #include "ui/tab_bar.h"
+#include "ui/vault_view.h"
 #include "core/platform/async.h"
 
 #include <algorithm>
@@ -41,6 +42,8 @@ namespace fs = std::filesystem;
 namespace {
 int failures = 0, recoveryCalls = 0, clearRecoveryCalls = 0, closeRequests = 0;
 bool recoveryAvailable = false;
+bool systemPrefersLight = true;
+int fullPaintRequests = 0;
 std::string lastRecoveryOrigin;
 std::string sessionConfigDirectory;
 neo::settings::RecoverySnapshot recoverySnapshot;
@@ -73,8 +76,7 @@ Data& current() {
 
 std::string configDirectory() { return sessionConfigDirectory; }
 bool flush() { return true; }
-// 跟随系统主题的替身：单测统一按亮色解析。
-bool systemThemePrefersLight() { return true; }
+bool systemThemePrefersLight() { return systemPrefersLight; }
 bool writeRecovery(const std::string& text, const std::string& originPath, const textfile::Document*) {
     ++recoveryCalls; lastRecoveryOrigin = originPath; return true;
 }
@@ -146,7 +148,7 @@ namespace app {
 void requestUpdate() {}
 void requestClose() { ++closeRequests; }
 namespace detail {
-void requestFullPaint() {}
+void requestFullPaint() { ++fullPaintRequests; }
 } // namespace detail
 } // namespace app
 
@@ -161,6 +163,124 @@ int main() {
     neo::sessionwriter::setInlineForTest(true);
     neo::vaultcache::resetForTest();
     neo::i18n::initialize("en");
+    {
+        neo::AppState library;
+        auto scan = std::make_shared<neo::vault::ScanResult>();
+        scan->ok = true;
+        scan->roots = {{"notes.md", "notes.md", false, {}},
+                       {"other.txt", "other.txt", false, {}}};
+        library.vaultScan = scan;
+        library.filter = "notes";
+        library.vaultPathInputMode = false;
+        neo::rebuildRows(library);
+        check(library.rows.size() == 1 && library.rows.front().relative == "notes.md",
+              "search mode applies the retained filename filter");
+        library.vaultPathInputMode = true;
+        neo::rebuildRows(library);
+        check(library.rows.size() == 2 && library.filter == "notes",
+              "path mode restores the full tree while preserving the search query");
+        library.vaultPathInputMode = false;
+        neo::rebuildRows(library);
+        check(library.rows.size() == 1, "returning to search mode restores matching rows");
+        for (float font : {14.0f, 18.0f}) {
+            library.uiFontSize = font;
+            for (float width : {180.0f, 264.0f}) {
+                eui::Ui vaultUi;
+                vaultUi.begin("vault-ui");
+                neo::vaultPanelView(vaultUi, library, width, 600);
+                vaultUi.end(); vaultUi.layout(width, 600);
+                check(vaultUi.find("vault.address") && !vaultUi.find("vault.filter"),
+                      "both library modes share exactly one input");
+                const auto* modeHit = vaultUi.find("vault.mode.filter.hit");
+                const auto* parentHit = vaultUi.find("vault.parent.hit");
+                check(!vaultUi.find("vault.head.title") && modeHit && parentHit &&
+                      std::fabs(parentHit->frame.x - modeHit->frame.x - modeHit->frame.width - 2.0f) < 0.1f,
+                      "toolbar omits directory name and groups mode and parent buttons closely");
+                const auto* label = vaultUi.find("vault.choose.text");
+                check(label && label->frame.x + label->frame.width <= width - 9 &&
+                      core::TextPrimitive::measureTextWidth(label->text, label->fontFamily, label->fontSize)
+                          <= label->frame.width + 0.1f,
+                      "English folder button text fits the narrow and large-font toolbar");
+                auto& sharedInput = vaultUi.state<components::input_detail::InputModel::InputState>("vault.address");
+                sharedInput.undoStack.emplace_back(); sharedInput.redoStack.emplace_back();
+                vaultUi.find("vault.mode.filter.hit")->onClick();
+                check(sharedInput.undoStack.empty() && sharedInput.redoStack.empty(),
+                      "mode changes clear undo history independently of value equality");
+                check(library.vaultPathInputMode && library.rows.size() == 2 && library.filter == "notes",
+                      "mode button restores full tree and keeps the query");
+                vaultUi.find("vault.mode.filter.hit")->onClick();
+                check(!library.vaultPathInputMode && library.rows.size() == 1,
+                      "mode button restores the retained search");
+            }
+        }
+        check(neo::createDocumentTab(library) && !library.vaultPathInputMode && library.filter == "notes",
+              "a new tab inherits both the library query and input mode");
+    }
+    for (const char* language : {"en", "zh-CN"}) {
+        neo::i18n::initialize(language);
+        neo::AppState library;
+        for (float font : {14.0f, 18.0f}) {
+            library.uiFontSize = font;
+            for (float width : {180.0f, 264.0f}) {
+                eui::Ui ui;
+                ui.begin("vault-alignment");
+                neo::vaultPanelView(ui, library, width, 600.0f);
+                ui.end(); ui.layout(width, 600.0f);
+                for (const char* tab : {"vault.tab.files", "vault.tab.outline"}) {
+                    const std::string id(tab);
+                    const auto* hit = ui.find(id + ".hit");
+                    const auto* icon = ui.find(id + ".icon");
+                    const auto* label = ui.find(id + ".label");
+                    check(hit && icon && label &&
+                          std::fabs((icon->frame.x + label->frame.x + label->frame.width) * 0.5f
+                                    - (hit->frame.x + hit->frame.width * 0.5f)) < 0.1f &&
+                          core::TextPrimitive::measureTextWidth(label->text, label->fontFamily, label->fontSize)
+                              <= label->frame.width + 0.1f &&
+                          label->verticalAlign == eui::VerticalAlign::Center,
+                          "translated sidebar tabs center the measured icon and label group");
+                }
+                for (const char* tooltip : {"vault.mode.tooltip", "vault.parent.tooltip", "vault.choose.tooltip"}) {
+                    const std::string id(tooltip);
+                    const auto* panel = ui.find(id + ".bg");
+                    const auto* text = ui.find(id + ".text");
+                    check(panel && text && text->horizontalAlign == eui::HorizontalAlign::Center &&
+                          text->verticalAlign == eui::VerticalAlign::Center &&
+                          std::fabs(text->frame.y + text->frame.height * 0.5f
+                                    - panel->frame.y - panel->frame.height * 0.5f) < 0.1f,
+                          "all new toolbar explanations center text inside their panel");
+                }
+            }
+        }
+    }
+    neo::i18n::initialize("en");
+    {
+        neo::AppState appearance;
+        neo::applyFollowSystemTheme(appearance);
+        check(appearance.themeFollowSystem && appearance.theme==neo::ThemeMode::Light &&
+              neo::settings::current().theme==2, "follow preference resolves light and persists automatic mode");
+        systemPrefersLight=false;
+        const int paints=fullPaintRequests;
+        neo::refreshSystemTheme(appearance);
+        check(appearance.themeFollowSystem && appearance.theme==neo::ThemeMode::Dark &&
+              neo::settings::current().theme==2 && fullPaintRequests==paints+1,
+              "system change resolves dark, preserves follow and invalidates retained colors");
+        neo::refreshSystemTheme(appearance);
+        check(fullPaintRequests==paints+1, "duplicate system notification does not repaint");
+        systemPrefersLight=true;
+        neo::refreshSystemTheme(appearance);
+        check(appearance.theme==neo::ThemeMode::Light && fullPaintRequests==paints+2,
+              "system change back to light repaints");
+        neo::applyTheme(appearance,neo::ThemeMode::Dark);
+        neo::refreshSystemTheme(appearance);
+        check(!appearance.themeFollowSystem && appearance.theme==neo::ThemeMode::Dark &&
+              neo::settings::current().theme==0, "fixed dark ignores system light");
+        neo::applyTheme(appearance,neo::ThemeMode::Light);
+        systemPrefersLight=false;
+        neo::refreshSystemTheme(appearance);
+        check(!appearance.themeFollowSystem && appearance.theme==neo::ThemeMode::Light &&
+              neo::settings::current().theme==1, "fixed light ignores system dark");
+        systemPrefersLight=true;
+    }
     const auto dir = fs::temp_directory_path() / ("neo-tabs-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(dir / "project/docs/nested"); fs::create_directories(dir / "project-extra"); fs::create_directories(dir / "other");
     const auto child = dir / "project/docs/README.md", parent = dir / "project/README.md", unrelated = dir / "other/README.md";
@@ -250,6 +370,27 @@ int main() {
               std::fabs(closeHit->frame.width - 24.0f) < 0.01f &&
               closeHit->frame.x + closeHit->frame.width <= 31.01f,
               "24 DIP tab card keeps its close hit within the card bounds");
+    }
+
+    for (float width : {96.0f, 180.0f, 232.0f}) {
+        eui::Ui dirtyTabUi;
+        dirtyTabUi.begin("document-tabs-dirty-marker");
+        neo::TabInfo dirtyTab = *narrowTab;
+        dirtyTab.dirty = true;
+        dirtyTab.name = "long-document-name-with-an-ellipsis.md";
+        neo::UiMetrics metrics;
+        metrics.menuBarHeight = 32.0f;
+        neo::tab_bar_detail::tabCard(dirtyTabUi, barState, neo::editorColors(), metrics,
+                                     dirtyTab, narrowTabs, 7.0f, width, false, true, false);
+        dirtyTabUi.layout(300.0f, 40.0f);
+        const std::string id = "menubar.tabs." + std::to_string(dirtyTab.id);
+        const auto* name = dirtyTabUi.find(id + ".name");
+        const auto* marker = dirtyTabUi.find(id + ".dirty");
+        const auto* close = dirtyTabUi.find(id + ".close.hit");
+        check(name && marker && close &&
+              marker->frame.x >= name->frame.x + name->frame.width + 4.9f &&
+              close->frame.x >= marker->frame.x + marker->frame.width + 4.9f,
+              "dirty marker clears the title ellipsis and unchanged close hit area");
     }
 
     neo::tab_bar_detail::closeTabFromBar(barState, barBId, true, 162.0f, 16.0f);

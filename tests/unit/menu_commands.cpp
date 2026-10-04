@@ -11,6 +11,20 @@ int main() {
     for(const char* language : {"zh-CN","en"}) {
         setPreference(language);
         auto items=viewMenuItems(state);
+        if(commandAtPath(items,{5,0})!=id(Command::FollowSystem) ||
+           commandAtPath(items,{5,1})!=id(Command::Dark) ||
+           commandAtPath(items,{5,2})!=id(Command::Light)) return 7;
+        for (bool follow : {false,true}) {
+            for (auto mode : {neo::ThemeMode::Dark,neo::ThemeMode::Light}) {
+                state.themeFollowSystem=follow;
+                state.theme=mode;
+                const auto choices=viewMenuItems(state)[5].children;
+                if(choices.size()!=3 || choices[0].checked!=follow ||
+                   choices[1].checked!=(!follow && mode==neo::ThemeMode::Dark) ||
+                   choices[2].checked!=(!follow && mode==neo::ThemeMode::Light)) return 8;
+                if(std::count_if(choices.begin(),choices.end(),[](const auto& choice){return choice.checked;})!=1) return 9;
+            }
+        }
         if(commandAtPath(items,{3})!=id(Command::Wrap) || commandAtPath(items,{4})!=id(Command::Readable) ||
            commandAtPath(items,{7,0})!=id(Command::LanguageSystem) || commandAtPath(items,{7,1})!=id(Command::LanguageChinese) ||
            commandAtPath(items,{7,2})!=id(Command::LanguageEnglish) || commandAtPath(items,{8})!=id(Command::Settings)) return 1;

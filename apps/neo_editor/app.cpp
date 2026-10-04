@@ -4,6 +4,7 @@
 #include "platform/single_instance.h"
 #include "platform/font_safety.h"
 #include "platform/vault_watcher.h"
+#include "platform/system_appearance.h"
 #include "model/text_file.h"
 #include "model/theme_loader.h"
 #include "state/app_actions.h"
@@ -51,6 +52,11 @@
 
 namespace app {
 namespace {
+
+neo::platform::SystemAppearanceObserver& systemAppearanceObserver() {
+    static neo::platform::SystemAppearanceObserver observer;
+    return observer;
+}
 
 const char* defaultTextFont() {
 #if defined(_WIN32)
@@ -392,7 +398,8 @@ DslAppConfig& appConfigStorage() {
             if (neo::themeloader::load(savedThemeFile, themeError)) {
                 // 主题只覆盖 base 那一侧的配色，外观跟着切过去（正常情况下
                 // persistSettings 落的 theme 已经等于它，这里兜住手改 settings.ini）。
-                if (neo::activeTheme().version == neo::themeloader::kSchemaVersion) {
+                if (!state.themeFollowSystem &&
+                    neo::activeTheme().version == neo::themeloader::kSchemaVersion) {
                     state.theme = neo::activeTheme().baseLight ? neo::ThemeMode::Light
                                                               : neo::ThemeMode::Dark;
                 }
@@ -432,6 +439,7 @@ DslAppConfig& appConfigStorage() {
             .onKeyEvent([](const eui::KeyEvent& event) { handleShortcut(neo::state(), event); })
             .onCloseRequest([] { return neo::requestCloseDocument(neo::state()); })
             .onShutdown([] {
+                systemAppearanceObserver().stop();
                 // Async workers have already stopped here. Approved WM_CLOSE has
                 // completed session cleanup; submitting a write here cannot run
                 // and used to wait for the entire 5-second checkpoint timeout.
@@ -561,6 +569,10 @@ void applyOutlineJump(eui::Ui& ui, neo::AppState& state) {
 
 void compose(eui::Ui& ui, const eui::Screen& screen) {
     neo::AppState& state = neo::state();
+    auto& appearance = systemAppearanceObserver();
+    appearance.watch(core::window::nativeWindowInfo(core::window::mainWindowHandle()).platformWindow,
+                     [] { app::requestUpdate(); });
+    if (appearance.consumeChange()) neo::refreshSystemTheme(state);
     const neo::EditorColors& colors = neo::editorColors();
     const neo::UiMetrics metrics = neo::uiMetrics(state);
     if (state.sessionClosePending) {

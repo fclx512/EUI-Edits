@@ -21,6 +21,70 @@ namespace neo {
 namespace vault_detail {
 // 文档库由监视线程实时更新。
 
+inline std::string elideToMeasuredWidth(const std::string& text, float maxWidth,
+                                        const std::string& fontFamily, float fontSize) {
+    if (maxWidth <= 0.0f || text.empty()) return {};
+    const auto measure = [&](const std::string& value) {
+        return core::TextPrimitive::measureTextWidth(value, fontFamily, fontSize);
+    };
+    if (measure(text) <= maxWidth) return text;
+    const std::string ellipsis = "\xE2\x80\xA6";
+    const float ellipsisWidth = measure(ellipsis);
+    if (ellipsisWidth > maxWidth) return {};
+    std::string prefix;
+    for (std::size_t index = 0; index < text.size();) {
+        const unsigned char first = static_cast<unsigned char>(text[index]);
+        const std::size_t length = first < 0x80 ? 1 : (first & 0xE0) == 0xC0 ? 2
+            : (first & 0xF0) == 0xE0 ? 3 : (first & 0xF8) == 0xF0 ? 4 : 1;
+        const std::size_t next = std::min(text.size(), index + length);
+        std::string candidate = prefix + text.substr(index, next - index) + ellipsis;
+        if (measure(candidate) > maxWidth) return prefix + ellipsis;
+        prefix.append(text, index, next - index);
+        index = next;
+    }
+    return text;
+}
+
+inline void toolbarTooltip(eui::Ui& ui, const std::string& id, const std::string& source,
+                           const std::string& text, float anchorX, float toolbarBottom,
+                           float panelWidth, float panelHeight, const EditorColors& colors,
+                           const char* fontFamily, float fontSize) {
+    constexpr float kPaddingX = 10.0f;
+    constexpr float kPaddingY = 6.0f;
+    constexpr float kVerticalGap = 4.0f;
+    const float available = std::max(0.0f, panelWidth - kPaddingX * 2.0f);
+    const float measured = core::TextPrimitive::measureTextWidth(text, fontFamily, fontSize);
+    const float tooltipWidth = std::min(available, std::max(std::min(86.0f, available),
+                                                            measured + kPaddingX * 2.0f));
+    const float textWidth = std::max(1.0f, tooltipWidth - kPaddingX * 2.0f);
+    core::TextStyle textStyle;
+    textStyle.text = text;
+    textStyle.fontFamily = fontFamily;
+    textStyle.fontSize = fontSize;
+    textStyle.maxWidth = textWidth;
+    textStyle.wrap = true;
+    textStyle.lineHeight = fontSize + 5.0f;
+    const float textHeight = std::max(textStyle.lineHeight, core::TextPrimitive::measureTextSize(textStyle).y);
+    const float tooltipHeight = textHeight + kPaddingY * 2.0f;
+    const float x = std::clamp(anchorX - tooltipWidth * 0.5f, kPaddingX,
+                               std::max(kPaddingX, panelWidth - tooltipWidth - kPaddingX));
+    const float wantedY = toolbarBottom + kVerticalGap;
+    const float y = std::clamp(wantedY, 8.0f, std::max(8.0f, panelHeight - tooltipHeight - 8.0f));
+    const eui::Color background = colors.tokens.dark
+        ? core::mixColor(colors.tokens.surface, core::Color{0.0f, 0.0f, 0.0f, 1.0f}, 0.18f)
+        : core::Color{1.0f, 1.0f, 1.0f, 0.96f};
+    ui.stack(id).position(x, y).size(tooltipWidth, tooltipHeight).zIndex(2600)
+        .hoverOpacityFrom(source)
+        .content([&] {
+            ui.rect(id + ".bg").fill().radius(7.0f).color(background)
+                .border(1.0f, colors.border).build();
+            ui.text(id + ".text").position(kPaddingX, kPaddingY).size(textWidth, textHeight)
+                .text(text).fontFamily(fontFamily).fontSize(fontSize).lineHeight(textStyle.lineHeight)
+                .color(colors.tokens.text).horizontalAlign(eui::HorizontalAlign::Center)
+                .verticalAlign(eui::VerticalAlign::Center).wrap(true).build();
+        }).build();
+}
+
 inline std::string lowerExtension(const std::string& name) {
     const std::size_t dot = name.find_last_of('.');
     if (dot == std::string::npos || dot + 1 >= name.size()) {
@@ -111,11 +175,10 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
 
     constexpr float kPadding = 10.0f;
     constexpr float kHeaderHeight = 26.0f;
-    // 地址栏：原来是 16 的只读路径文字，现在要让出输入框的内边距。
-    constexpr float kRootHeight = 24.0f;
-    constexpr float kFilterHeight = 28.0f;
+    constexpr float kRootHeight = 30.0f;
     constexpr float kGap = 6.0f;
-    constexpr float kChooseWidth = 92.0f;
+    constexpr float kToolbarGap = 2.0f;
+    constexpr float kModeButtonWidth = 28.0f;
     constexpr float kRowIconWidth = 16.0f;
     constexpr float kCaretWidth = 13.0f;
     constexpr float kIconGap = 6.0f;
@@ -137,10 +200,17 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
         state.vaultPendingReveal.clear();
     }
     const float listHeight = std::max(0.0f,
-                                      height - 16.0f - tabsHeight - kHeaderHeight - kRootHeight -
-                                          kFilterHeight - kGap * 4.0f);
-    const float titleWidth = std::max(
-        0.0f, inner - kChooseWidth - kGap - kRowIconWidth - 4.0f);
+                                      height - 16.0f - tabsHeight - kHeaderHeight - kRootHeight - kGap * 3.0f);
+    // Give the action its measured label width while keeping it inside the sidebar.
+    const float chooseGlyph = std::min(18.0f, metrics.vaultFilterFontSize + 2.0f);
+    const float chooseNaturalWidth = core::TextPrimitive::measureTextWidth(
+        i18n::tr("vault.choose_directory"), uiFontFamily(state), metrics.vaultFilterFontSize) + chooseGlyph + 18.0f;
+    const float chooseAvailable = std::max(0.0f, inner - kModeButtonWidth * 2.0f - kToolbarGap * 3.0f);
+    const float chooseWidth = std::min(chooseAvailable, std::max(82.0f, chooseNaturalWidth));
+    const std::filesystem::path currentVaultPath = state.vaultRoot.empty()
+        ? std::filesystem::path{} : textfile::pathFromUtf8(state.vaultRoot).lexically_normal();
+    const std::filesystem::path vaultParent = currentVaultPath.parent_path();
+    const bool canGoParent = !currentVaultPath.empty() && !vaultParent.empty() && vaultParent != currentVaultPath;
 
     // 每帧只算一次相对路径；放进行回调会变成“每行一次文件系统调用”。
     const std::string activeRelative = state.path.empty() ? std::string{} : vaultRelativePath(state, state.path);
@@ -151,8 +221,6 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
     }
     const std::string selectedRelative = state.vaultSelectedPath;
     const std::string contextRelative = state.vaultContextMenuOpen ? state.vaultContextPath : std::string{};
-    const std::string rootLabel =
-        state.vaultRoot.empty() ? std::string(i18n::tr("vault.no_document")) : textfile::fileName(state.vaultRoot);
     const bool empty = state.rows.empty();
 
     ui.stack("vault")
@@ -172,65 +240,105 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                     vaultTabsView(ui, state, inner, metrics.vaultTitleFontSize);
                     ui.row("vault.head")
                         .size(inner, kHeaderHeight)
-                        .gap(kGap)
+                        .gap(kToolbarGap)
                         .alignItems(eui::Align::CENTER)
                         .content([&] {
-                            ui.stack("vault.head.icon").size(kRowIconWidth, kHeaderHeight).content([&] {
-                                iconView(ui, "vault.head.folder", UiIcon::Folder, 0,
-                                         (kHeaderHeight-kRowIconWidth)*.5f, kRowIconWidth, colors.iconFolder);
+                            const bool filterMode = !state.vaultPathInputMode;
+                            const eui::Color activeModeFill = rgba(colors.accent.r, colors.accent.g,
+                                                                  colors.accent.b, 0.14f);
+                            ui.stack("vault.mode.filter").size(kModeButtonWidth, kHeaderHeight).content([&] {
+                                ui.rect("vault.mode.filter.hit").fill().radius(5.0f)
+                                    .color(filterMode ? activeModeFill : transparentColor())
+                                    .border(filterMode ? 1.0f : 0.0f, colors.accent)
+                                    .states(filterMode ? activeModeFill : transparentColor(), colors.rowHover,
+                                            colors.pressed)
+                                    .cursor(eui::CursorShape::Hand)
+                                    .onClick([&state, &ui] {
+                                        // A shared field must not undo into the other mode, even
+                                        // when both retained values happen to be identical.
+                                        auto& input = ui.state<components::input_detail::InputModel::InputState>("vault.address");
+                                        input.undoStack.clear();
+                                        input.redoStack.clear();
+                                        state.vaultPathInputMode = !state.vaultPathInputMode;
+                                        rebuildRows(state);
+                                        state.vaultScroll = 0.0f;
+                                        app::requestUpdate();
+                                    }).build();
+                                iconView(ui, "vault.mode.filter.icon", UiIcon::Search,
+                                         (kModeButtonWidth - 18.0f) * 0.5f,
+                                         (kHeaderHeight - 18.0f) * 0.5f, 18.0f,
+                                         filterMode ? colors.accent : colors.textMuted);
                             }).build();
-                            ui.text("vault.head.title")
-                                .size(titleWidth, kHeaderHeight)
-                                .text(elideToWidth(rootLabel, titleWidth, metrics.vaultTitleFontSize))
-                                .fontFamily(uiFontFamily(state))
-                                .fontSize(metrics.vaultTitleFontSize)
-                                .verticalAlign(eui::VerticalAlign::Center)
-                                .color(colors.text)
-                                .build();
-                            iconTextButton(ui, "vault.choose", UiIcon::ArrowLeft, i18n::tr("vault.choose_directory"), kChooseWidth,
+                            ui.stack("vault.parent").size(kModeButtonWidth, kHeaderHeight).content([&] {
+                                auto hit = ui.rect("vault.parent.hit").fill().radius(5.0f)
+                                    .states(transparentColor(), colors.rowHover, colors.pressed)
+                                    .preserveFocusOnPress().disabled(!canGoParent);
+                                if (canGoParent) {
+                                    hit.cursor(eui::CursorShape::Hand).onClick([&state] {
+                                        const std::filesystem::path current =
+                                            textfile::pathFromUtf8(state.vaultRoot).lexically_normal();
+                                        const std::filesystem::path parent = current.parent_path();
+                                        if (parent.empty() || parent == current) return;
+                                        state.vaultRoot = textfile::pathToUtf8(parent);
+                                        state.vaultAddress = state.vaultRoot;
+                                        state.vaultScan.reset();
+                                        state.vaultRowsGeneration = 0;
+                                        state.expanded.clear();
+                                        refreshVault(state, true);
+                                        app::requestUpdate();
+                                    });
+                                }
+                                hit.build();
+                                const float glyph = 18.0f;
+                                iconView(ui, "vault.parent.icon", UiIcon::Previous,
+                                         (kModeButtonWidth-glyph)*.5f, (kHeaderHeight-glyph)*.5f,
+                                         glyph, canGoParent ? colors.text : colors.textMuted);
+                            }).build();
+                            ui.stack("vault.head.spacer").fill().build();
+                            const float chooseTextWidth = std::max(
+                                0.0f, chooseWidth - std::min(18.0f, metrics.vaultFilterFontSize + 2.0f) - 18.0f);
+                            iconTextButton(ui, "vault.choose", UiIcon::FolderOpen,
+                                           elideToMeasuredWidth(i18n::tr("vault.choose_directory"), chooseTextWidth,
+                                                                uiFontFamily(state), metrics.vaultFilterFontSize),
+                                           chooseWidth,
                                            metrics.vaultFilterFontSize,
                                            [&state] { chooseVaultDirectory(state); }, uiFontFamily(state));
                         })
                         .build();
 
-                    // 地址栏。原来这里只是一行只读路径，进深层目录只能一层层点开；
-                    // 现在是输入框：粘贴路径回车就跳过去（目录=展开到它，文件=展开并打开）。
-                    // 平时底色跟侧栏一致，看着仍像一行路径文字，聚焦才显出输入框。
-                    components::InputStyle addressStyle(colors.tokens);
-                    addressStyle.background = colors.panel;
-                    addressStyle.focused = colors.panel;
-                    addressStyle.border = transparentColor();
-                    addressStyle.focusBorder = colors.rowHover;
-                    addressStyle.text = state.vaultAddress.empty() ? colors.textMuted : colors.text;
-                    addressStyle.placeholder = colors.textMuted;
-                    addressStyle.cursor = colors.accent;
-                    addressStyle.radius = 4.0f;
-                    addressStyle.shadow = eui::Shadow{};
+                    // 路径跳转和文件筛选共用一个输入框，切换时各自的文本都保留。
+                    components::InputStyle unifiedStyle(colors.tokens);
+                    unifiedStyle.background = colors.panel;
+                    unifiedStyle.focused = colors.panel;
+                    unifiedStyle.border = colors.border;
+                    unifiedStyle.focusBorder = colors.accent;
+                    unifiedStyle.text = (state.vaultPathInputMode ? state.vaultAddress : state.filter).empty()
+                        ? colors.textMuted : colors.text;
+                    unifiedStyle.placeholder = colors.textMuted;
+                    unifiedStyle.cursor = colors.accent;
+                    unifiedStyle.radius = 5.0f;
+                    unifiedStyle.shadow = eui::Shadow{};
                     components::input(ui, "vault.address")
                         .size(inner, kRootHeight)
-                        .value(state.vaultAddress)
-                        .placeholder(i18n::tr("vault.path_placeholder"))
-                        .fontSize(metrics.vaultPathFontSize)
-                        .fontFamily(uiFontFamily(state))
-                        .inset(6.0f)
-                        .style(addressStyle)
-                        .transition(quickTransition())
-                        .onChange([&state](const std::string& value) { state.vaultAddress = value; })
-                        .onEnter([&state] { navigateToVaultPath(state, state.vaultAddress); })
-                        .build();
-
-                    components::input(ui, "vault.filter")
-                        .size(inner, kFilterHeight)
-                        .value(state.filter)
-                        .placeholder(i18n::tr("vault.filter"))
+                        .value(state.vaultPathInputMode ? state.vaultAddress : state.filter)
+                        .placeholder(i18n::tr(state.vaultPathInputMode
+                                                  ? "vault.path_placeholder" : "vault.filter"))
                         .fontSize(metrics.vaultFilterFontSize)
+                        .fontFamily(uiFontFamily(state))
                         .inset(8.0f)
-                        .theme(colors.tokens)
+                        .style(unifiedStyle)
                         .transition(quickTransition())
                         .onChange([&state](const std::string& value) {
-                            state.filter = value;
-                            rebuildRows(state);
-                            state.vaultScroll = 0.0f;
+                            if (state.vaultPathInputMode) {
+                                state.vaultAddress = value;
+                            } else {
+                                state.filter = value;
+                                rebuildRows(state);
+                                state.vaultScroll = 0.0f;
+                            }
+                        })
+                        .onEnter([&state] {
+                            if (state.vaultPathInputMode) navigateToVaultPath(state, state.vaultAddress);
                         })
                         .build();
 
@@ -426,6 +534,20 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                         .build();
                 })
                 .build();
+            const float toolbarCenterY = 8.0f + tabsHeight + kGap + kHeaderHeight * 0.5f;
+            toolbarTooltip(ui, "vault.mode.tooltip", "vault.mode.filter.hit",
+                           i18n::tr(state.vaultPathInputMode ? "vault.filter_mode" : "vault.path_mode"),
+                           kPadding + kModeButtonWidth * 0.5f, toolbarCenterY + kHeaderHeight * 0.5f,
+                           width, height, colors, uiFontFamily(state), metrics.vaultFilterFontSize);
+            toolbarTooltip(ui, "vault.parent.tooltip", "vault.parent.hit",
+                           i18n::tr("vault.parent_directory"),
+                           kPadding + kModeButtonWidth + kToolbarGap + kModeButtonWidth * 0.5f,
+                           toolbarCenterY + kHeaderHeight * 0.5f,
+                           width, height, colors, uiFontFamily(state), metrics.vaultFilterFontSize);
+            toolbarTooltip(ui, "vault.choose.tooltip", "vault.choose.hit",
+                           i18n::tr("vault.choose_directory"),
+                           kPadding + inner - chooseWidth * 0.5f, toolbarCenterY + kHeaderHeight * 0.5f,
+                           width, height, colors, uiFontFamily(state), metrics.vaultFilterFontSize);
         })
         .build();
 }

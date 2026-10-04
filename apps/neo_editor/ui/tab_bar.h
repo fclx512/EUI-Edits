@@ -323,7 +323,9 @@ inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
 
     if (tab.dirty && showTitle) {
         ui.rect(id + ".dirty")
-            .position(std::max(titleLeft, titleRight - 5.0f), y + (height - 5.0f) * 0.5f)
+            // titleRight already leaves 15 DIP before the close hit area;
+            // use that gap so the dirty marker no longer sits on the ellipsis.
+            .position(titleRight + 5.0f, y + (height - 5.0f) * 0.5f)
             .size(5.0f, 5.0f).radius(2.5f).color(colors.accent).build();
     }
 
@@ -493,7 +495,7 @@ inline void tabList(eui::Ui& ui, AppState& state, const eui::Screen& screen,
                                                                     actionsWidth - 8.0f);
                         const std::string title = elideMeasured(
                             tab.name.empty() ? std::string(i18n::tr("tabs.untitled")) : tab.name,
-                            family, metrics.menuFontSize, std::max(0.0f, titleWidth - 9.0f));
+                            family, metrics.menuFontSize, std::max(0.0f, titleWidth - 13.0f));
                         const std::string pathLabel = tab.path.empty()
                             ? std::string(i18n::tr("tabs.unsaved_path")) : tab.path;
                         const std::string rootLabel = displayedRoot(state, tab);
@@ -560,7 +562,7 @@ inline void tabList(eui::Ui& ui, AppState& state, const eui::Screen& screen,
                             .verticalAlign(eui::VerticalAlign::Center).wrap(false).build();
                         if (tab.dirty) {
                             ui.rect(rowId + ".dirty")
-                                .position(titleLeft + std::max(0.0f, titleWidth - 18.0f) + 4.0f,
+                                .position(titleLeft + std::max(0.0f, titleWidth - 5.0f),
                                           cardTop + 8.0f + (lm.titleRow - 5.0f) * 0.5f)
                                 .size(5.0f, 5.0f).radius(2.5f).color(colors.accent).build();
                         }

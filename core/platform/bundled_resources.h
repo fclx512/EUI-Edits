@@ -6,7 +6,13 @@
 namespace core::platform {
 
 enum class BundledResourceId : unsigned int {
-    EuiEditsLicenses = 502
+    EuiEditsLicenses = 502,
+    AboutIcon48 = 510,
+    AboutIcon60 = 511,
+    AboutIcon72 = 512,
+    AboutIcon96 = 513,
+    AboutIcon120 = 514,
+    AboutIcon144 = 515
 };
 
 struct BundledResourceView {

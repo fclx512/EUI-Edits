@@ -42,7 +42,7 @@ inline std::vector<float> fontSizeOptions(const AppState& state) {
 enum class Command {
     None = 0, NewText, NewMarkdown, Open, CloseTab, Exit, Save, SaveAs, OpenVault,
     Undo, Redo, Cut, Copy, SelectAll, Find, Syntax,
-    Simple, Vault, Dark, Light, Lines, Status, Wrap, Readable,
+    Simple, Vault, Dark, Light, FollowSystem, Lines, Status, Wrap, Readable,
     LanguageSystem, LanguageChinese, LanguageEnglish, Settings,
     FontSizeBase = 100, EncodingBase = 200
 };
@@ -95,8 +95,10 @@ inline std::vector<MenuItem> viewMenuItems(const AppState& state) {
         toggle(Command::Status, "menu.status", state.showStatusBar),
         toggle(Command::Wrap, "menu.wrap", state.wordWrap()).withSeparatorBefore(),
         toggle(Command::Readable, "menu.readable", state.readableWidth),
-        MenuItem(i18n::tr("menu.appearance"), {toggle(Command::Dark, "menu.dark", state.theme==ThemeMode::Dark),
-                                            toggle(Command::Light, "menu.light", state.theme==ThemeMode::Light)}).withSeparatorBefore(),
+        MenuItem(i18n::tr("menu.appearance"), {
+            toggle(Command::FollowSystem, "menu.theme_system", state.themeFollowSystem),
+            toggle(Command::Dark, "menu.dark", !state.themeFollowSystem && state.theme==ThemeMode::Dark),
+            toggle(Command::Light, "menu.light", !state.themeFollowSystem && state.theme==ThemeMode::Light)}).withSeparatorBefore(),
         MenuItem(i18n::tr("menu.font_size"), std::move(sizes))
             // 字号子级固定 112 DIP、数字居中；其余子级按统一紧凑槽位自适应宽度。
             .withChildrenPresentation(components::ContextMenuItem::ChildrenPresentation{112.0f, true, true}),
@@ -157,6 +159,7 @@ inline void dispatchCommand(AppState& state, int id) {
             persistSettings(state); break;
         case Command::Dark: case Command::Light:
             applyTheme(state,id==static_cast<int>(Command::Light)?ThemeMode::Light:ThemeMode::Dark); break;
+        case Command::FollowSystem: applyFollowSystemTheme(state); break;
         case Command::Lines: state.showLineNumbers=!state.showLineNumbers; persistSettings(state); break;
         case Command::Status: state.showStatusBar=!state.showStatusBar; applyShowStatusBar(state); break;
         case Command::Wrap: state.wrapOverride=state.wordWrap()?0:1; break;

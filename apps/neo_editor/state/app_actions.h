@@ -147,8 +147,10 @@ void applyShowStatusBar(AppState& state);
 // 界面主题（settings.ini 的 theme）。配色是全局的：改完不只是重新 compose，
 // 还得让保留层里的图元整屏作废 —— 它们的颜色是画的时候烘进去的。
 void applyTheme(AppState& state, ThemeMode mode);
-// "跟随系统"：每次按 Windows 个人化的应用模式明暗解析（不常驻监听系统切换）。
+// "跟随系统"：立即解析 Windows 应用模式，并由系统外观通知继续更新。
 void applyFollowSystemTheme(AppState& state);
+// 系统通知只更新跟随偏好；固定亮/暗不受影响，模式没变时不重绘或落盘。
+void refreshSystemTheme(AppState& state);
 
 // 自选字体文件（settings.ini 的 editor_font_file / ui_font_file / code_font_file）。
 // 传空串 = 恢复预设。编辑区字体立刻生效；界面字体还要顺带换掉框架的全局默认字体，

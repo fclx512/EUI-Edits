@@ -5,12 +5,61 @@
 #include "ui/widgets.h"
 #include "state/app_actions.h"
 #include "model/version.h"
+#include "model/settings.h"
 #include "core/platform/bundled_resources.h"
 #include <neo_editor_icon_generated.h>
 
 #include <array>
+#include <cmath>
+#include <cstdio>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 namespace neo::settings_detail {
+
+inline std::string aboutIconPath(float physicalSize) {
+    constexpr std::array<int, 6> sizes{{48, 60, 72, 96, 120, 144}};
+    const int target = std::clamp(static_cast<int>(std::lround(physicalSize)), sizes.front(), sizes.back());
+    std::size_t selected = 0;
+    for (std::size_t i = 1; i < sizes.size(); ++i) {
+        if (std::abs(sizes[i] - target) < std::abs(sizes[selected] - target)) selected = i;
+    }
+    static std::array<std::string, sizes.size()> paths{};
+    static std::array<bool, sizes.size()> attempted{};
+    if (attempted[selected]) return paths[selected];
+    attempted[selected] = true;
+
+    const auto resourceId = static_cast<core::platform::BundledResourceId>(510 + selected);
+    const auto resource = core::platform::bundledResource(resourceId);
+    if (!resource) return {};
+    std::uint64_t contentHash = 14695981039346656037ull;
+    for (std::size_t i = 0; i < resource.size; ++i) {
+        contentHash = (contentHash ^ resource.data[i]) * 1099511628211ull;
+    }
+    const std::string configDirectory = settings::configDirectory();
+    if (configDirectory.empty()) return {};
+    char suffix[64]{};
+    std::snprintf(suffix, sizeof(suffix), "about-icon-%d-%016llx.png", sizes[selected],
+                  static_cast<unsigned long long>(contentHash));
+    const std::filesystem::path cacheDirectory = textfile::pathFromUtf8(configDirectory) / "cache";
+    const std::filesystem::path cacheFile = cacheDirectory / suffix;
+    std::error_code error;
+    std::filesystem::create_directories(cacheDirectory, error);
+    if (error) return {};
+    const bool complete = std::filesystem::exists(cacheFile, error) && !error &&
+                          std::filesystem::file_size(cacheFile, error) == resource.size && !error;
+    if (!complete) {
+        std::ofstream output(cacheFile, std::ios::binary | std::ios::trunc);
+        if (!output) return {};
+        output.write(reinterpret_cast<const char*>(resource.data), static_cast<std::streamsize>(resource.size));
+        output.close();
+        if (!output) return {};
+    }
+    paths[selected] = cacheFile.u8string();
+    return paths[selected];
+}
 
 inline const char* aboutWindowBackend() {
 #if defined(EUI_WINDOW_BACKEND_WIN32)
@@ -191,8 +240,14 @@ inline void aboutPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
             ui.stack("settings.about.content").size(width, contentHeight).scrollContentFrom(scrollId)
                 .content([&] {
                     card("settings.about.hero", 0, heroHeight, true);
-                    ui.svg("settings.about.icon").position(padding, padding).size(logoSize, logoSize)
-                        .source(application_icon::kSvg).build();
+                    const auto logo = aboutIconPath(logoSize * effectiveWindowScale());
+                    if (!logo.empty()) {
+                        ui.image("settings.about.icon").position(padding, padding).size(logoSize, logoSize)
+                            .source(logo).contain().build();
+                    } else {
+                        ui.svg("settings.about.icon").position(padding, padding).size(logoSize, logoSize)
+                            .source(application_icon::kSvg).build();
+                    }
                     text("settings.about.brand", "EUI-Edits", brandX, brandY, brandWidth, brandSize, colors.text, 600);
                     text("settings.about.platform", i18n::tr("about.platform"), brandX, platformY, brandWidth, hintSize, colors.textMuted);
                     text("settings.about.slogan.lead", lead, padding, sloganY, stackedSlogan ? inner : leadW, sloganSize, colors.accent, 600);
@@ -250,7 +305,7 @@ inline void aboutPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
         }).build();
     if (maxOffset > 0.0f) {
         components::scroll(ui, "settings.about.scrollbar").theme(colors.tokens).scrollStateId(scrollId)
-            .position(width + inset - 2, scrollTop).size(8, scrollHeight).viewport(scrollHeight)
+            .position(width + 2.0f * inset - 12.0f, scrollTop).size(8, scrollHeight).viewport(scrollHeight)
             .content(contentHeight).offset(state.settingsScroll).step(step).build();
     }
 }

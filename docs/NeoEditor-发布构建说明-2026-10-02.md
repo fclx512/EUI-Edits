@@ -1,5 +1,15 @@
 # NeoEditor 独立发布构建
 
+> 下文的旧构建结果与哈希为 2026-10-02 的历史记录。当前产品使用系统字体和矢量 UI 图标，旧记录中的 Font Awesome 内嵌字体描述不再适用。
+
+## 当前本地构建（2026-10-04）
+
+最新已验收程序统一放在 `out/latest/EUI-Edits-0.1.0-windows-x64.exe`，版本为 `0.1.0`，SHA256 为 `bed21e8d4e0f52e46b40be9685d397e10b22e1c58538b02d49888bcc13e1c48e`。同目录保留 SHA256 文件、完整许可证和 `latest.json`；当前增量构建目录为 `build-win32/ui-issues-20261004`。验收记录、构建日志及现场整理清单位于 `out/acceptance`，均不入源码库。
+
+该本地构建依赖动态 MSVC 运行库，不能直接充当静态 CRT 的正式单 EXE 发布包。正式发布应使用下面的打包脚本生成新包，重新验证导入依赖、内嵌资源、许可证与源码路径，并对新哈希完成实机检查。README 订正完成后再创建远端仓库、推送或正式发版。
+
+## 独立发布构建与历史记录
+
 用户已确定 NeoEditor 首发产品版本为 `0.1.0`；它与根 `project(EUI-NEO VERSION 0.6.0)` 独立。根目录英文 README 与 `README.zh-CN.md` 已改为 NeoEditor 产品说明；旧框架说明归档在 `docs/upstream/`，原 EUI-NEO workflows 归档在 `.github/upstream-workflows/`，不再作为活动 workflow 自动触发。
 
 在安装 VS 2022 或 VS 2026 C++ x64 工具的 Windows 环境执行：
