@@ -1,84 +1,224 @@
 # EUI-Edits
 
-[简体中文](README.zh-CN.md) · English
+简体中文 · [English](README_EN.md)
 
-EUI-Edits is a native Windows notepad built around low resource use and a modern UI. Alongside simple text editing, it offers Obsidian-style live Markdown rendering and in-place editing: formatting follows your input, while reading and editing stay in the same document.
+EUI-Edits 是一个主打低占用与现代 UI 的 Windows 原生记事本。保持简单文本编辑的同时，提供类似 Obsidian 的 Markdown 即时渲染与原位编辑体验，让格式随输入更新，阅读和编辑始终在同一视图中。
 
-**0.1.0 release candidate** · Windows x64 · C++ · Win32 / Direct2D · Apache-2.0
+## 界面预览
 
-## See it in use
+![浅色主题下的 Markdown 即时渲染与原位编辑](docs/screenshots/markdown-light.png)
 
-![Markdown live rendering and in-place editing in the light theme](docs/screenshots/markdown-light.png)
+![深色主题下的多标签编辑与语法着色](docs/screenshots/code-dark.png)
 
-![JSON editing and the document library in the dark theme](docs/screenshots/code-dark.png)
+应用图标与 Markdown、文本、代码、数据和其他文件的文档图标采用协调的自绘设计：
 
-Five small, matching document icons for Markdown, text, code, data, and other files:
+![应用图标（上）与五类文档图标（下）](docs/screenshots/icons-overview.png)
 
-<p align="center">
-  <img src="apps/neo_editor/assets/icons/md.svg" width="56" alt="Markdown document icon">
-  &nbsp;&nbsp;
-  <img src="apps/neo_editor/assets/icons/txt.svg" width="56" alt="Text document icon">
-  &nbsp;&nbsp;
-  <img src="apps/neo_editor/assets/icons/code.svg" width="56" alt="Code document icon">
-  &nbsp;&nbsp;
-  <img src="apps/neo_editor/assets/icons/data.svg" width="56" alt="Data document icon">
-  &nbsp;&nbsp;
-  <img src="apps/neo_editor/assets/icons/file.svg" width="56" alt="Generic file icon">
-</p>
+## 编辑体验
 
-<details>
-<summary>More screenshots: appearance and file associations</summary>
+- **边写边看 Markdown。** 常见标题、强调、链接、列表、任务列表、引用、代码块和表格会在原文中即时更新。当前编辑区域显示 Markdown 源文，阅读和编辑不必切换文档。
+- **多标签页编辑。** 同时打开多篇文档，每个标签独立保留光标、选区、撤销历史、折叠与文档库视图。异常退出后，未保存的草稿会按标签逐页恢复，不会静默覆盖原文件。
+- **本地文档库。** 列出所选目录下的全部文件，包括隐藏文件和无扩展名文件；已打开的文件在列表中标记圆点，支持 `F2` 重命名。扫描在后台进行，目录变化后自动刷新，只读取文件与目录元数据，不读取未打开文件的内容。
+- **简单编辑各类文本。** 可打开 Markdown、纯文本、源码和数据文件。已识别格式提供基础语法着色，也可通过“文件语言…”手动切换当前文档的呈现方式；其他文本保持纯文本显示。
 
-![English appearance settings](docs/screenshots/settings-en.png)
+界面以 C++、Win32 和 Direct2D 构建，按需刷新，不嵌入 WebView，同时只运行一个实例——重复打开文件会转到已运行的窗口。
 
-![File association settings](docs/screenshots/associations-zh.png)
+## Markdown 语法支持
 
-</details>
-
-The screenshots show the 0.1.0 candidate on Windows 11 with sample documents and isolated settings.
-
-## The editing experience
-
-- **Markdown, rendered as you write.** Common headings, emphasis, links, lists, task lists, blockquotes, code blocks, and tables update in place. The active editing region exposes the Markdown source, so reading and editing stay in the same document.
-- **A local document library.** Browse the full file list by default, including hidden and extensionless files. The library reads file and directory metadata; it does not load unopened file contents into the editor.
-- **Text files, simply edited.** Open Markdown, plain text, source code, and data files. Recognized formats get basic syntax coloring; other text remains plain text.
-
-The interface is built with native C++ on Win32 and Direct2D. Low resource use is a design goal: the editor redraws on demand and does not embed a WebView. The everyday essentials—open, save, find and replace, undo and redo, line numbers, and word wrap—are kept close at hand. In image preview, use the wheel to zoom and middle-drag to pan; left-click or press `Esc` to close it.
-
-EUI-Edits focuses on writing and local files, not knowledge-base organization or IDE features such as code completion and debugging. It does not run scripts.
-
-## Get started
-
-The 0.1.0 candidate is not yet publicly available. The local candidate ships as a single `EUI-Edits-0.1.0-windows-x64.exe`, with no installer or external resource directory. Run it and open a document with **File → Open** or `Ctrl+O`.
-
-Settings and recovery drafts are stored in `%APPDATA%\EUI-Edits`; this is an install-free application, not a portable-settings mode. On first use, TXT and Markdown are preselected in file associations; other types, including BAT, CMD, PowerShell, and Python, are optional. Applying a selection adds EUI-Edits to Windows Open With; it does not change the Windows default app, which you choose separately in Windows Settings.
-
-| Shortcut | Action |
+| 语法 | 支持情况 |
 | --- | --- |
-| `Ctrl+N` / `Ctrl+O` | New / Open |
-| `Ctrl+S` / `Ctrl+Shift+S` | Save / Save As |
-| `Ctrl+F` / `Ctrl+H` | Find / Replace |
-| `Ctrl+G` / `Ctrl+Shift+G` | Next / Previous search result (while Find is open) |
-| `F3` / `Shift+F3` | Open Find / Next or Previous result |
-| `F2` | Rename the focused item in the document library |
-| `Ctrl+,` | Settings |
+| 标题（`#` 与下划线式）、段落 | ✅ 即时渲染，原位编辑 |
+| 粗体、斜体、行内代码、删除线、下划线（`_.._`） | ✅ |
+| 链接、Wiki 链接（`[[...]]`） | ✅ 可点击跳转 |
+| 有序 / 无序列表、引用（最多四层） | ✅ |
+| 任务列表 | ✅ 可勾选 |
+| 围栏代码块、表格、分隔线、frontmatter | ✅ |
+| 本地图片（独占一行） | ✅ 显示图片，点击进入预览 |
+| 行内数学 `$...$` | ⚠️ 按代码样式呈现，不做公式排版 |
+| HTML | ⚠️ 不执行，保留源码文本 |
+| 公式排版（LaTeX）、远程图片 | ❌ 不在范围内，源码保持可编辑 |
+| 高亮 `==...==`、注释 `%%...%%`、脚注、callout、标签 | ❌ 暂不支持，按普通文本显示 |
 
-## Development
+## 低占用
 
-For the repository's Windows translation and correctness checks, run [`scripts/check-neoeditor.ps1`](scripts/check-neoeditor.ps1).
+EUI-Edits 采用 C++、Win32 和 Direct2D 构建，按需刷新界面，不嵌入浏览器或 WebView。降低占用主要依靠以下设计：
 
-## Scope
+- **按需刷新。** 输入、滚动、窗口变化和交互反馈触发界面更新；关闭交互动画后，悬停与按压等反馈不再产生过渡帧。
+- **复用标签页缓存。** 切换标签时，在内容和呈现条件未变的情况下复用排版与高亮结果；缓存按预算保留，超出预算会释放较少使用的派生数据，文稿、光标和撤销状态继续保留。
+- **目录扫描与正文读取分开。** 文档库在后台扫描文件与目录元数据，多个标签可以共享同一目录的扫描结果；只有打开文件时才加载正文，目录中的全部文件不会一起读进编辑器。
 
-The release configuration targets **Windows 10/11 x64**. The 0.1.0 candidate has been checked on Windows 11; Windows 10 has not received equivalent machine testing. The executable is currently unsigned.
+原 README 记录的 0.1.0 候选版工作集参考值如下，环境为 Windows 11，冷启动后静置读取：
 
-- Files are limited to **64 MiB** by default. Suspected binary files and content that cannot be decoded reliably are rejected. UTF-8, UTF-16, and Windows ANSI encodings are supported.
-- Markdown focuses on common syntax. Formulas, remote images, and presentation mode are outside the current scope.
-- The first document-library scan is synchronous, so very large folders may take time to enumerate.
+| 场景 | 进程工作集 |
+| --- | --- |
+| 启动后保持空白文档 | 约 50–54 MB |
+| 打开一份 9 MB 文本文档 | 约 68 MB |
 
-## License and credits
+这些是既有候选版的参考读数，尚未对本次待发布程序重新测量。实际占用会随文档类型、行数、Markdown 结构、本地图片、打开的标签数、字体及渲染环境变化；纯文本与相同大小的 Markdown 文档也可能有不同的排版成本，以上读数不代表固定内存上限。
 
-EUI-Edits is built on [EUI-NEO](https://github.com/sudoevolve/EUI-NEO). The framework source is retained in this repository; the framework's upstream documentation lives in the [EUI-NEO repository](https://github.com/sudoevolve/EUI-NEO).
+## 外观与个性化
 
-The project follows the repository's [Apache-2.0 license](LICENSE). The application icon is a redrawn project asset with a dedicated 16px design. Third-party libraries and fonts retain their respective licenses and attribution; see [Third-party notices](apps/neo_editor/THIRD-PARTY-NOTICES.md) and [LICENSES](apps/neo_editor/LICENSES). EUI-Edits uses the work of the FreeType Team for font handling.
+从「视图 → 设置…」或 `Ctrl+,` 打开设置。外观、编辑、文件与系统分开配置，大多数调整会立即显示效果并保存，下次启动继续使用。
 
-The complete license and attribution texts are also embedded in the executable and can be viewed and exported from **Settings → About**.
+| 可调整的项目 | 使用方式与效果 |
+| --- | --- |
+| 界面语言 | 可跟随系统，也可固定为简体中文或 English；界面语言与文档的语法着色类型分别设置。 |
+| 明暗主题 | 可选跟随系统、浅色、深色。首次启动默认跟随 Windows 的应用主题；保留跟随模式时，系统明暗变化也会更新到程序。 |
+| 字体 | 「外观 → 选择字体」分别设置正文、代码和界面字体。正文用于编辑与 Markdown 阅读，代码字体用于代码块和行内代码，界面字体用于菜单、侧栏、状态栏等。 |
+| 字号 | 编辑区字号为 12–32，界面字号为 12–18，两者独立调整；「视图 → 字号」也能快速切换编辑区字号。 |
+| 界面缩放 | 可在 Windows 显示缩放的基础上额外调整 80%–200%。这里的 100% 表示不额外缩放，仍然遵循系统 DPI。 |
+| 阅读与编辑布局 | 可显示或隐藏行号、状态栏，切换自动换行；「限制行宽」会收窄并居中内容列，适合阅读宽窗口中的 Markdown。 |
+| 文档库布局 | 「视图 → 布局」可在简洁视图和带文件侧栏的文档库视图之间切换。 |
+| 交互动画 | 可开启或关闭悬停、按压等反馈动画。首次启动使用 Windows 的动画偏好，之后记住程序内的选择。 |
+
+字体列表来自本机，也可以通过「导入字体」选择 `.ttf`、`.otf` 或 `.ttc` 文件；代码字体会检查是否等宽。程序使用系统字体和自绘界面图标，发行包不附带字体文件。
+
+状态栏提供当前文件名与位置、文档语言、编码、换行类型、行数和字符数；点击文档语言可切换语法呈现，自动换行也有独立开关。窗口较窄时，部分信息会按可用空间收起。
+
+**本地主题导入仍是测试功能。** 在「外观 → 主题文件（测试）→ 主题库…」中选择本地 JSON 或 CSS 文件，也可把主题放入 `%APPDATA%\EUI-Edits\themes` 后从主题库应用。Obsidian 主题可选择其 `manifest.json`（同目录需要 `theme.css`）或直接选择 CSS。导入主要映射可识别的配色变量，不会执行 CSS，也不保证还原原主题的布局与插件样式；界面中可返回内置配色。
+
+## 开始使用
+
+### 打开与保存文档
+
+发行包按单个 `EUI-Edits-<版本>-windows-x64.exe` 分发，无需安装或解压资源目录。把程序放在准备长期使用的位置后直接运行；如果同时提供 `.exe.sha256`，可用它核对程序文件。
+
+1. **新建：**选择「文件 → 新建 → 文本 / Markdown」。`Ctrl+N` 新建纯文本；新建页尚未对应磁盘文件，第一次保存时选择文件名与位置。
+2. **打开：**使用「文件 → 打开…」或 `Ctrl+O`，也可把文件拖入窗口。文档在标签页中打开；重复打开同一文件会定位到已有标签，其他页的未保存内容继续保留。
+3. **保存：**`Ctrl+S` 保存当前页，`Ctrl+Shift+S` 另存为。已有文件保存时保留读取到的编码、BOM 和换行类型；编码无法表示新输入的字符时会报错，保留原文件。
+4. **关闭：**`Ctrl+W` 关闭当前页。关闭有改动的标签或退出程序时，会询问保存、不保存或取消；保存失败或取消保存不会直接丢弃正文。
+
+如果文本显示乱码，可从「文件 → 以编码重新打开」选择合适的编码。文件在其他程序中发生变化时，EUI-Edits 会在保存流程中检查冲突，避免直接用旧内容覆盖磁盘上的新版本。
+
+程序默认只运行一个实例。再次启动并打开文件时，会把请求转交给已有窗口，在其中打开或定位文档。
+
+### 浏览文件与常用操作
+
+选择「文件 → 打开文档库…」指定目录，或从「视图 → 布局」切换到文档库视图。文件侧栏列出目录结构及其中的文件，打开文件时才读取正文；在侧栏聚焦的文件或目录上按 `F2` 可重命名。已打开的文档会在列表中标记圆点，当前文档另有选中提示。
+
+| 操作 | 快捷键 / 方法 |
+| --- | --- |
+| 新建文本 / 打开文件 | `Ctrl+N` / `Ctrl+O` |
+| 保存 / 另存为 | `Ctrl+S` / `Ctrl+Shift+S` |
+| 关闭当前标签 | `Ctrl+W` |
+| 下一标签 / 上一标签 | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| 定位标签 | `Ctrl+1`–`Ctrl+8` 定位相应标签，`Ctrl+9` 定位最后一个 |
+| 查找 / 替换 | `Ctrl+F` / `Ctrl+H` |
+| 下一匹配 / 上一匹配 | 查找栏打开时按 `F3` / `Shift+F3`，或 `Ctrl+G` / `Ctrl+Shift+G` |
+| 重命名侧栏项目 | 在文档库列表中聚焦项目后按 `F2` |
+| 打开设置 | `Ctrl+,` |
+
+点击 Markdown 中的本地图片可进入预览：滚轮缩放、中键拖动平移，左键点击或按 `Esc` 关闭。
+
+### 设置与恢复草稿
+
+程序免安装，但设置保存在当前 Windows 用户的配置目录，不随 EXE 一起移动：
+
+| 位置 | 内容 |
+| --- | --- |
+| `%APPDATA%\EUI-Edits\settings.ini` | 外观、字体、布局、最近文件等偏好 |
+| `%APPDATA%\EUI-Edits\session` | 标签会话及未保存内容的恢复副本 |
+| `%APPDATA%\EUI-Edits\themes` | 可供主题库列出的本地主题 |
+
+未保存内容会定期写入恢复副本。异常退出后，下次启动可将这些内容恢复为独立草稿，原文件不会被恢复流程自动覆盖；确认内容后再手动保存。正常退出完成保存或放弃确认后会清理恢复会话，下次不会自动重开这次的全部标签。恢复副本不是逐次输入的即时保存，重要内容仍应主动按 `Ctrl+S` 保存。
+
+### 文件关联
+
+在「设置 → 文件与系统」中选择希望加入 Windows「打开方式」的文件类型。尚未登记关联时，列表预选 TXT 和 Markdown；BAT、CMD、PowerShell、Python 等其他类型可以按需勾选。
+
+应用选择只登记当前用户的打开方式，不会替你更改 Windows 默认应用。需要双击默认使用 EUI-Edits 时，再在 Windows 设置或文件的「打开方式」中选择它。关联记录指向 EXE 的位置，移动或重命名程序后需要重新登记。脚本文件按文本编辑，程序不会执行其中的代码。
+
+## 开发
+
+### 构建环境
+
+下面的命令构建 Windows x64 的 Win32 / Direct2D 版本。应用代码位于 `apps/neo_editor`，构建入口是仓库根目录的 [`CMakeLists.txt`](CMakeLists.txt)，目标名为 `neo_editor`。
+
+| 工具或组件 | 要求与用途 |
+| --- | --- |
+| Windows | 在 Windows 上构建 x64 程序；以下脚本面向 MSVC。 |
+| Visual Studio / Build Tools | 使用 VS 2022 或 VS 2026，安装「使用 C++ 的桌面开发」及 MSVC x64 工具。 |
+| Windows SDK | 安装 Windows 10 或 11 SDK，提供 Win32、Direct2D 等系统库和资源编译器 `rc.exe`。 |
+| CMake | VS 2022 生成器需要 **3.21 或以上**；VS 2026 生成器需要 **4.2 或以上**。可使用 Visual Studio 随附的 CMake。 |
+| PowerShell | 检查和打包脚本要求 **5.1 或以上**；也可在 PowerShell 7 中运行。 |
+| Python 3 | 运行开发检查时需要，翻译检查只使用标准库；上述应用编译和单 EXE 打包流程本身不依赖 Python。 |
+| `dumpbin.exe` | 运行单 EXE 打包脚本时需要，随 MSVC 工具提供，用于检查架构和 DLL 依赖。 |
+
+工程使用 **C++17 / C99**。第三方依赖源码随仓库保存在 `3rd/`，包括 FreeType、zlib、libpng、MD4C 和 yyjson 等。下面选择 `bundled` 模式，使用仓库内源码，不需要另外安装这些库或在配置时联网下载；请保留完整的 `3rd/`、`assets/` 和应用许可证目录。
+
+根工程声明的 CMake 最低版本为 3.14，但上述 Visual Studio 生成器有更高要求，构建时应按表中的版本选择。生成器版本说明见 CMake 官方文档：[VS 2022](https://cmake.org/cmake/help/latest/generator/Visual%20Studio%2017%202022.html)、[VS 2026](https://cmake.org/cmake/help/latest/generator/Visual%20Studio%2018%202026.html)。
+
+### 编译应用
+
+打开 PowerShell，进入源码仓库根目录，确保 `cmake` 在 PATH 中；也可以使用 Visual Studio 的 Developer PowerShell，或将 CMake 的 `bin` 目录加入 PATH。下面以 VS 2022 为例，只配置编辑器及其链接依赖，采用与独立发布配置一致的 Win32 / Direct2D 后端和静态 MSVC 运行库：
+
+```powershell
+cmake -S . -B build-editor -G "Visual Studio 17 2022" -A x64 `
+  -DEUI_BUILD_NEOEDITOR_ONLY=ON `
+  -DEUI_WINDOW_BACKEND=win32 -DEUI_RENDER_BACKEND=d2d `
+  -DEUI_DEPS_MODE=bundled -DEUI_BUILD_SHARED=OFF `
+  -DEUI_ENABLE_INSTALL=OFF -DEUI_ENABLE_MODULES=OFF `
+  -DEUI_BUILD_TEST_FIXTURES=OFF `
+  -DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE `
+  '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>'
+
+cmake --build build-editor --config Release --target neo_editor --parallel 2
+.\build-editor\Release\neo_editor.exe
+```
+
+使用 VS 2026 时，将生成器替换为 `Visual Studio 18 2026`，并使用支持它的 CMake。产物为 `build-editor\Release\neo_editor.exe`；调试构建可把构建命令中的 `Release` 换成 `Debug`，产物位于对应的 `Debug` 目录。
+
+这里显式选择后端，因为直接使用根工程默认配置会走框架的默认后端，并配置其他示例。`EUI_BUILD_NEOEDITOR_ONLY=ON` 用于只构建本应用；`EUI_BUILD_SHARED=OFF` 静态链接框架，MSVC 运行库选项用于静态链接 CRT。不要把其他配置的普通本地构建直接当作已验证的独立发行包。
+
+### 运行开发检查
+
+在仓库根目录运行：
+
+```powershell
+.\scripts\check-neoeditor.ps1
+```
+
+脚本先运行翻译检查，再在新的构建目录中配置、编译并执行选定的 Win32 / Direct2D 正确性测试，包括文件与保存安全、编码、标签状态、恢复存储、设置、文件关联、主题加载和缓存调度等。
+
+脚本会自动寻找 Visual Studio、CMake 和 PATH 中的 Python；查找失败时，可通过 `-Generator`、`-CMake`、`-Python` 显式指定。`-BuildDirectory` 可以指定输出目录，但必须使用尚不存在的目录，脚本不会清空或复用已有构建目录。性能测量和真实窗口交互验收需要另外进行，该脚本不启动应用界面。
+
+### 生成单 EXE 发行包
+
+完成检查后，使用 [`scripts/package-neoeditor.ps1`](scripts/package-neoeditor.ps1) 构建并验证发行文件：
+
+```powershell
+.\scripts\package-neoeditor.ps1 -Version 0.1.0
+```
+
+脚本只构建编辑器的 Release x64 配置，静态链接框架与 MSVC 运行库，嵌入图标及完整许可文本，并检查 PE 版本、系统 DLL 依赖、开发目录路径和空目录中的许可证导出。默认产物为：
+
+```text
+out/euiedits-0.1.0-single-exe/
+  EUI-Edits-0.1.0-windows-x64.exe
+  EUI-Edits-0.1.0-windows-x64.exe.sha256
+```
+
+可用 `-BuildDirectory` 指定一个新构建目录，用 `-OutputDirectory` 指定不存在或为空的输出目录；工具查找失败时可传 `-CMake`、`-Dumpbin`、`-Generator`。脚本不会覆盖旧发行文件，也不会上传仓库或发布 Release。打包验证不等同于全部 GUI 验收，新生成的 EXE 仍需检查实际打开、编辑、保存、恢复和退出等操作。
+
+## 当前范围
+
+EUI-Edits 面向本地文本、Markdown、源码和配置文件的浏览与编辑，不提供知识库管理、代码补全、编译调试或脚本执行功能。Markdown 的具体支持情况见上方语法表。
+
+| 项目 | 当前支持与边界 |
+| --- | --- |
+| 平台 | 发布配置面向 **Windows 10/11 x64**。0.1.0 候选版已在 Windows 11 上检查；Windows 10 尚未完成同等范围的实机测试。当前程序未签名。 |
+| 文件大小 | 默认打开上限为 **64 MiB**。超过限制、疑似二进制或无法可靠解码的文件会报错，不会强行作为文本载入。 |
+| 编码与换行 | 支持 UTF-8、UTF-16 LE / BE，以及 Windows ANSI 代码页。读取时统一处理文本，保存时还原原有编码、BOM 和 LF / CRLF 特征；不能表示的字符不会被静默替换。 |
+| Markdown | 覆盖常见语法与部分扩展；不做 LaTeX 公式排版，不加载远程图片，也没有演示模式。HTML 保留为源码，不作为网页执行。 |
+| 文档库扫描 | 扫描目录和文件元数据，包含隐藏文件与无扩展名文件；不会预先读取全部正文。扫描不递归进入符号链接目录或目录联接点的目标，以避免越出根目录和循环。 |
+| 恢复容量 | 恢复记录最多保存 **256 个标签项**；恢复正文的读取还受单份 **256 MiB**、合计 **1 GiB** 的保护限额约束。这些是恢复存储边界，不是建议的日常文档大小。 |
+| 恢复异常 | 清单损坏或缺少正文时会保留原数据并提示问题，避免自动写入覆盖排查证据；恢复功能可能因此不可用，手动保存仍可使用。 |
+| 自选主题 | 本地主题导入为测试功能，配色映射与兼容性有限，尚未达到可靠性与完整还原方面的预期。 |
+
+## 许可与致谢
+
+EUI-Edits 基于 [EUI-NEO](https://github.com/sudoevolve/EUI-NEO) 开发。仓库保留框架源码，框架官方文档见 [EUI-NEO 仓库](https://github.com/sudoevolve/EUI-NEO)。
+
+项目遵循仓库的 [Apache-2.0 许可](LICENSE)。应用主图标为项目重绘资源，并提供 16px 专用设计。第三方库和字体保留各自许可与署名，详见[第三方说明](apps/neo_editor/THIRD-PARTY-NOTICES.md)及 [LICENSES](apps/neo_editor/LICENSES)。字体处理使用了 FreeType Team 的工作。
+
+完整的许可与署名文本也嵌入在可执行文件中，可在“设置 → 关于”查看和导出。
