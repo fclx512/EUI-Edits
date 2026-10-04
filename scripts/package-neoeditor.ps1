@@ -111,7 +111,7 @@ if (Test-Path -LiteralPath $OutputDirectory) {
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 }
 
-# Prove the binary carries its runtime font and complete readable license bundle:
+# Prove the binary carries a complete readable license bundle:
 # copy only the EXE into a brand-new empty directory and export notices from it.
 $verifyDirectory = Join-Path $BuildDirectory ('single-exe-verify-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $verifyDirectory | Out-Null
@@ -128,7 +128,9 @@ if (Test-Path -LiteralPath (Join-Path $verifyDirectory 'assets')) {
     throw 'The standalone verification directory unexpectedly contains an assets fallback.'
 }
 $licenseText = Get-Content -LiteralPath $verifyLicense -Raw -Encoding UTF8
-foreach ($requiredText in @('Apache License', 'FREETYPE LICENSES', 'SIL OPEN FONT LICENSE',
+# 2026-10-04 字体解耦后不再内嵌任何字体（FA 及其 SIL 许可已移除），
+# 许可包只含 Apache-2.0、第三方声明与 vendored 库许可。
+foreach ($requiredText in @('Apache License', 'FREETYPE LICENSES',
                             'Copyright (c) 2017 Serge Zaitsev', 'Copyright (c) 2020 YaoYuan')) {
     if (-not $licenseText.Contains($requiredText)) {
         throw ('Embedded license bundle is incomplete: ' + $requiredText)
