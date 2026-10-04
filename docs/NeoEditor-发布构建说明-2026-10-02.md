@@ -6,7 +6,18 @@
 
 最新已验收程序统一放在 `out/latest/EUI-Edits-0.1.0-windows-x64.exe`，版本为 `0.1.0`，SHA256 为 `bed21e8d4e0f52e46b40be9685d397e10b22e1c58538b02d49888bcc13e1c48e`。同目录保留 SHA256 文件、完整许可证和 `latest.json`；当前增量构建目录为 `build-win32/ui-issues-20261004`。验收记录、构建日志及现场整理清单位于 `out/acceptance`，均不入源码库。
 
-该本地构建依赖动态 MSVC 运行库，不能直接充当静态 CRT 的正式单 EXE 发布包。正式发布应使用下面的打包脚本生成新包，重新验证导入依赖、内嵌资源、许可证与源码路径，并对新哈希完成实机检查。README 订正完成后再创建远端仓库、推送或正式发版。
+该本地构建依赖动态 MSVC 运行库，不能直接充当静态 CRT 的正式单 EXE 发布包。
+
+## 正式静态包（2026-10-04）
+
+README 中英双语定稿（提交 `bf9da23`）后，用 `scripts/package-neoeditor.ps1 -Version 0.1.0` 生成正式单 EXE（静态框架与 MSVC CRT，全新构建目录 `build-neoeditor-package-f6076e66d58a422dbd24cdd251f2018f`）：
+
+- 位置：`out/euiedits-0.1.0-single-exe/EUI-Edits-0.1.0-windows-x64.exe`（3,671,552 字节）+ 同名 `.sha256`
+- SHA256：`c3176a0c079fb189015a6efee943e415a2a761d0890e0c6eed5842f3fbf6f19d`（与旁置校验文件一致）
+- 打包校验：PE 版本/x64、仅系统 DLL 依赖、内嵌资源与许可导出（空目录，49,649 字节，与 `out/latest` 的许可文本同尺寸）均通过
+- 实机冒烟：隔离 APPDATA 启动、argv 打开 Markdown、文档库侧栏与状态栏正常，工作集 57.9 MB / 专用 29.8 MB，与已验收构建口径一致
+
+剩余步骤：远端仓库尚未配置（`git remote` 为空），创建远端、推送与公开发布需用户授权后进行。原 123 云盘自动上传工具（`D:\ruanjian\neo-upload\`）与 123pan 客户端登录态在本机均已不存在，自动上传通道失效。
 
 ## 独立发布构建与历史记录
 
