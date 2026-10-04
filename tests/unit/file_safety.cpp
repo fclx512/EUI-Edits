@@ -254,8 +254,11 @@ int main() {
     }), "pre-replacement guard catches writer during save preparation");
     check(get(file) == "changed while preparing save\n", "rejected guard preserves newest writer bytes");
     std::size_t temporaryFiles = 0;
-    for (const auto& entry : fs::directory_iterator(dir))
-        if (entry.path().filename().string().find(".neo-tmp-") != std::string::npos) ++temporaryFiles;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        // .wstring() 而非 .string()：fixture 里有中文文件名，.string() 走 ANSI
+        // 代码页转换，在非 GBK 代码页（如 CI 的 1252）表示不了会直接抛异常。
+        if (entry.path().filename().wstring().find(L".neo-tmp-") != std::wstring::npos) ++temporaryFiles;
+    }
     check(temporaryFiles == 0, "rejected and failed saves remove their own temporary files");
 
     // New/open preserves the old buffer; closing its tab still uses the save gate.

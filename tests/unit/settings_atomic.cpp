@@ -155,24 +155,31 @@ std::string serializeSettings(const neo::settings::Data& data) {
 }
 
 // 默认 Data 的固定期望值：独立于上面的镜像函数，钉死首次创建的字节形态。
-const char* const kDefaultSettings =
+const char* const kDefaultSettingsPrefix =
     "vault=\n"
     "last_file=\n"
     "mode=0\n"
     "ui_language=system\n"
     "show_status_bar=1\n"
     "line_numbers=1\n"
-    "readable_width=1\n"
-    "animations=1\n"
-    "attachment_mode=0\n"
-    "theme=2\n"
-    "ui_scale=1\n"
-    "editor_font_size=16\n"
-    "vault_width=264\n"
-    "ui_font_size=14\n"
-    "editor_font_file=\n"
-    "ui_font_file=\n"
-    "code_font_file=\n";
+    "readable_width=1\n";
+
+// 默认 Data 的固定期望值：独立于上面的镜像函数，钉死首次创建的字节形态。
+// 唯一随环境变的是 animations：首启跟随系统"动画效果"开关（CI 虚机常是关的），
+// 期望值必须取自同一来源，而不是假定它恒为 1。
+std::string defaultSettingsIni() {
+    return std::string(kDefaultSettingsPrefix) +
+        "animations=" + (neo::settings::systemAnimationsDefault() ? '1' : '0') + '\n' +
+        "attachment_mode=0\n"
+        "theme=2\n"
+        "ui_scale=1\n"
+        "editor_font_size=16\n"
+        "vault_width=264\n"
+        "ui_font_size=14\n"
+        "editor_font_file=\n"
+        "ui_font_file=\n"
+        "code_font_file=\n";
+}
 
 } // namespace
 
@@ -217,7 +224,7 @@ int main(int argc, char** argv) {
     // ── ① 不存在目标：首次创建成功 ───────────────────────────────────────────
     check(!fs::exists(settingsIni), "测试前提：settings.ini 尚不存在");
     check(neo::settings::flush(), "不存在目标时首次创建 settings.ini 应成功");
-    expectFileEquals(settingsIni, kDefaultSettings, "首次创建的 settings.ini 应等于旧直写序列化");
+    expectFileEquals(settingsIni, defaultSettingsIni(), "首次创建的 settings.ini 应等于旧直写序列化");
     check(temporaryLeftovers(configDir) == 0, "首次创建后不应留下临时文件");
 
     check(!fs::exists(recoveryTxt), "测试前提：recovery.txt 尚不存在");

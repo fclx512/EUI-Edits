@@ -33,18 +33,6 @@ const char* const kRecoveryHeaderV2 = "#neo-recovery-v2";
 // 单行元数据的安全上限：超长说明这行不是我们写出的，拒绝解析。
 constexpr std::size_t kRecoveryMetaLimit = 4096;
 
-// 首次运行时的动画默认值：跟随 Windows 的"辅助功能 → 视觉效果 → 动画效果"。
-// settings.ini 里一旦写下 animations 键，之后一律以用户的选择为准。
-bool systemAnimationsDefault() {
-#if defined(_WIN32)
-    BOOL enabled = TRUE;
-    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0)) {
-        return enabled != FALSE;
-    }
-#endif
-    return true;
-}
-
 const char* recoveryEncodingName(textfile::Encoding encoding) {
     switch (encoding) {
         case textfile::Encoding::Utf8:
@@ -135,6 +123,19 @@ std::string trim(std::string value) {
 }
 
 } // namespace
+
+// 首次运行时的动画默认值：跟随 Windows 的"辅助功能 → 视觉效果 → 动画效果"。
+// settings.ini 里一旦写下 animations 键，之后一律以用户的选择为准。
+// 声明在头文件：测试要用同一来源推导首启 settings.ini 的期望字节形态。
+bool systemAnimationsDefault() {
+#if defined(_WIN32)
+    BOOL enabled = TRUE;
+    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0)) {
+        return enabled != FALSE;
+    }
+#endif
+    return true;
+}
 
 bool systemThemePrefersLight() {
 #if defined(_WIN32)

@@ -15,6 +15,7 @@
 //
 // 不依赖 参考/ 下的素材；临时文件都写在系统临时目录里。
 
+#include "model/i18n.h"
 #include "model/settings.h"
 #include "model/style_schema.h"
 #include "model/text_file.h"
@@ -511,6 +512,10 @@ void testDualAndObsidianImport(const fs::path& root) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // 断言里匹配的是中文文案（"不存在"/"无法读取"）：不钉语言就会跟着 CI 的
+    // 英文系统走，必然假失败。field 名等 ASCII 断言（version/colors/radius）
+    // 在 zh 文案里同样成立，不受影响。
+    neo::i18n::initialize("zh-CN");
     if (argc >= 3 && std::string(argv[1]) == "--probe-file") {
         std::string error;
         if (!neo::themeloader::load(argv[2], error)) {

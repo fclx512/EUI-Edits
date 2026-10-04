@@ -29,8 +29,13 @@ namespace fs = std::filesystem;
 
 fs::path fixtureRoot() {
     std::error_code error;
-    const fs::path base = fs::temp_directory_path() / "neo_tab_presentation_fixture";
+    fs::path base = fs::temp_directory_path() / "neo_tab_presentation_fixture";
     fs::create_directories(base, error);
+    // CI 的 TEMP 可能带 8.3 短名（如 C:\Users\RUNNER~1\...）：canonical 把既有
+    // 前缀解析成真实长名。否则 weakly_canonical（解短名）与 fs::absolute（不解）
+    // 会对同一路径给出不同的 root key，rootIdentity 的回退断言必然假失败。
+    const fs::path real = fs::canonical(base, error);
+    if (!error) base = real;
     return base;
 }
 

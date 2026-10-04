@@ -60,6 +60,10 @@ std::string configDirectory();
 // （应用模式明暗）。键缺失或读取失败按亮色处理。
 bool systemThemePrefersLight();
 
+// 首次运行时 animations 键的初值：跟随 Windows 的
+// "辅助功能 → 视觉效果 → 动画效果"。测试需要同一来源推导期望值。
+bool systemAnimationsDefault();
+
 // 首次访问时从磁盘读取，之后返回同一份可写数据。
 Data& current();
 
