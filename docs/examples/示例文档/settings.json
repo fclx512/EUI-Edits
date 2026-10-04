@@ -1,0 +1,28 @@
+{
+  "name": "NeoEditor",
+  "version": "0.1.0",
+  "interface": {
+    "theme": "dark",
+    "language": "en",
+    "word_wrap": true,
+    "font_size": 18
+  },
+  "documents": [
+    {
+      "name": "notes.md",
+      "type": "markdown"
+    },
+    {
+      "name": "settings.json",
+      "type": "configuration"
+    },
+    {
+      "name": "hello.py",
+      "type": "code"
+    }
+  ],
+  "library": {
+    "show_all_files": true,
+    "load_document_on_open": true
+  }
+}

@@ -1,0 +1,27 @@
+/build
+/build-*/
+/build_*/
+/build-sdl2
+/参考
+/.workbuddy/
+/build-check
+/.vs/
+/out/
+/Testing/
+.DS_Store
+/docs/releases/*
+/tmp/
+/temp/
+/.github/skills/
+/.idea/
+/Android/.deps/
+/Android/.gradle/
+/Android/app/.cxx/
+/Android/app/build/
+/Android/build/
+/Android/local.properties
+/.zcode/
+
+# Python 探针字节码（不应入库：每次 import 都会重写，导致工作树无端变脏）
+__pycache__/
+*.pyc

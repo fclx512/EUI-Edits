@@ -1,0 +1,28 @@
+#include <winver.h>
+1 VERSIONINFO
+ FILEVERSION @NEO_EDITOR_FILE_VERSION_RC@
+ PRODUCTVERSION @NEO_EDITOR_FILE_VERSION_RC@
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS @NEO_EDITOR_VERSION_FLAGS@
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904b0"
+  BEGIN
+   VALUE "CompanyName", "EUI-Edits contributors\0"
+   VALUE "FileDescription", "EUI-Edits\0"
+   VALUE "FileVersion", "@NEO_EDITOR_VERSION@\0"
+   VALUE "InternalName", "neo_editor\0"
+   VALUE "OriginalFilename", "neo_editor.exe\0"
+   VALUE "ProductName", "EUI-Edits\0"
+   VALUE "ProductVersion", "@NEO_EDITOR_VERSION@\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x0409, 1200
+ END
+END

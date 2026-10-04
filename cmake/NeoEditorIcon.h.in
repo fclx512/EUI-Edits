@@ -1,0 +1,6 @@
+#pragma once
+
+namespace neo::application_icon {
+// The About mark and the Windows resources use the same approved master asset.
+inline constexpr char kSvg[] = R"NEO_APP_ICON(@NEO_EDITOR_APP_ICON_SVG@)NEO_APP_ICON";
+} // namespace neo::application_icon

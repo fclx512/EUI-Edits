@@ -1,0 +1,61 @@
+name: NeoEditor Windows checks
+
+on:
+  push:
+    branches: [main, master, 'codex/**']
+    paths:
+      - 'apps/neo_editor/**'
+      - 'core/**'
+      - 'components/**'
+      - 'include/**'
+      - 'eui_neo.h'
+      - '3rd/**'
+      - 'assets/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'scripts/check-neoeditor.ps1'
+      - 'scripts/package-neoeditor.ps1'
+      - '.github/workflows/neoeditor-ci.yml'
+      - '.github/workflows/neoeditor-release.yml'
+  pull_request:
+    paths:
+      - 'apps/neo_editor/**'
+      - 'core/**'
+      - 'components/**'
+      - 'include/**'
+      - 'eui_neo.h'
+      - '3rd/**'
+      - 'assets/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'scripts/check-neoeditor.ps1'
+      - 'scripts/package-neoeditor.ps1'
+      - '.github/workflows/neoeditor-ci.yml'
+      - '.github/workflows/neoeditor-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  correctness:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Check translations and Win32/Direct2D correctness
+        shell: pwsh
+        run: ./scripts/check-neoeditor.ps1 -BuildDirectory "$env:GITHUB_WORKSPACE/build-neoeditor-check"
+      - name: Build and verify the standalone executable
+        shell: pwsh
+        run: ./scripts/package-neoeditor.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE/out/neoeditor-ci"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: NeoEditor-windows-x64-candidate
+          path: out/neoeditor-ci/*
+          if-no-files-found: error

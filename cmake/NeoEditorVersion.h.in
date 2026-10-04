@@ -1,0 +1,7 @@
+#pragma once
+namespace neo::version {
+inline constexpr char kProductName[] = "EUI-Edits";
+inline constexpr char kVersion[] = "@NEO_EDITOR_VERSION@";
+inline constexpr char kDisplayVersion[] = "EUI-Edits @NEO_EDITOR_VERSION@";
+inline constexpr char kFileVersion[] = "@NEO_EDITOR_FILE_VERSION@";
+}

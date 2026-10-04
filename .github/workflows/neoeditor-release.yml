@@ -1,0 +1,71 @@
+name: NeoEditor release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'NeoEditor product version (major.minor.patch[-prerelease])'
+        required: true
+        default: '0.1.0'
+        type: string
+  push:
+    tags:
+      - 'neoeditor-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Determine independent product version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $version = if ($env:GITHUB_REF -like 'refs/tags/neoeditor-v*') {
+            $env:GITHUB_REF_NAME.Substring('neoeditor-v'.Length)
+          } else { $env:INPUT_VERSION }
+          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') {
+            throw 'Invalid NeoEditor product version.'
+          }
+          "NEOEDITOR_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Check translations and Win32/Direct2D correctness
+        shell: pwsh
+        run: ./scripts/check-neoeditor.ps1 -BuildDirectory "$env:GITHUB_WORKSPACE/build-neoeditor-check"
+      - name: Build and verify standalone executable
+        shell: pwsh
+        run: ./scripts/package-neoeditor.ps1 -Version $env:NEOEDITOR_VERSION -OutputDirectory "$env:GITHUB_WORKSPACE/dist/neoeditor"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: NeoEditor-${{ env.NEOEDITOR_VERSION }}-windows-x64
+          path: dist/neoeditor/*
+          if-no-files-found: error
+      - name: Create draft release for a NeoEditor tag
+        if: startsWith(github.ref, 'refs/tags/neoeditor-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $notes = (Get-Content apps/neo_editor/RELEASE-NOTES.md -Raw -Encoding UTF8).Replace('@NEO_EDITOR_VERSION@', $env:NEOEDITOR_VERSION)
+          $notesPath = Join-Path $env:RUNNER_TEMP 'neoeditor-release-notes.md'
+          [IO.File]::WriteAllText($notesPath, $notes, [Text.UTF8Encoding]::new($false))
+          $existing = gh release view $tag --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'Refusing to modify an already published release.' }
+            throw 'A draft release already exists. Inspect it before replacing any artifacts.'
+          }
+          $assets = @(Get-ChildItem dist/neoeditor -File | ForEach-Object { $_.FullName })
+          $releaseArgs = @('release','create',$tag,'--verify-tag','--draft','--title',"NeoEditor $env:NEOEDITOR_VERSION",'--notes-file',$notesPath)
+          if ($env:NEOEDITOR_VERSION.Contains('-')) { $releaseArgs += '--prerelease' }
+          & gh @releaseArgs @assets
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to create NeoEditor draft release.' }
