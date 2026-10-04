@@ -1,8 +1,8 @@
-# EUI-Edits @NEO_EDITOR_VERSION@ — 候选说明 / Candidate notes
+# EUI-Edits @NEO_EDITOR_VERSION@ — 发布说明 / Release notes
 
-**状态：候选开发继续，公开发布暂停。** 本文用于跟踪候选版本，不构成发布公告；发布计划恢复前不提供公开下载或发布日期。
+**状态：0.1.0 已发布。** 正式包为静态 CRT 单 EXE，见 GitHub Release 附件；SHA256 见旁置 `.sha256` 文件。下文说明继续适用于该版本。
 
-**Status: candidate development continues; public release is paused.** These notes describe the candidate and are not a release announcement. No public download or publication date is being offered while publication remains paused.
+**Status: 0.1.0 is released.** The official package is a static-CRT single EXE; see the GitHub Release assets, with the SHA256 in the adjacent `.sha256` file. The notes below apply to that version.
 
 ## 产品内容 / Product
 
