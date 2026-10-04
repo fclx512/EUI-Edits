@@ -34,8 +34,10 @@ struct Data {
     std::string editorFontFile;
     std::string uiFontFile;
     std::string codeFontFile;
-    // 界面主题：0 = 暗色（默认），1 = 亮色。
-    int theme = 0;
+    // 界面主题：0 = 暗色，1 = 亮色，2 = 跟随系统（默认）。跟随系统在应用时
+    // 按 Windows 个人化的 AppsUseLightTheme 解析成 0/1；settings.ini 里没有
+    // theme 键（首次运行）时也落在这里，之后以用户的选择为准。
+    int theme = 2;
     // 主题文件（T13）：UTF-8 绝对路径，空 = 用内置配色。落盘 key 是
     // last_theme_file，开机由 app.cpp 在首帧配色之前恢复。
     std::string lastThemeFile;
@@ -53,6 +55,10 @@ struct Data {
 };
 
 std::string configDirectory();
+
+// "跟随系统"主题的探测：读 HKCU\...\Themes\Personalize 的 AppsUseLightTheme
+// （应用模式明暗）。键缺失或读取失败按亮色处理。
+bool systemThemePrefersLight();
 
 // 首次访问时从磁盘读取，之后返回同一份可写数据。
 Data& current();

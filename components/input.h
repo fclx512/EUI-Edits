@@ -644,10 +644,22 @@ public:
                             InputModel::moveCursor(state, -1, event.modifiers.shift, fontFamily, fontSize, allowMultiline, textWidth);
                         } else if (event.key == core::InputKey::Right) {
                             InputModel::moveCursor(state, 1, event.modifiers.shift, fontFamily, fontSize, allowMultiline, textWidth);
-                        } else if (event.key == core::InputKey::Up && allowMultiline) {
-                            InputModel::moveCursorVertical(state, -1, event.modifiers.shift, fontFamily, fontSize, textWidth, textHeight);
-                        } else if (event.key == core::InputKey::Down && allowMultiline) {
-                            InputModel::moveCursorVertical(state, 1, event.modifiers.shift, fontFamily, fontSize, textWidth, textHeight);
+                        } else if (event.key == core::InputKey::Up) {
+                            if (allowMultiline) {
+                                InputModel::moveCursorVertical(state, -1, event.modifiers.shift, fontFamily, fontSize, textWidth, textHeight);
+                            } else {
+                                // 单行输入（查找/替换、重命名等）没有"上一行"：↑ 复用
+                                // Home 的实现跳到行首；多行的边界折行跳转在
+                                // moveCursorVertical 内统一处理，两种场景行为对齐。
+                                InputModel::moveCursorTo(state, 0, event.modifiers.shift);
+                            }
+                        } else if (event.key == core::InputKey::Down) {
+                            if (allowMultiline) {
+                                InputModel::moveCursorVertical(state, 1, event.modifiers.shift, fontFamily, fontSize, textWidth, textHeight);
+                            } else {
+                                // 单行 ↓ 同理：复用 End 的实现跳到行尾。
+                                InputModel::moveCursorTo(state, static_cast<int>(state.text.size()), event.modifiers.shift);
+                            }
                         } else if ((event.key == core::InputKey::PageUp || event.key == core::InputKey::PageDown) && allowMultiline) {
                             InputModel::moveCursorPage(state, event.key == core::InputKey::PageUp ? -1 : 1,
                                 event.modifiers.shift, fontFamily, fontSize, textWidth, textHeight);

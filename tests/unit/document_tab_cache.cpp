@@ -47,6 +47,8 @@ namespace neo::settings {
 Data& current() { static Data data; return data; }
 std::string configDirectory() { return sessionConfigDirectory; }
 bool flush() { return true; }
+// 跟随系统主题的替身：单测统一按亮色解析。
+bool systemThemePrefersLight() { return true; }
 bool writeRecovery(const std::string&, const std::string&, const textfile::Document*) { return true; }
 bool readRecovery(RecoverySnapshot&) { return false; }
 void clearRecovery() {}

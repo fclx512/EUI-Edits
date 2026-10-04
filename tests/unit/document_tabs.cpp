@@ -73,6 +73,8 @@ Data& current() {
 
 std::string configDirectory() { return sessionConfigDirectory; }
 bool flush() { return true; }
+// 跟随系统主题的替身：单测统一按亮色解析。
+bool systemThemePrefersLight() { return true; }
 bool writeRecovery(const std::string& text, const std::string& originPath, const textfile::Document*) {
     ++recoveryCalls; lastRecoveryOrigin = originPath; return true;
 }

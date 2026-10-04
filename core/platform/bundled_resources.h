@@ -6,7 +6,6 @@
 namespace core::platform {
 
 enum class BundledResourceId : unsigned int {
-    EuiEditsFontAwesome = 501,
     EuiEditsLicenses = 502
 };
 
@@ -31,7 +30,5 @@ int handleEuiEditsLicenseCommandLine() noexcept;
 // saved text file with the user's registered text viewer.
 bool showEuiEditsLicenseExportDialog(void* ownerWindow = nullptr) noexcept;
 
-inline constexpr const char* kEuiEditsFontAwesomeResourcePath =
-    "@euiedits-resource:font-awesome";
 
 } // namespace core::platform

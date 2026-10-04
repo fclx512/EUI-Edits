@@ -1710,6 +1710,18 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         const int currentLine = lineIndexFor(lines, state.cursor);
         const int nextLine = std::clamp(currentLine + direction, 0, static_cast<int>(lines.size()) - 1);
         if (nextLine == currentLine) {
+            // 已在第一行（↑）/最后一行（↓）：跟随记事本、Obsidian 等的边界惯例，
+            // 折到当前视觉行的行首/行尾，而不是无响应；光标已在该边缘则保持原样
+            // （连同既有选区一起不动）。行语义与上方正常移动一致（折行后的视觉行）；
+            // Shift 选区沿用本函数的 keepSelection 语义——选区随光标扩到行边缘，
+            // 与 Home/End 行为对齐，这是刻意选择：只给原本无响应的边界加跳转，
+            // 不改变其他场景的选区行为。
+            const InputLayout::Line& line = lines[static_cast<size_t>(currentLine)];
+            const int edge = direction < 0 ? line.start : line.end;
+            if (state.cursor == edge) {
+                return;
+            }
+            moveCursorToLineEdge(state, direction > 0, keepSelection, fontFamily, fontSize, viewportWidth);
             return;
         }
 

@@ -1355,7 +1355,7 @@ void persistSettings(const AppState& state) {
     data.editorFontFile = state.editorFontFile;
     data.uiFontFile = state.uiFontFile;
     data.codeFontFile = state.codeFontFile;
-    data.theme = static_cast<int>(state.theme);
+    data.theme = state.themeFollowSystem ? 2 : static_cast<int>(state.theme);
     data.lastThemeFile = state.themeFile;
     settings::flush();
 }
@@ -1381,8 +1381,13 @@ void applyShowStatusBar(AppState& state) {
     app::requestUpdate();
 }
 
-void applyTheme(AppState& state, ThemeMode mode) {
+void applyThemePreference(AppState& state, bool followSystem, ThemeMode mode) {
+    state.themeFollowSystem = followSystem;
     if (state.theme == mode) {
+        // 模式没变也要落盘：从"暗色"切到"跟随系统（当前解析为暗色）"这类
+        // 偏好变化不改变配色，但仍要写进 settings.ini。
+        persistSettings(state);
+        app::requestUpdate();
         return;
     }
     state.theme = mode;
@@ -1399,6 +1404,15 @@ void applyTheme(AppState& state, ThemeMode mode) {
     // lp::DecorationCache::theme 目前只吃 ThemeMode 枚举，还没吃 themeRevision() ——
     // 深浅切换因此是好的，但"换主题文件、外观侧不变"时行内装饰要等下次键变才刷新。
     // 补法是在 lp_decorations.h 的缓存键里加一列 themeRevision（那是 T5 在改的文件）。
+}
+
+void applyTheme(AppState& state, ThemeMode mode) {
+    applyThemePreference(state, /*followSystem=*/false, mode);
+}
+
+void applyFollowSystemTheme(AppState& state) {
+    applyThemePreference(state, /*followSystem=*/true,
+                         settings::systemThemePrefersLight() ? ThemeMode::Light : ThemeMode::Dark);
 }
 
 void applyUiFontSize(AppState& state, float fontSize) {
@@ -1516,7 +1530,11 @@ void resetViewSettings(AppState& state) {
     // themeRevision() 失效，先 reset 才能取到内置配色的窗口底色。
     themeloader::reset();
     state.themeFile = defaults.lastThemeFile;
-    state.theme = static_cast<ThemeMode>(defaults.theme);
+    state.themeFollowSystem = defaults.theme == 2;
+    state.theme = defaults.theme == 1 ? ThemeMode::Light
+                : defaults.theme == 0 ? ThemeMode::Dark
+                                      : (settings::systemThemePrefersLight() ? ThemeMode::Light
+                                                                             : ThemeMode::Dark);
     mutableAppConfig().uiScaleValue = state.uiScale;
     mutableAppConfig().clearColorValue = editorColors().window;
     // 界面字体一并回到框架默认。

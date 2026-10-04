@@ -236,13 +236,6 @@ struct FontFileFingerprint {
 
 FontFileFingerprint fingerprintFontFile(const std::string& path) {
     FontFileFingerprint fingerprint;
-    if (path == core::platform::kEuiEditsFontAwesomeResourcePath) {
-        const auto resource = core::platform::bundledResource(
-            core::platform::BundledResourceId::EuiEditsFontAwesome);
-        fingerprint.exists = static_cast<bool>(resource);
-        fingerprint.size = resource.size;
-        return fingerprint;
-    }
     const auto native = std::filesystem::u8path(path);
     std::error_code error;
     const bool exists = std::filesystem::exists(native, error);
@@ -1082,10 +1075,6 @@ std::string resolveDefaultIconFontPath() {
     // 与 resolveDefaultUiFontPath 同理：icon override 的读侧也取同一把锁。
     std::scoped_lock lock(textCacheMutex());
     const std::string& override = defaultIconFontFileOverride();
-    if (override.empty() && core::platform::bundledResource(
-            core::platform::BundledResourceId::EuiEditsFontAwesome)) {
-        return core::platform::kEuiEditsFontAwesomeResourcePath;
-    }
     const std::string path = override.empty() ? resolveProjectAssetPath(kDefaultIconFontFile) : resolveFontFilePath(override);
     if (const std::string existing = existingPath(std::filesystem::u8path(path)); !existing.empty()) {
         return existing;
@@ -1128,15 +1117,6 @@ bool isEmojiFontPath(const std::string& path) {
 FT_Error openFontFace(FT_Library library, const std::string& path, FT_Face* face,
                      std::shared_ptr<std::vector<unsigned char>>& storage) {
     std::scoped_lock lock(textCacheMutex());
-    if (path == core::platform::kEuiEditsFontAwesomeResourcePath) {
-        const auto resource = core::platform::bundledResource(
-            core::platform::BundledResourceId::EuiEditsFontAwesome);
-        if (!resource || resource.size > static_cast<std::size_t>(std::numeric_limits<FT_Long>::max())) {
-            return FT_Err_Cannot_Open_Resource;
-        }
-        storage.reset();
-        return FT_New_Memory_Face(library, resource.data, static_cast<FT_Long>(resource.size), 0, face);
-    }
 #ifdef _WIN32
     const bool unicode = std::any_of(path.begin(), path.end(), [](unsigned char c) { return c >= 128; });
     if (unicode) {

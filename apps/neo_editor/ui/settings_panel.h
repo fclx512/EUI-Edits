@@ -1123,9 +1123,14 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                      0.0f, rowY, labelWidth, geometry);
             segmentedAt(ui, colors, "settings.theme",
                         controlX, rowY + plainRowControlY, controlWidth,
-                        {i18n::tr("settings.dark"), i18n::tr("settings.light")}, state.theme == ThemeMode::Light ? 1 : 0, metrics.panelFontSize,
+                        {i18n::tr("settings.theme_system"), i18n::tr("settings.dark"), i18n::tr("settings.light")},
+                        state.themeFollowSystem ? 0 : (state.theme == ThemeMode::Light ? 2 : 1), metrics.panelFontSize,
                         [&state](int index) {
-                            applyTheme(state, index == 1 ? ThemeMode::Light : ThemeMode::Dark);
+                            if (index == 0) {
+                                applyFollowSystemTheme(state);
+                            } else {
+                                applyTheme(state, index == 2 ? ThemeMode::Light : ThemeMode::Dark);
+                            }
                         });
             rowY += geometry.rowHeight;
 

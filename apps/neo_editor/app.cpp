@@ -138,7 +138,13 @@ void restoreSession(neo::AppState& state) {
     state.showLineNumbers = saved.lineNumbers;
     state.readableWidth = saved.readableWidth;
     state.animations = saved.animations;
-    state.theme = saved.theme == 1 ? neo::ThemeMode::Light : neo::ThemeMode::Dark;
+    // 主题：0/1 是固定明暗；2（或首启无 theme 键）= 跟随系统，按 Windows
+    // 个人化的应用模式解析。跟随系统之后每次启动都重新解析，不落具体模式。
+    state.themeFollowSystem = saved.theme == 2;
+    state.theme = saved.theme == 1 ? neo::ThemeMode::Light
+                : saved.theme == 0 ? neo::ThemeMode::Dark
+                : (neo::settings::systemThemePrefersLight() ? neo::ThemeMode::Light
+                                                            : neo::ThemeMode::Dark);
     state.uiScale = std::clamp(saved.uiScale, neo::kMinimumUiScale, neo::kMaximumUiScale);
     state.editorFontSize =
         std::clamp(saved.editorFontSize, neo::kMinimumEditorFontSize, neo::kMaximumEditorFontSize);

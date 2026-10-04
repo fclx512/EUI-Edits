@@ -136,6 +136,20 @@ std::string trim(std::string value) {
 
 } // namespace
 
+bool systemThemePrefersLight() {
+#if defined(_WIN32)
+    DWORD value = 1;
+    DWORD size = sizeof(value);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr,
+                     &value, &size) == ERROR_SUCCESS) {
+        return value != 0;
+    }
+#endif
+    return true;
+}
+
 std::string configDirectory() {
     std::string base;
 #if defined(_WIN32)
@@ -240,7 +254,7 @@ Data& current() {
                 } else if (key == "code_font_file") {
                     loaded.codeFontFile = value;
                 } else if (key == "theme") {
-                    loaded.theme = value == "1" ? 1 : 0;
+                    loaded.theme = value == "1" ? 1 : value == "2" ? 2 : 0;
                 } else if (key == "last_theme_file") {
                     loaded.lastThemeFile = value;
                 } else if (key == "line_numbers") {

@@ -286,6 +286,9 @@ struct AppState : DocumentSession {
     std::string codeFontFile;
     // 界面主题。落盘到 settings.ini 的 theme。
     ThemeMode theme = ThemeMode::Dark;
+    // 主题偏好 = "跟随系统"（settings.ini 的 theme=2）：theme 字段此时存的是
+    // 启动/点击时解析出的实际模式，每次都按系统 AppsUseLightTheme 重新解析。
+    bool themeFollowSystem = false;
     // 当前生效的主题文件（UTF-8 路径，空 = 内置配色）。落盘到 last_theme_file，
     // 设置面板的"主题文件"行按它显示；配色数据本体在 model 层的 activeTheme()，
     // 两边由 load/reset 一起改（见 ui/settings_panel.h 的主题文件入口）。

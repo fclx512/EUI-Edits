@@ -78,6 +78,11 @@ int main() {
     if (key(K::PageDown) || key(K::PageUp)) return 17;
     key(K::End, true); key(K::Home, true, true);
     if (state.cursor != 0 || state.selectionStart != static_cast<int>(value.size())) return 18;
+    // 单行输入：↑/↓ 折到行首/行尾并消费事件（原先无响应）；Shift 沿用选区扩展语义。
+    if (!key(K::Up) || state.cursor != 0 || M::hasTextSelection(state)) return 21;
+    if (!key(K::Down) || state.cursor != static_cast<int>(value.size()) || M::hasTextSelection(state)) return 22;
+    if (!key(K::Up, false, true) || state.cursor != 0 ||
+        state.selectionStart != static_cast<int>(value.size()) || state.selectionEnd != 0) return 23;
 
     // Hidden lines do not consume page distance and cannot be landing targets.
     M::InputState hidden;
@@ -90,5 +95,28 @@ int main() {
     if (target < 8 || hidden.cachedLines[target].hidden) return 19;
     M::moveCursorPage(hidden, -1, true, "monospace", 16, 200, 40);
     if (hidden.cursor != 0 || hidden.selectionStart <= 0 || hidden.selectionEnd != 0) return 20;
+
+    // 边界折行跳转（记事本惯例）：第一行 ↑ / 最后一行 ↓ 折到当前视觉行的行首/行尾，
+    // 已在边缘则保持原样；行语义与正常上下移动一致（折行后的视觉行）。
+    M::InputState edge;
+    edge.text = "alpha\nbeta\ngamma";  // 行区间：0-5 / 6-10 / 11-16
+    M::moveCursorVertical(edge, -1, false, "monospace", 16, 200, 40);
+    if (edge.cursor != 0) return 24;  // 第一行行首 ↑：无操作
+    edge.cursor = 2;
+    M::moveCursorVertical(edge, -1, false, "monospace", 16, 200, 40);
+    if (edge.cursor != 0) return 25;  // 第一行中间 ↑：折到行首
+    edge.cursor = 2;
+    M::moveCursorVertical(edge, -1, true, "monospace", 16, 200, 40);
+    if (edge.cursor != 0 || edge.selectionStart != 2 || edge.selectionEnd != 0) return 26;  // Shift+↑ 扩选到行首
+    edge.cursor = static_cast<int>(edge.text.size());
+    M::moveCursorVertical(edge, 1, false, "monospace", 16, 200, 40);
+    if (edge.cursor != static_cast<int>(edge.text.size())) return 27;  // 最后一行行尾 ↓：无操作
+    edge.cursor = 13;
+    M::moveCursorVertical(edge, 1, false, "monospace", 16, 200, 40);
+    if (edge.cursor != static_cast<int>(edge.text.size())) return 28;  // 最后一行中间 ↓：折到行尾
+    edge.cursor = 13;
+    M::moveCursorVertical(edge, 1, true, "monospace", 16, 200, 40);
+    if (edge.cursor != static_cast<int>(edge.text.size()) || edge.selectionStart != 13 ||
+        edge.selectionEnd != static_cast<int>(edge.text.size())) return 29;  // Shift+↓ 扩选到行尾
     std::cout << "Navigation: document edges, viewport paging, selection, UTF-8, wrapping, folding and IME passed\n";
 }

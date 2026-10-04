@@ -108,26 +108,27 @@ std::string makeUniqueText(int index, int chunks) {
     return text;
 }
 
-// 在测试工作目录（ctest 起在 build-win32/）与仓库 assets/ 的常见相对位置里找
-// 字体文件，返回**绝对路径**。用例一律把绝对路径喂给 override / fontFamily：
-// resolveFontFilePath 对已存在的路径原样返回，解析结果就不依赖 text.cpp 那套
-// 「可执行文件目录 + cwd」探测，ctest 与直接跑 exe 两种方式下都一致。
-std::string findFontAsset(const char* name) {
-    const char* prefixes[] = {
-        "", "../", "../../", "assets/", "../assets/", "../../assets/",
-        "Release/assets/", "../Release/assets/"
+// 产品已不再携带仓库字体（assets 只剩应用图标，界面走 Windows 系统字体），
+// 并发/覆盖用例的候选字体改用系统字体文件。返回两份**互不相同**的现有字体
+// 绝对路径（度量必然不同），找不到两份时为空。
+std::vector<std::string> findSystemFontCandidates() {
+    const char* candidates[] = {
+        "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/consola.ttf",
+        "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/times.ttf", "C:/Windows/Fonts/seguisym.ttf",
     };
-    for (const char* prefix : prefixes) {
+    std::vector<std::string> found;
+    for (const char* path : candidates) {
         std::error_code error;
-        const std::filesystem::path candidate = std::filesystem::path(prefix) / name;
-        if (!std::filesystem::exists(candidate, error) || error) {
+        if (!std::filesystem::exists(path, error) || error) {
             continue;
         }
-        std::error_code absoluteError;
-        const std::filesystem::path absolute = std::filesystem::absolute(candidate, absoluteError);
-        return absoluteError ? candidate.string() : absolute.string();
+        found.push_back(path);
+        if (found.size() == 2) {
+            break;
+        }
     }
-    return {};
+    return found;
 }
 
 // 结构合法性：首停在 0、末停在文本末尾、两支数组同长，索引与 caret 都不回退。
@@ -448,12 +449,13 @@ void testConcurrent() {
 // 合法（进程崩溃本身就是失败）。锁序证明写在 text.cpp 的 setDefaultFontFiles。
 void testConcurrentWithFontOverride() {
     setCacheEnv("");
-    const std::string fontA = findFontAsset("YouSheBiaoTiHei-2.ttf");
-    const std::string fontB = findFontAsset("Font Awesome 7 Free-Solid-900.otf");
-    if (fontA.empty() || fontB.empty()) {
-        fail("并发覆盖：assets 里找不到候选字体（A=" + fontA + "，B=" + fontB + "）");
+    const auto systemFonts = findSystemFontCandidates();
+    if (systemFonts.size() < 2) {
+        fail("并发覆盖：系统字体候选不足两份，测不了翻字体");
         return;
     }
+    const std::string fontA = systemFonts[0];
+    const std::string fontB = systemFonts[1];
     const std::string text =
         "并发覆盖 \xe5\xad\x97\xe4\xbd\x93 abc 0123456789 \xe5\x9b\xba\xe5\xae\x9a 42";
 
@@ -551,11 +553,12 @@ void testConcurrentWithFontOverride() {
 // (默认字体, 文本) 度量必须整层作废：同一文本重新 miss，且结果换成新字体的度量。
 void testOverrideClearsCache() {
     setCacheEnv("");
-    const std::string fontA = findFontAsset("YouSheBiaoTiHei-2.ttf");
-    if (fontA.empty()) {
-        fail("覆盖清缓存：assets 里找不到 YouSheBiaoTiHei-2.ttf");
+    const auto systemFonts = findSystemFontCandidates();
+    if (systemFonts.empty()) {
+        fail("覆盖清缓存：系统里找不到候选字体");
         return;
     }
+    const std::string fontA = systemFonts[0];
     const std::string text = "覆盖清缓存 \xe5\xad\x97\xe4\xbd\x93 abc 0123456789 \xe9\x87\x8d\xe6\x96\xb0\xe8\xae\xa1 miss";
 
     neoTextCacheClear();
@@ -649,13 +652,7 @@ void testFallbackRecovery() {
     // "换没换结果" 才判得出来）。
     std::string donor;
     TextPrimitive::TextMetrics donorReference;
-    for (const char* name : {"YouSheBiaoTiHei-2.ttf",
-                             "Font Awesome 7 Free-Solid-900.otf",
-                             "JingNanJunJunTi-JinNanJunJunTi-Bold-2.ttf"}) {
-        const std::string candidate = findFontAsset(name);
-        if (candidate.empty()) {
-            continue;
-        }
+    for (const std::string& candidate : findSystemFontCandidates()) {
         const TextPrimitive::TextMetrics metrics = measure(text, candidate);
         if (!sameMetrics(metrics, fallback)) {
             donor = candidate;
@@ -718,11 +715,12 @@ void testFallbackRecovery() {
 // 两个路径必然不同（fontA 是存在的绝对路径，空覆盖解析到仓库自带默认字体）。
 void testOverrideWriteSharesLock() {
     setCacheEnv("");
-    const std::string fontA = findFontAsset("YouSheBiaoTiHei-2.ttf");
-    if (fontA.empty()) {
-        fail("写侧共锁：assets 里找不到 YouSheBiaoTiHei-2.ttf");
+    const auto systemFonts = findSystemFontCandidates();
+    if (systemFonts.empty()) {
+        fail("写侧共锁：系统里找不到候选字体");
         return;
     }
+    const std::string fontA = systemFonts[0];
 
     TextPrimitive::setDefaultFontFiles("", "");  // 起点：空覆盖
     std::string baseline;

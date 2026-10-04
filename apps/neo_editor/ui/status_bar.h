@@ -33,17 +33,21 @@ inline void statusField(eui::Ui& ui,
                         float height,
                         eui::Color color) {
     ui.text(id)
-        .size(estimateTextWidth(value, fontSize) + 4.0f, height)
+        .size(core::TextPrimitive::measureTextWidth(value, fontFamily, fontSize) + 4.0f, height)
         .text(value)
         .fontFamily(fontFamily)
         .fontSize(fontSize)
         .color(color)
         .verticalAlign(eui::VerticalAlign::Center)
+        .clip()
         .build();
 }
 
-inline std::string statusTextForWidth(const std::string& text, float width, float fontSize) {
-    if (estimateTextWidth(text, fontSize) <= width) {
+inline std::string statusTextForWidth(const std::string& text,
+                                      float width,
+                                      float fontSize,
+                                      const char* fontFamily) {
+    if (core::TextPrimitive::measureTextWidth(text, fontFamily, fontSize) <= width) {
         return text;
     }
     return elideToWidth(text, width, fontSize);
@@ -52,12 +56,13 @@ inline std::string statusTextForWidth(const std::string& text, float width, floa
 inline std::string statusNameForWidth(const std::string& name,
                                       bool dirty,
                                       float width,
-                                      float fontSize) {
+                                      float fontSize,
+                                      const char* fontFamily) {
     const float markerWidth = dirty ? fontSize * .55f + 6.0f : 0.0f;
     if (dirty && width < markerWidth) {
         return {};
     }
-    return statusTextForWidth(name, std::max(0.0f, width - markerWidth), fontSize);
+    return statusTextForWidth(name, std::max(0.0f, width - markerWidth), fontSize, fontFamily);
 }
 
 } // namespace status_detail
@@ -99,14 +104,24 @@ inline void statusBarView(eui::Ui& ui, AppState& state, float width) {
     constexpr float kGap = 6.0f;
     const float iconSlot = fontSize + 2.0f;
     const float horizontalPad = std::min(12.0f, std::max(1.0f, width * 0.04f));
-    const auto fieldWidth = [&](const std::string& value) {
-        return estimateTextWidth(value, fontSize) + 4.0f;
+    // 宽度一律用真实字体测量（estimateTextWidth 会低估大写字母，文档名溢出
+    // 压过段间距是状态栏重叠的根因）；右段各字段先量一次缓存，避免级联
+    // 收缩判断里反复 shaping。
+    const auto measure = [&](const std::string& value) {
+        return core::TextPrimitive::measureTextWidth(value, uiFont, fontSize);
     };
+    const auto fieldWidth = [&](const std::string& value) {
+        return measure(value) + 4.0f;
+    };
+    const float metaWidth = fieldWidth(metaText);
+    const float linesWidth = fieldWidth(linesText);
+    const float charsWidth = fieldWidth(charsText);
+    const float nameTextWidth = measure(nameText);
     const float minimumNameWidth = std::min(
-        estimateTextWidth(nameText, fontSize) + (state.dirty() ? (fontSize*.55f+6) : 0.0f),
+        nameTextWidth + (state.dirty() ? (fontSize*.55f+6) : 0.0f),
         std::max(40.0f, fontSize * 3.0f));
     const float leftMinimum = horizontalPad * 2.0f + minimumNameWidth;
-    const float languageWidth=std::min(120.0f,estimateTextWidth(filetypes::label(state.language())+" ▾",fontSize)+14.0f);
+    const float languageWidth=std::min(120.0f,measure(filetypes::label(state.language())+" ▾")+14.0f);
     const bool wrapControl=width>=480;
     const float viewControls=languageWidth+(wrapControl?64.0f:0.0f);
     const auto rightWidthFor = [&](bool meta, bool lines, bool chars, bool icons) {
@@ -115,9 +130,9 @@ inline void statusBarView(eui::Ui& ui, AppState& state, float width) {
             return viewControls+horizontalPad*2;
         }
         float result = horizontalPad * 2.0f + viewControls + kGap;
-        if (meta) result += fieldWidth(metaText);
-        if (lines) result += fieldWidth(linesText);
-        if (chars) result += fieldWidth(charsText);
+        if (meta) result += metaWidth;
+        if (lines) result += linesWidth;
+        if (chars) result += charsWidth;
         if (icons) result += count * iconSlot;
         result += kGap * (icons ? count * 2 - 1 : count - 1);
         return result;
@@ -161,7 +176,7 @@ inline void statusBarView(eui::Ui& ui, AppState& state, float width) {
     const float nameMinimum = std::min(minimumNameWidth, leftInner);
     const bool showFileIcon = leftInner >= iconSlot + kGap + nameMinimum && nameMinimum > 0.0f;
     const float afterFileIcon = std::max(0.0f, leftInner - (showFileIcon ? iconSlot + kGap : 0.0f));
-    const float locationMinimum = std::min(48.0f, estimateTextWidth(locationText, fontSize));
+    const float locationMinimum = std::min(48.0f, measure(locationText));
     const float pathFixed = kGap + iconSlot + kGap;
     const bool showLocation = afterFileIcon >= nameMinimum + pathFixed + locationMinimum &&
                               locationMinimum > 0.0f;
@@ -169,8 +184,7 @@ inline void statusBarView(eui::Ui& ui, AppState& state, float width) {
     float locationWidth = 0.0f;
     if (showLocation) {
         const float flexible = afterFileIcon - pathFixed;
-        nameWidth = std::min(estimateTextWidth(nameText, fontSize) +
-                                 (state.dirty() ? (fontSize*.55f+6) : 0.0f),
+        nameWidth = std::min(nameTextWidth + (state.dirty() ? (fontSize*.55f+6) : 0.0f),
                              std::max(nameMinimum, flexible * 0.55f));
         locationWidth = std::max(0.0f, flexible - nameWidth);
     }
@@ -206,12 +220,12 @@ inline void statusBarView(eui::Ui& ui, AppState& state, float width) {
                             iconView(ui,"status.name.glyph",icon,0,(height-fontSize-2)*.5f,fontSize+2,color);
                         }).build();
                     }
-                    const std::string renderedName = statusNameForWidth(nameText, state.dirty(), nameWidth, fontSize);
+                    const std::string renderedName = statusNameForWidth(nameText, state.dirty(), nameWidth, fontSize, uiFont);
                     ui.stack("status.name").size(nameWidth, height).content([&] {
                         ui.text("status.name.text").fill().text(renderedName)
                             .fontFamily(uiFont).fontSize(fontSize)
                             .color(state.dirty() ? colors.accent : colors.text)
-                            .verticalAlign(eui::VerticalAlign::Center).build();
+                            .verticalAlign(eui::VerticalAlign::Center).clip().build();
                         if (state.dirty() && nameWidth >= 6) {
                             const float dotX = std::min(nameWidth-6,
                                 core::TextPrimitive::measureTextWidth(renderedName, uiFont, fontSize)+5);
@@ -223,11 +237,12 @@ inline void statusBarView(eui::Ui& ui, AppState& state, float width) {
                         statusIcon(ui, "status.location.icon", UiIcon::FolderOpen, fontSize, height, colors.textMuted);
                         ui.text("status.location")
                             .size(locationWidth, height)
-                            .text(statusTextForWidth(locationText, locationWidth, fontSize))
+                            .text(statusTextForWidth(locationText, locationWidth, fontSize, uiFont))
                             .fontFamily(uiFont)
                             .fontSize(fontSize)
                             .color(colors.textMuted)
                             .verticalAlign(eui::VerticalAlign::Center)
+                            .clip()
                             .build();
                     }
                 })

@@ -730,7 +730,6 @@ if(EUI_BUILD_USER_APPS)
             set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                 "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/THIRD-PARTY-NOTICES.md"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/Font Awesome 7 Free-Solid-900.otf"
                 ${NEO_EDITOR_LICENSE_FILES})
             foreach(NEO_EDITOR_LICENSE_FILE IN LISTS NEO_EDITOR_LICENSE_FILES)
                 get_filename_component(NEO_EDITOR_LICENSE_NAME "${NEO_EDITOR_LICENSE_FILE}" NAME)
@@ -740,16 +739,12 @@ if(EUI_BUILD_USER_APPS)
                     "${NEO_EDITOR_LICENSE_TEXT}")
             endforeach()
             file(WRITE "${NEO_EDITOR_BUNDLED_LICENSES}" "${NEO_EDITOR_BUNDLED_LICENSES_TEXT}")
-            file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/Font Awesome 7 Free-Solid-900.otf"
-                NEO_EDITOR_FONT_AWESOME_NATIVE)
             file(TO_NATIVE_PATH "${NEO_EDITOR_BUNDLED_LICENSES}" NEO_EDITOR_LICENSE_BUNDLE_NATIVE)
-            string(REPLACE "\\" "\\\\" NEO_EDITOR_FONT_AWESOME_ESCAPED "${NEO_EDITOR_FONT_AWESOME_NATIVE}")
             string(REPLACE "\\" "\\\\" NEO_EDITOR_LICENSE_BUNDLE_ESCAPED "${NEO_EDITOR_LICENSE_BUNDLE_NATIVE}")
             file(APPEND "${NEO_EDITOR_DOCUMENT_ICONS_RC}"
-                "501 RCDATA \"${NEO_EDITOR_FONT_AWESOME_ESCAPED}\"\n"
                 "502 RCDATA \"${NEO_EDITOR_LICENSE_BUNDLE_ESCAPED}\"\n")
             set_property(SOURCE "${NEO_EDITOR_DOCUMENT_ICONS_RC}" APPEND PROPERTY OBJECT_DEPENDS
-                "${NEO_EDITOR_BUNDLED_LICENSES};${CMAKE_CURRENT_SOURCE_DIR}/assets/Font Awesome 7 Free-Solid-900.otf")
+                "${NEO_EDITOR_BUNDLED_LICENSES}")
             target_compile_definitions(neo_editor PRIVATE EUI_EDITS_BUNDLED_RESOURCES=1)
             # Compile the app icon and five document groups together: separate RC files restart their
             # generated RT_ICON IDs at 1 and collide at link time.
