@@ -47,14 +47,25 @@ EUI-Edits is built with C++, Win32, and Direct2D, refreshes the UI on demand, an
 - **Tab caches are reused.** When switching tabs and neither content nor presentation conditions changed, layout and highlighting results are reused; caches are kept within a budget, and exceeding it releases the least-recently-used derived data while documents, carets, and undo state stay intact.
 - **Directory scanning and content reading are separate.** The document library scans file and directory metadata in the background, and multiple tabs can share one folder's scan result; content loads only when a file is opened—the whole folder is never read into the editor.
 
-The following working-set reference values were recorded for the earlier 0.1.0 candidate (Windows 11, read after a cold start had settled):
+**Memory measurements for the released 0.1.0 EXE (2026-10-05).** The tested executable matches the SHA256 on the [public release page](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.0). Measurements use Windows 11 and the current Win32 / Direct2D default software rendering path, with no rendering overrides: light theme, 125% system scaling, editor font size 16 / UI font size 14, a 1262 × 753-pixel client area, word wrap and readable width enabled. Each scenario starts in a fresh profile three times. After the window finishes loading, it idles for 10 seconds, followed by 20 samples at 0.5-second intervals. Each table entry is the median of the three per-run sample medians, in **MiB (1 MiB = 1,048,576 bytes)**.
 
-| Scenario | Process working set |
-| --- | --- |
-| Started with an empty document | about 50–54 MB |
-| One 9 MB text document open | about 68 MB |
+| Scenario | Total working set | Private working set | Private commit |
+| --- | ---: | ---: | ---: |
+| Empty document, one tab | 48.6 | 16.8 | 22.0 |
+| Three small Markdown tabs, 2,580 bytes in total, idle after visiting each tab | 57.8 | 23.4 | 32.2 |
+| 9 MiB plain text, 73,728 file lines | 184.5 | 152.6 | 194.4 |
+| 9 MiB Markdown, 73,728 file lines, with a list item, bold text and inline code on every line | 306.6 | 274.5 | 322.1 |
 
-These are reference readings from the existing candidate and have not been re-measured against the program pending release. Actual usage varies with document type, line count, Markdown structure, local images, the number of open tabs, fonts, and the rendering environment; plain text and an equally sized Markdown document can also lay out at different costs. These readings are not a fixed memory ceiling.
+The counters come from the tested EXE's single process, using Windows `GetProcessMemoryInfo` / `PROCESS_MEMORY_COUNTERS_EX2`; the sampling script is excluded. **Total working set** counts process pages currently resident in RAM, including shareable pages. **Private working set** is the non-shareable part of that working set. **Private commit** counts the process's committed private memory, which need not all be resident in RAM. The three columns must not be added together or used interchangeably. See [Microsoft's field definitions](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex2) and the [measurement record](docs/内存实测-2026-10-05.md) for individual runs, observed ranges, file characteristics and reproduction commands.
+
+Process memory includes more than the text file itself. The source confirms these categories:
+
+- **UI and rendering overhead.** Windows, font measurements, drawing buffers and graphics resources, plus resident pages from the executable and system DLLs. An empty document therefore still uses memory.
+- **Text and editing state.** The document model, editing state and layout caches retain text data; reading, decoding and saving may also need temporary buffers. Undo and redo retain inserted or removed text ranges, so large edits can increase history storage.
+- **Layout and syntax data.** Line indexes, text measurements, caret positions, wrapped lines, Markdown parsing and decorations, table geometry, or source highlighting. Both line count and syntax structure affect the cost; equally sized files need not use equal memory.
+- **Tab, directory and image caches.** Tabs retain documents and some presentation caches; the library retains directory trees and path metadata. Images are decoded into pixels and retain rendering resources, so compressed file size is not decoded memory size. Derived-cache budgets exclude some text, undo history and active resources; they are not process memory limits.
+
+These are source-based categories, not a measured allocation breakdown. The scenarios contain no images and include no editing or saving; GPU / driver memory and the system file cache were not measured separately. These are idle readings under the stated conditions, not startup or interaction peaks or fixed ceilings. The earlier "about 68 MB for a 9 MB text document" lacked a verifiable line count and complete test conditions; it has been replaced and is not used to infer an increase or decrease between versions.
 
 ## Appearance and personalization
 
@@ -80,6 +91,8 @@ The status bar shows the current file name and location, the document's syntax m
 ## Getting started
 
 ### Opening and saving documents
+
+The current public release is [EUI-Edits 0.1.0](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.0); download the EXE and SHA256 file from its release page.
 
 The release ships as a single `EUI-Edits-<version>-windows-x64.exe` with no installer or resource folder to unpack. Put the program where you plan to keep it and run it directly; if a `.exe.sha256` is provided alongside, use it to verify the file.
 
@@ -133,6 +146,8 @@ Applying the selection only registers Open-with entries for the current user; it
 ### Build environment
 
 The commands below build the Windows x64 Win32 / Direct2D version. The application code lives in `apps/neo_editor`; the build entry point is the root [`CMakeLists.txt`](CMakeLists.txt), and the target is `neo_editor`.
+
+The product name is **EUI-Edits**. The source directory `apps/neo_editor`, build target and local output `neo_editor` / `neo_editor.exe`, CMake option `EUI_BUILD_NEOEDITOR_ONLY`, version variable `NEO_EDITOR_VERSION`, and the check and packaging script names below retain their original internal identifiers. They match the current build interfaces, so use them as written. The packaging script names release files `EUI-Edits-<version>-windows-x64.exe`. `EUI-NEO` is the upstream UI framework's name.
 
 | Tool or component | Requirement and purpose |
 | --- | --- |
@@ -206,7 +221,7 @@ EUI-Edits targets browsing and editing of local text, Markdown, source code, and
 
 | Area | Current support and limits |
 | --- | --- |
-| Platform | The release configuration targets **Windows 10/11 x64**. The 0.1.0 candidate has been checked on Windows 11; Windows 10 has not received equivalent on-machine testing. The program is currently unsigned. |
+| Platform | The release configuration targets **Windows 10/11 x64**. The released 0.1.0 EXE has had startup and memory measurements repeated on Windows 11; Windows 10 has not received equivalent on-machine testing. The program is currently unsigned. |
 | File size | The default open limit is **64 MiB**. Oversized files, suspected binaries, and files that cannot be decoded reliably raise an error instead of loading as text. |
 | Encodings and line endings | UTF-8, UTF-16 LE / BE, and Windows ANSI code pages are supported. Text is processed in a unified form internally and written back with the file's original encoding, BOM, and LF / CRLF characteristics; unrepresentable characters are never silently replaced. |
 | Markdown | Covers common syntax and part of the extensions; no LaTeX formula typesetting, no remote images, and no presentation mode. HTML is kept as source, not executed as a web page. |

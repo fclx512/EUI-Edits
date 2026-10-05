@@ -1,0 +1,1932 @@
+{
+  "date": "2026-10-05T09:30:06.345453+08:00",
+  "exe": "D:\\ruanjian\\NeoEditor\\out\\euiedits-0.1.0-single-exe\\EUI-Edits-0.1.0-windows-x64.exe",
+  "sha256": "c3176a0c079fb189015a6efee943e415a2a761d0890e0c6eed5842f3fbf6f19d",
+  "machine": {
+    "gpu": [
+      {
+        "Name": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+        "DriverVersion": "32.0.16.1062"
+      },
+      {
+        "Name": "Intel(R) Graphics",
+        "DriverVersion": "32.0.101.8331"
+      }
+    ],
+    "cpu": {
+      "Name": "Intel(R) Core(TM) Ultra 9 275HX"
+    },
+    "os": {
+      "Caption": "Microsoft Windows 11 家庭版 中文版",
+      "Version": "10.0.26300",
+      "BuildNumber": "26300"
+    },
+    "ram_bytes": 33784107008
+  },
+  "git_head": "5cbfa67e5b2ff3b905c6b5251bdc612aca4422fe",
+  "settings_ini": "ui_language=zh-CN\ntheme=1\neditor_font_size=16\nui_font_size=14\nui_scale=1\nmode=0\nline_numbers=1\nreadable_width=1\nshow_status_bar=1\nanimations=1\n",
+  "renderer": "Win32/Direct2D default (software + DC per source); no NEO_* overrides",
+  "sampling": {
+    "repetitions": 3,
+    "settle_seconds": 10,
+    "samples_per_launch": 20,
+    "interval_seconds": 0.5,
+    "statistic": "median of per-launch medians; range over all retained idle samples",
+    "api": "GetProcessMemoryInfo / PROCESS_MEMORY_COUNTERS_EX2",
+    "unit": "bytes; divide by 1048576 for MiB",
+    "working_set_trimmed": false
+  },
+  "documents": {
+    "plain": [
+      {
+        "name": "large.txt",
+        "bytes": 9437184,
+        "lines": 73728,
+        "sha256": "2814da97968ba8121ed050cf83485415d3cb56c878a8ba678d2edef9afbde8e6"
+      }
+    ],
+    "markdown": [
+      {
+        "name": "large.md",
+        "bytes": 9437184,
+        "lines": 73728,
+        "sha256": "83eb098309d58b0c2f0b93c05255e4941b3b3bb61e2de02f32c35aa85c76b525"
+      }
+    ],
+    "small_tabs": [
+      {
+        "name": "small-1.md",
+        "bytes": 860,
+        "lines": 41,
+        "sha256": "561c147cb78db129237baea8eb4c3ace35ad37762afd9a248940c65e562a737e"
+      },
+      {
+        "name": "small-2.md",
+        "bytes": 860,
+        "lines": 41,
+        "sha256": "883c4bf2f306a42bac5610d80760caf3910a37530389ee3f222b7fcde76bd628"
+      },
+      {
+        "name": "small-3.md",
+        "bytes": 860,
+        "lines": 41,
+        "sha256": "029cc73cbd26d2ac0848cdd7221ae50a44839e6baeb4011960445b28eb4711a7"
+      }
+    ],
+    "blank": []
+  },
+  "runs": [
+    {
+      "scenario": "blank",
+      "repeat": 1,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 0.5,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 1.016,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 1.516,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 2.016,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 2.531,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 3.031,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 3.531,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 4.047,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 4.547,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 5.047,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 5.563,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 6.063,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 6.578,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 7.078,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 7.578,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 8.094,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 8.594,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 9.109,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        },
+        {
+          "seconds": 9.609,
+          "working_set_bytes": 51462144,
+          "private_working_set_bytes": 17596416,
+          "private_commit_bytes": 23056384
+        }
+      ],
+      "pid": 3364,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 51462144.0,
+        "private_working_set_bytes": 17596416.0,
+        "private_commit_bytes": 23056384.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "small_tabs",
+      "repeat": 1,
+      "samples": [
+        {
+          "seconds": 0.016,
+          "working_set_bytes": 60678144,
+          "private_working_set_bytes": 24563712,
+          "private_commit_bytes": 34156544
+        },
+        {
+          "seconds": 0.516,
+          "working_set_bytes": 60755968,
+          "private_working_set_bytes": 24641536,
+          "private_commit_bytes": 35508224
+        },
+        {
+          "seconds": 1.031,
+          "working_set_bytes": 60256256,
+          "private_working_set_bytes": 24141824,
+          "private_commit_bytes": 32227328
+        },
+        {
+          "seconds": 1.531,
+          "working_set_bytes": 60399616,
+          "private_working_set_bytes": 24285184,
+          "private_commit_bytes": 33206272
+        },
+        {
+          "seconds": 2.047,
+          "working_set_bytes": 60682240,
+          "private_working_set_bytes": 24567808,
+          "private_commit_bytes": 33771520
+        },
+        {
+          "seconds": 2.547,
+          "working_set_bytes": 60690432,
+          "private_working_set_bytes": 24576000,
+          "private_commit_bytes": 33091584
+        },
+        {
+          "seconds": 3.063,
+          "working_set_bytes": 60706816,
+          "private_working_set_bytes": 24592384,
+          "private_commit_bytes": 33550336
+        },
+        {
+          "seconds": 3.563,
+          "working_set_bytes": 60416000,
+          "private_working_set_bytes": 24301568,
+          "private_commit_bytes": 32260096
+        },
+        {
+          "seconds": 4.063,
+          "working_set_bytes": 60862464,
+          "private_working_set_bytes": 24748032,
+          "private_commit_bytes": 34390016
+        },
+        {
+          "seconds": 4.578,
+          "working_set_bytes": 60837888,
+          "private_working_set_bytes": 24723456,
+          "private_commit_bytes": 33701888
+        },
+        {
+          "seconds": 5.078,
+          "working_set_bytes": 60616704,
+          "private_working_set_bytes": 24502272,
+          "private_commit_bytes": 35307520
+        },
+        {
+          "seconds": 5.594,
+          "working_set_bytes": 60391424,
+          "private_working_set_bytes": 24276992,
+          "private_commit_bytes": 33210368
+        },
+        {
+          "seconds": 6.094,
+          "working_set_bytes": 60858368,
+          "private_working_set_bytes": 24743936,
+          "private_commit_bytes": 35184640
+        },
+        {
+          "seconds": 6.61,
+          "working_set_bytes": 60674048,
+          "private_working_set_bytes": 24559616,
+          "private_commit_bytes": 32641024
+        },
+        {
+          "seconds": 7.11,
+          "working_set_bytes": 60510208,
+          "private_working_set_bytes": 24395776,
+          "private_commit_bytes": 33361920
+        },
+        {
+          "seconds": 7.61,
+          "working_set_bytes": 60735488,
+          "private_working_set_bytes": 24621056,
+          "private_commit_bytes": 35188736
+        },
+        {
+          "seconds": 8.125,
+          "working_set_bytes": 60231680,
+          "private_working_set_bytes": 24117248,
+          "private_commit_bytes": 32137216
+        },
+        {
+          "seconds": 8.625,
+          "working_set_bytes": 60624896,
+          "private_working_set_bytes": 24510464,
+          "private_commit_bytes": 34750464
+        },
+        {
+          "seconds": 9.141,
+          "working_set_bytes": 60624896,
+          "private_working_set_bytes": 24510464,
+          "private_commit_bytes": 34750464
+        },
+        {
+          "seconds": 9.641,
+          "working_set_bytes": 60923904,
+          "private_working_set_bytes": 24809472,
+          "private_commit_bytes": 34385920
+        }
+      ],
+      "pid": 6124,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 60676096.0,
+        "private_working_set_bytes": 24561664.0,
+        "private_commit_bytes": 33736704.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "plain",
+      "repeat": 1,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 0.515,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 1.015,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 1.531,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 2.031,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 2.546,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 3.046,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 3.546,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 4.062,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 4.562,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 5.062,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 5.578,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 6.093,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 6.593,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 7.109,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 7.609,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 8.109,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 8.625,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 9.125,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        },
+        {
+          "seconds": 9.64,
+          "working_set_bytes": 193470464,
+          "private_working_set_bytes": 160010240,
+          "private_commit_bytes": 204587008
+        }
+      ],
+      "pid": 18756,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 193470464.0,
+        "private_working_set_bytes": 160010240.0,
+        "private_commit_bytes": 204587008.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "markdown",
+      "repeat": 1,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 0.516,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 1.016,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 1.516,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 2.032,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 2.532,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 3.047,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 3.547,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 4.063,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 4.563,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 5.063,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 5.578,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 6.078,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 6.594,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 7.094,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 7.61,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 8.11,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 8.61,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 9.125,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        },
+        {
+          "seconds": 9.625,
+          "working_set_bytes": 321515520,
+          "private_working_set_bytes": 287846400,
+          "private_commit_bytes": 337752064
+        }
+      ],
+      "pid": 11228,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 321515520.0,
+        "private_working_set_bytes": 287846400.0,
+        "private_commit_bytes": 337752064.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "blank",
+      "repeat": 2,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 0.5,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 1.016,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 1.516,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 2.032,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 2.532,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 3.032,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 3.547,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 4.047,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 4.547,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 5.063,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 5.563,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 6.079,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 6.579,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 7.094,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 7.594,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 8.11,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 8.61,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 9.11,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        },
+        {
+          "seconds": 9.625,
+          "working_set_bytes": 50610176,
+          "private_working_set_bytes": 17317888,
+          "private_commit_bytes": 21958656
+        }
+      ],
+      "pid": 10800,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 50610176.0,
+        "private_working_set_bytes": 17317888.0,
+        "private_commit_bytes": 21958656.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "small_tabs",
+      "repeat": 2,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 59666432,
+          "private_working_set_bytes": 23552000,
+          "private_commit_bytes": 29978624
+        },
+        {
+          "seconds": 0.516,
+          "working_set_bytes": 60059648,
+          "private_working_set_bytes": 23945216,
+          "private_commit_bytes": 33509376
+        },
+        {
+          "seconds": 1.016,
+          "working_set_bytes": 60067840,
+          "private_working_set_bytes": 23953408,
+          "private_commit_bytes": 32935936
+        },
+        {
+          "seconds": 1.516,
+          "working_set_bytes": 60059648,
+          "private_working_set_bytes": 23945216,
+          "private_commit_bytes": 32849920
+        },
+        {
+          "seconds": 2.031,
+          "working_set_bytes": 60198912,
+          "private_working_set_bytes": 24084480,
+          "private_commit_bytes": 33013760
+        },
+        {
+          "seconds": 2.531,
+          "working_set_bytes": 60907520,
+          "private_working_set_bytes": 24793088,
+          "private_commit_bytes": 38653952
+        },
+        {
+          "seconds": 3.031,
+          "working_set_bytes": 60678144,
+          "private_working_set_bytes": 24563712,
+          "private_commit_bytes": 36593664
+        },
+        {
+          "seconds": 3.547,
+          "working_set_bytes": 60334080,
+          "private_working_set_bytes": 24219648,
+          "private_commit_bytes": 33587200
+        },
+        {
+          "seconds": 4.047,
+          "working_set_bytes": 60583936,
+          "private_working_set_bytes": 24469504,
+          "private_commit_bytes": 34385920
+        },
+        {
+          "seconds": 4.562,
+          "working_set_bytes": 60813312,
+          "private_working_set_bytes": 24698880,
+          "private_commit_bytes": 33357824
+        },
+        {
+          "seconds": 5.062,
+          "working_set_bytes": 60514304,
+          "private_working_set_bytes": 24399872,
+          "private_commit_bytes": 32522240
+        },
+        {
+          "seconds": 5.578,
+          "working_set_bytes": 60567552,
+          "private_working_set_bytes": 24453120,
+          "private_commit_bytes": 32743424
+        },
+        {
+          "seconds": 6.078,
+          "working_set_bytes": 60637184,
+          "private_working_set_bytes": 24522752,
+          "private_commit_bytes": 34140160
+        },
+        {
+          "seconds": 6.594,
+          "working_set_bytes": 60620800,
+          "private_working_set_bytes": 24506368,
+          "private_commit_bytes": 33239040
+        },
+        {
+          "seconds": 7.094,
+          "working_set_bytes": 59994112,
+          "private_working_set_bytes": 23879680,
+          "private_commit_bytes": 30048256
+        },
+        {
+          "seconds": 7.609,
+          "working_set_bytes": 60411904,
+          "private_working_set_bytes": 24297472,
+          "private_commit_bytes": 33239040
+        },
+        {
+          "seconds": 8.109,
+          "working_set_bytes": 60313600,
+          "private_working_set_bytes": 24199168,
+          "private_commit_bytes": 32477184
+        },
+        {
+          "seconds": 8.625,
+          "working_set_bytes": 60096512,
+          "private_working_set_bytes": 23982080,
+          "private_commit_bytes": 31219712
+        },
+        {
+          "seconds": 9.125,
+          "working_set_bytes": 60096512,
+          "private_working_set_bytes": 23982080,
+          "private_commit_bytes": 31219712
+        },
+        {
+          "seconds": 9.625,
+          "working_set_bytes": 60657664,
+          "private_working_set_bytes": 24543232,
+          "private_commit_bytes": 35311616
+        }
+      ],
+      "pid": 3376,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 60372992.0,
+        "private_working_set_bytes": 24258560.0,
+        "private_commit_bytes": 33126400.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "markdown",
+      "repeat": 2,
+      "samples": [
+        {
+          "seconds": 0.015,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 0.515,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 1.031,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 1.531,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 2.047,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 2.547,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 3.047,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 3.562,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 4.062,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 4.562,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 5.078,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 5.578,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 6.078,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 6.593,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 7.093,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 7.609,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 8.109,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 8.625,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 9.125,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        },
+        {
+          "seconds": 9.64,
+          "working_set_bytes": 321892352,
+          "private_working_set_bytes": 288219136,
+          "private_commit_bytes": 338198528
+        }
+      ],
+      "pid": 10816,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 321892352.0,
+        "private_working_set_bytes": 288219136.0,
+        "private_commit_bytes": 338198528.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "plain",
+      "repeat": 2,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 0.516,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 1.016,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 1.532,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 2.032,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 2.547,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 3.047,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 3.547,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 4.063,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 4.563,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 5.078,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 5.578,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        },
+        {
+          "seconds": 6.078,
+          "working_set_bytes": 193867776,
+          "private_working_set_bytes": 160944128,
+          "private_commit_bytes": 203022336
+        }
+      ],
+      "pid": 2740,
+      "dpi": 120,
+      "client_pixels": [
+        1041,
+        773
+      ],
+      "title": "EUI-Edits",
+      "error": "RuntimeError('Owned foreground lost')",
+      "exit_code": 0
+    },
+    {
+      "scenario": "plain",
+      "repeat": 2,
+      "samples": [
+        {
+          "seconds": 0.016,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 0.516,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 1.031,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 1.531,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 2.031,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 2.547,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 3.047,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 3.562,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 4.062,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 4.578,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 5.078,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 5.578,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 6.094,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 6.594,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 7.094,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 7.609,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 8.109,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 8.625,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 9.125,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        },
+        {
+          "seconds": 9.625,
+          "working_set_bytes": 192962560,
+          "private_working_set_bytes": 159485952,
+          "private_commit_bytes": 202592256
+        }
+      ],
+      "evidence_directory": "plain-2-retry-8",
+      "pid": 21424,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 192962560.0,
+        "private_working_set_bytes": 159485952.0,
+        "private_commit_bytes": 202592256.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "blank",
+      "repeat": 3,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 0.516,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 1.016,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 1.531,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 2.031,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 2.531,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 3.047,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 3.547,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 4.047,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 4.563,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 5.063,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 5.578,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 6.078,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 6.594,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 7.094,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 7.594,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 8.11,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 8.61,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 9.125,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        },
+        {
+          "seconds": 9.625,
+          "working_set_bytes": 50987008,
+          "private_working_set_bytes": 17678336,
+          "private_commit_bytes": 23248896
+        }
+      ],
+      "evidence_directory": "blank-3",
+      "pid": 20812,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 50987008.0,
+        "private_working_set_bytes": 17678336.0,
+        "private_commit_bytes": 23248896.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "small_tabs",
+      "repeat": 3,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 60682240,
+          "private_working_set_bytes": 24567808,
+          "private_commit_bytes": 33824768
+        },
+        {
+          "seconds": 0.515,
+          "working_set_bytes": 60329984,
+          "private_working_set_bytes": 24215552,
+          "private_commit_bytes": 34459648
+        },
+        {
+          "seconds": 1.015,
+          "working_set_bytes": 60878848,
+          "private_working_set_bytes": 24764416,
+          "private_commit_bytes": 36810752
+        },
+        {
+          "seconds": 1.515,
+          "working_set_bytes": 60477440,
+          "private_working_set_bytes": 24363008,
+          "private_commit_bytes": 34279424
+        },
+        {
+          "seconds": 2.031,
+          "working_set_bytes": 60940288,
+          "private_working_set_bytes": 24825856,
+          "private_commit_bytes": 40087552
+        },
+        {
+          "seconds": 2.531,
+          "working_set_bytes": 61034496,
+          "private_working_set_bytes": 24920064,
+          "private_commit_bytes": 38092800
+        },
+        {
+          "seconds": 3.047,
+          "working_set_bytes": 60628992,
+          "private_working_set_bytes": 24514560,
+          "private_commit_bytes": 35266560
+        },
+        {
+          "seconds": 3.547,
+          "working_set_bytes": 60485632,
+          "private_working_set_bytes": 24371200,
+          "private_commit_bytes": 33214464
+        },
+        {
+          "seconds": 4.047,
+          "working_set_bytes": 60887040,
+          "private_working_set_bytes": 24772608,
+          "private_commit_bytes": 34955264
+        },
+        {
+          "seconds": 4.562,
+          "working_set_bytes": 60805120,
+          "private_working_set_bytes": 24690688,
+          "private_commit_bytes": 33873920
+        },
+        {
+          "seconds": 5.062,
+          "working_set_bytes": 60948480,
+          "private_working_set_bytes": 24834048,
+          "private_commit_bytes": 34246656
+        },
+        {
+          "seconds": 5.562,
+          "working_set_bytes": 60686336,
+          "private_working_set_bytes": 24571904,
+          "private_commit_bytes": 33964032
+        },
+        {
+          "seconds": 6.078,
+          "working_set_bytes": 60252160,
+          "private_working_set_bytes": 24137728,
+          "private_commit_bytes": 31522816
+        },
+        {
+          "seconds": 6.578,
+          "working_set_bytes": 60821504,
+          "private_working_set_bytes": 24707072,
+          "private_commit_bytes": 38612992
+        },
+        {
+          "seconds": 7.093,
+          "working_set_bytes": 60338176,
+          "private_working_set_bytes": 24223744,
+          "private_commit_bytes": 35041280
+        },
+        {
+          "seconds": 7.593,
+          "working_set_bytes": 60379136,
+          "private_working_set_bytes": 24264704,
+          "private_commit_bytes": 33353728
+        },
+        {
+          "seconds": 8.093,
+          "working_set_bytes": 60272640,
+          "private_working_set_bytes": 24158208,
+          "private_commit_bytes": 32493568
+        },
+        {
+          "seconds": 8.609,
+          "working_set_bytes": 60346368,
+          "private_working_set_bytes": 24231936,
+          "private_commit_bytes": 32505856
+        },
+        {
+          "seconds": 9.109,
+          "working_set_bytes": 60506112,
+          "private_working_set_bytes": 24391680,
+          "private_commit_bytes": 32841728
+        },
+        {
+          "seconds": 9.609,
+          "working_set_bytes": 60878848,
+          "private_working_set_bytes": 24764416,
+          "private_commit_bytes": 34275328
+        }
+      ],
+      "evidence_directory": "small_tabs-3",
+      "pid": 8364,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 60655616.0,
+        "private_working_set_bytes": 24541184.0,
+        "private_commit_bytes": 34260992.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "plain",
+      "repeat": 3,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 0.515,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 1.015,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 1.531,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 2.031,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 2.547,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 3.047,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 3.562,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 4.062,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 4.578,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 5.078,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 5.594,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 6.094,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 6.609,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 7.109,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 7.625,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 8.125,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 8.64,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 9.14,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        },
+        {
+          "seconds": 9.656,
+          "working_set_bytes": 193613824,
+          "private_working_set_bytes": 160149504,
+          "private_commit_bytes": 203825152
+        }
+      ],
+      "evidence_directory": "plain-3",
+      "pid": 19596,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 193613824.0,
+        "private_working_set_bytes": 160149504.0,
+        "private_commit_bytes": 203825152.0
+      },
+      "exit_code": 0
+    },
+    {
+      "scenario": "markdown",
+      "repeat": 3,
+      "samples": [
+        {
+          "seconds": 0.0,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 0.5,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 1.015,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 1.515,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 2.031,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 2.531,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 3.047,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 3.547,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 4.047,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 4.562,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 5.062,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 5.578,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 6.078,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 6.594,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 7.094,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 7.594,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 8.109,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 8.609,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 9.125,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        },
+        {
+          "seconds": 9.625,
+          "working_set_bytes": 320696320,
+          "private_working_set_bytes": 287035392,
+          "private_commit_bytes": 335667200
+        }
+      ],
+      "evidence_directory": "markdown-3",
+      "pid": 4236,
+      "dpi": 120,
+      "client_pixels": [
+        1262,
+        753
+      ],
+      "title": "EUI-Edits",
+      "process_count": 1,
+      "medians": {
+        "working_set_bytes": 320696320.0,
+        "private_working_set_bytes": 287035392.0,
+        "private_commit_bytes": 335667200.0
+      },
+      "exit_code": 0
+    }
+  ],
+  "resume_dates": [
+    "2026-10-05T09:34:39.976074+08:00"
+  ],
+  "summary": {
+    "blank": {
+      "working_set_bytes": {
+        "median_bytes": 50987008.0,
+        "min_bytes": 50610176,
+        "max_bytes": 51462144
+      },
+      "private_working_set_bytes": {
+        "median_bytes": 17596416.0,
+        "min_bytes": 17317888,
+        "max_bytes": 17678336
+      },
+      "private_commit_bytes": {
+        "median_bytes": 23056384.0,
+        "min_bytes": 21958656,
+        "max_bytes": 23248896
+      }
+    },
+    "small_tabs": {
+      "working_set_bytes": {
+        "median_bytes": 60655616.0,
+        "min_bytes": 59666432,
+        "max_bytes": 61034496
+      },
+      "private_working_set_bytes": {
+        "median_bytes": 24541184.0,
+        "min_bytes": 23552000,
+        "max_bytes": 24920064
+      },
+      "private_commit_bytes": {
+        "median_bytes": 33736704.0,
+        "min_bytes": 29978624,
+        "max_bytes": 40087552
+      }
+    },
+    "plain": {
+      "working_set_bytes": {
+        "median_bytes": 193470464.0,
+        "min_bytes": 192962560,
+        "max_bytes": 193613824
+      },
+      "private_working_set_bytes": {
+        "median_bytes": 160010240.0,
+        "min_bytes": 159485952,
+        "max_bytes": 160149504
+      },
+      "private_commit_bytes": {
+        "median_bytes": 203825152.0,
+        "min_bytes": 202592256,
+        "max_bytes": 204587008
+      }
+    },
+    "markdown": {
+      "working_set_bytes": {
+        "median_bytes": 321515520.0,
+        "min_bytes": 320696320,
+        "max_bytes": 321892352
+      },
+      "private_working_set_bytes": {
+        "median_bytes": 287846400.0,
+        "min_bytes": 287035392,
+        "max_bytes": 288219136
+      },
+      "private_commit_bytes": {
+        "median_bytes": 337752064.0,
+        "min_bytes": 335667200,
+        "max_bytes": 338198528
+      }
+    }
+  },
+  "complete": true
+}
