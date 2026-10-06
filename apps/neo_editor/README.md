@@ -26,6 +26,6 @@ Targets Windows x64 and uses Win32 and Direct2D; the release package statically 
 
 ## 版本与发布 / Version and release
 
-0.1.0 已发布，版本变化见[发布说明](RELEASE-NOTES.md)。构建与检查入口见[仓库 README](../../README.md#开发)，历史构建与验收记录见[发布构建说明](../../docs/NeoEditor-发布构建说明-2026-10-02.md)。内部 CMake 版本变量仍叫 `NEO_EDITOR_VERSION`，用于生成程序版本头文件和 PE 资源；本 README 是静态文档，构建不会替换其内容。
+0.1.0 已发布，版本变化见[发布说明](RELEASE-NOTES.md)。当前构建与检查入口见[仓库 README](../../README.md#开发)。本目录与 CMake 目标 `neo_editor` 保留内部标识，产品和发行文件使用 EUI-Edits 名称；[历史发布构建说明](../../docs/NeoEditor-发布构建说明-2026-10-02.md)中的旧名称和绝对路径仅作参考，当前打包配置以脚本为准。
 
-0.1.0 is released; see the [release notes](RELEASE-NOTES.md) for version changes. Build and check commands are in the [repository README](../../README_EN.md#development); historical build and acceptance records are in the [release build guide](../../docs/NeoEditor-发布构建说明-2026-10-02.md). The internal CMake version variable remains `NEO_EDITOR_VERSION` and generates the program's version header and PE resources. This README is a static document and is not substituted during the build.
+0.1.0 is released; see the [release notes](RELEASE-NOTES.md) for version changes. Current build and check commands are in the [repository README](../../README_EN.md#development). This folder and the CMake target `neo_editor` retain internal identifiers; the product and release files use EUI-Edits. Old names and absolute paths in the [historical release build guide](../../docs/NeoEditor-发布构建说明-2026-10-02.md) are references only; the scripts define the current package configuration.

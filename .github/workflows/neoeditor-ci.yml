@@ -1,4 +1,4 @@
-name: NeoEditor Windows checks
+name: EUI-Edits Windows checks
 
 on:
   push:
@@ -56,6 +56,6 @@ jobs:
         run: ./scripts/package-neoeditor.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE/out/neoeditor-ci"
       - uses: actions/upload-artifact@v6
         with:
-          name: NeoEditor-windows-x64-candidate
+          name: EUI-Edits-windows-x64-candidate
           path: out/neoeditor-ci/*
           if-no-files-found: error

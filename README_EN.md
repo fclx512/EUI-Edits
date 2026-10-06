@@ -2,7 +2,9 @@
 
 [简体中文](README.md) · English
 
-EUI-Edits is a native Windows notepad built around low resource use and a modern UI. Alongside simple text editing, it offers Obsidian-style live Markdown rendering and in-place editing: formatting follows your input, and reading and editing stay in the same view.
+EUI-Edits is a lightweight native text and Markdown editor for Windows, suited to everyday notes, document writing, and simple edits to source code and configuration files. Markdown is rendered live and edited in place, so formatting follows your input without switching between source and preview.
+
+Built with C++, Win32, and Direct2D, it redraws on demand and embeds no WebView. The install-free release is a single EXE with multiple tabs, a local document library, and recovery of unsaved content.
 
 ## Interface preview
 
@@ -10,230 +12,136 @@ EUI-Edits is a native Windows notepad built around low resource use and a modern
 
 ![Multi-tab editing with syntax coloring in the dark theme](docs/screenshots/code-dark.png)
 
-The application icon and the document icons for Markdown, text, code, data, and other files share one coordinated, hand-drawn design:
+The application icon and document icons for Markdown, text, code, data, and other files share one design:
 
 ![Application icon (top) and the five document icons (bottom)](docs/screenshots/icons-overview.png)
 
 ## The editing experience
 
-- **Markdown, rendered as you write.** Common headings, emphasis, links, lists, task lists, blockquotes, code blocks, and tables update in place. The editing region shows the Markdown source, so reading and editing never leave the document.
-- **Multi-tab editing.** Keep multiple documents open at once; each tab independently preserves its caret, selection, undo history, folds, and document-library view. After an abnormal exit, unsaved drafts are restored tab by tab and never silently overwrite the original files.
-- **A local document library.** Lists every file in the chosen folder, including hidden and extensionless files; opened documents are marked with a dot, and `F2` renames the focused item. Scanning runs in the background and refreshes automatically when the folder changes. It reads file and directory metadata only—never the contents of unopened files.
-- **Simple editing for all kinds of text.** Open Markdown, plain text, source code, and data files. Recognized formats get basic syntax coloring, and "Syntax mode…" switches how the current document is presented; other text stays plain.
+- **Markdown as you write.** Headings, lists, blockquotes, code blocks, and tables appear directly in the document; the active editing region shows source text. Links are clickable, tasks can be checked, and local images open a preview with zoom and pan.
+- **Multiple tabs.** Each tab preserves its caret, selection, undo history, folds, and library view. Opening the same file locates its existing tab; launching the app again forwards file requests to the running window.
+- **A local document library.** Browse a folder in the sidebar, including hidden and extensionless files. Opened files are marked with a dot, and `F2` renames items. Directory scanning runs in the background and refreshes on changes; document contents load only when opened.
+- **Editing across text formats.** Open Markdown, plain text, source code, and data files. Recognized formats receive basic syntax coloring; "Syntax mode…" changes the presentation manually. Find and replace, word wrap, and line numbers support everyday editing.
+- **Saving and recovery.** Saving preserves the original encoding, BOM, and line endings and checks for external changes. Unsaved content is copied periodically for recovery; after an abnormal exit, it can return as separate drafts for review and manual saving.
 
-The interface is built with C++, Win32, and Direct2D, redraws on demand, embeds no WebView, and runs as a single instance—opening a file again forwards it to the running window.
+## Markdown support
 
-## Markdown syntax support
-
-| Syntax | Support |
+| Syntax | Current behavior |
 | --- | --- |
-| Headings (`#` and underline style), paragraphs | ✅ Rendered live, edited in place |
-| Bold, italic, inline code, strikethrough, underline (`_.._`) | ✅ |
-| Links and wiki links (`[[...]]`) | ✅ Clickable navigation |
-| Ordered / unordered lists, blockquotes (up to four levels) | ✅ |
-| Task lists | ✅ Click to check off |
-| Fenced code blocks, tables, dividers, frontmatter | ✅ |
-| Local images (on their own line) | ✅ Rendered; click to open the preview |
-| Inline math `$...$` | ⚠️ Presented like code; no formula typesetting |
-| HTML | ⚠️ Not executed; kept as source text |
-| Formula typesetting (LaTeX), remote images | ❌ Out of scope; the source stays editable |
-| Highlights `==...==`, comments `%%...%%`, footnotes, callouts, tags | ❌ Not yet supported; shown as plain text |
+| Headings (`#` and underline style), paragraphs | ✅ Live rendering and in-place editing |
+| Bold, italic, inline code, strikethrough, underline (`_.._`) | ✅ Supported |
+| Links, wiki links (`[[...]]`) | ✅ Clickable navigation |
+| Ordered / unordered lists, tasks, blockquotes | ✅ Supported; tasks are clickable, blockquotes nest up to four levels |
+| Fenced code blocks, tables, dividers, frontmatter | ✅ Supported |
+| Local images on their own line | ✅ Rendered; click to preview |
+| Inline math `$...$`, HTML | ⚠️ Math uses code styling; HTML stays as source and is not executed |
+| Formula typesetting, remote images, highlights, comments, footnotes, callouts, tags | ❌ Not yet supported; source remains editable |
 
-## Low resource use
+Markdown covers common writing syntax and some extensions; full Obsidian compatibility is not guaranteed.
 
-EUI-Edits is built with C++, Win32, and Direct2D, refreshes the UI on demand, and embeds no browser or WebView. The low footprint comes from a few design choices:
+## Getting started
 
-- **On-demand redraws.** Typing, scrolling, window changes, and interaction feedback drive updates; with feedback animations turned off, hover and press states no longer produce transition frames.
-- **Tab caches are reused.** When switching tabs and neither content nor presentation conditions changed, layout and highlighting results are reused; caches are kept within a budget, and exceeding it releases the least-recently-used derived data while documents, carets, and undo state stay intact.
-- **Directory scanning and content reading are separate.** The document library scans file and directory metadata in the background, and multiple tabs can share one folder's scan result; content loads only when a file is opened—the whole folder is never read into the editor.
+Download `EUI-Edits-0.1.0-windows-x64.exe` from the [0.1.0 release page](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.0), put it where you plan to keep it, and run it directly. No resource folder needs unpacking; the adjacent `.exe.sha256` file is available for verification. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing.
 
-**Memory measurements for the released 0.1.0 EXE (2026-10-05).** The tested executable matches the SHA256 on the [public release page](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.0). Measurements use Windows 11 and the current Win32 / Direct2D default software rendering path, with no rendering overrides: light theme, 125% system scaling, editor font size 16 / UI font size 14, a 1262 × 753-pixel client area, word wrap and readable width enabled. Each scenario starts in a fresh profile three times. After the window finishes loading, it idles for 10 seconds, followed by 20 samples at 0.5-second intervals. Each table entry is the median of the three per-run sample medians, in **MiB (1 MiB = 1,048,576 bytes)**.
+### Common actions
+
+| Action | Shortcut / method |
+| --- | --- |
+| New text / open file | `Ctrl+N` / `Ctrl+O`; files can also be dropped into the window |
+| New Markdown | "File → New → Markdown" |
+| Save / Save As | `Ctrl+S` / `Ctrl+Shift+S` |
+| Close current tab | `Ctrl+W`; modified content prompts for save, discard, or cancel |
+| Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Go to tab | `Ctrl+1`–`Ctrl+8` select the matching tab, `Ctrl+9` the last |
+| Find / replace | `Ctrl+F` / `Ctrl+H` |
+| Next / previous match | With the find bar open: `F3` / `Shift+F3`, or `Ctrl+G` / `Ctrl+Shift+G` |
+| Open library / rename | "File → Open folder…"; focus a sidebar item and press `F2` |
+| Settings | "View → Settings…" or `Ctrl+,` |
+
+A new document's first save chooses its name and location. For garbled text, choose "File → Reopen with encoding". A failed save, an unrepresentable character, or a cancelled save keeps the document content and does not silently replace the original file.
+
+In image preview, use the wheel to zoom, middle-drag to pan, and left-click or `Esc` to close.
+
+### Settings, recovery, and file associations
+
+Settings live in the current Windows user's profile and do not move with the EXE:
+
+| Location | Contents |
+| --- | --- |
+| `%APPDATA%\EUI-Edits\settings.ini` | Appearance, fonts, layout, recent files, and other preferences |
+| `%APPDATA%\EUI-Edits\session` | Tab sessions and recovery copies of unsaved content |
+| `%APPDATA%\EUI-Edits\themes` | Local themes in the theme library |
+
+After an abnormal exit, recovered content opens as separate drafts without automatically overwriting original files. A normal exit clears the recovery session after save or discard confirmations, so all tabs do not automatically reopen next time. Recovery copies are periodic, not per-keystroke saves; save important work yourself.
+
+"Settings → Files & system" registers Open-with entries for the current user, initially selecting TXT and Markdown. Choose the default app separately in Windows. Moving or renaming the EXE requires registering associations again. Script files are edited as text; their code is not executed.
+
+## Appearance and personalization
+
+Most settings take effect immediately and persist across launches:
+
+| Option | Choices |
+| --- | --- |
+| Language and theme | 简体中文 / English; follow the system theme or choose light / dark |
+| Fonts | Separate body, code, and UI fonts; import `.ttf`, `.otf`, or `.ttc`; code fonts are checked for monospace |
+| Sizes and scaling | Body size 12–32, UI size 12–18; extra scaling of 80%–200% on top of system DPI |
+| Reading layout | Line numbers, status bar, word wrap; readable width narrows and centers the content |
+| Library and animations | Simple / library view; hover and press animations can be disabled |
+
+The status bar shows file location, syntax mode, encoding, line endings, line count, and character count, with controls for syntax mode and word wrap; some information collapses in narrow windows. Fonts come from your machine or imports; the release ships no font files.
+
+**Local theme import is a beta feature.** Choose JSON or CSS under "Appearance → Theme file (beta) → Theme library…", or place files in the `themes` folder above. For Obsidian themes, select `manifest.json` with a sibling `theme.css`, or select CSS directly. Import maps recognizable colors only, never executes CSS, and does not promise the original layout or plugin styles. Built-in colors remain available.
+
+## Resource use
+
+The UI redraws on demand. Tab switches reuse layout and highlighting where possible, with less-used derived data released when cache budgets are exceeded. The library scans metadata without loading every document. Disabling interaction animations removes hover and press transition frames.
+
+These are **idle memory measurements of the released 0.1.0 EXE on 2026-10-05**, in MiB: Windows 11, default Win32 / Direct2D software rendering, light theme, 125% system scaling, word wrap and readable width enabled. Each scenario starts three times in separate profiles, idles for 10 seconds after loading, then collects 20 samples per run. Entries are the median of the per-run medians.
 
 | Scenario | Total working set | Private working set | Private commit |
 | --- | ---: | ---: | ---: |
 | Empty document, one tab | 48.6 | 16.8 | 22.0 |
-| Three small Markdown tabs, 2,580 bytes in total, idle after visiting each tab | 57.8 | 23.4 | 32.2 |
+| Three small Markdown tabs, 2,580 bytes total, idle after visiting each | 57.8 | 23.4 | 32.2 |
 | 9 MiB plain text, 73,728 file lines | 184.5 | 152.6 | 194.4 |
-| 9 MiB Markdown, 73,728 file lines, with a list item, bold text and inline code on every line | 306.6 | 274.5 | 322.1 |
+| 9 MiB Markdown, same line count, with a list item, emphasis, and inline code on every line | 306.6 | 274.5 | 322.1 |
 
-The counters come from the tested EXE's single process, using Windows `GetProcessMemoryInfo` / `PROCESS_MEMORY_COUNTERS_EX2`; the sampling script is excluded. **Total working set** counts process pages currently resident in RAM, including shareable pages. **Private working set** is the non-shareable part of that working set. **Private commit** counts the process's committed private memory, which need not all be resident in RAM. The three columns must not be added together or used interchangeably. See [Microsoft's field definitions](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex2) and the [measurement record](docs/内存实测-2026-10-05.md) for individual runs, observed ranges, file characteristics and reproduction commands.
+Total working set counts process pages currently in RAM; private working set is its non-shareable part. Private commit need not all be resident in RAM. These columns cannot be added together or used interchangeably; 1 MiB = 1,048,576 bytes. See the [measurement record](docs/内存实测-2026-10-05.md) for full conditions, the EXE hash, raw data, and reproduction steps.
 
-Process memory includes more than the text file itself. The source confirms these categories:
-
-- **UI and rendering overhead.** Windows, font measurements, drawing buffers and graphics resources, plus resident pages from the executable and system DLLs. An empty document therefore still uses memory.
-- **Text and editing state.** The document model, editing state and layout caches retain text data; reading, decoding and saving may also need temporary buffers. Undo and redo retain inserted or removed text ranges, so large edits can increase history storage.
-- **Layout and syntax data.** Line indexes, text measurements, caret positions, wrapped lines, Markdown parsing and decorations, table geometry, or source highlighting. Both line count and syntax structure affect the cost; equally sized files need not use equal memory.
-- **Tab, directory and image caches.** Tabs retain documents and some presentation caches; the library retains directory trees and path metadata. Images are decoded into pixels and retain rendering resources, so compressed file size is not decoded memory size. Derived-cache budgets exclude some text, undo history and active resources; they are not process memory limits.
-
-These are source-based categories, not a measured allocation breakdown. The scenarios contain no images and include no editing or saving; GPU / driver memory and the system file cache were not measured separately. These are idle readings under the stated conditions, not startup or interaction peaks or fixed ceilings. The earlier "about 68 MB for a 9 MB text document" lacked a verifiable line count and complete test conditions; it has been replaced and is not used to infer an increase or decrease between versions.
-
-## Appearance and personalization
-
-Open Settings from "View → Settings…" or `Ctrl+,`. Appearance, editing, files, and system options are configured separately; most adjustments take effect immediately and are saved for the next launch.
-
-| Option | How it works |
-| --- | --- |
-| Interface language | Follow the system or fix to 简体中文 / English; the interface language is set separately from a document's syntax coloring. |
-| Light / dark theme | Follow system, light, or dark. First launch follows the Windows app theme; while following, system light/dark changes apply to the program live. |
-| Fonts | "Appearance → Choose fonts" sets body, code, and UI fonts separately. Body covers editing and Markdown reading, code covers code blocks and inline code, and UI covers menus, the sidebar, and the status bar. |
-| Font sizes | Editor size 12–32 and UI size 12–18 adjust independently; "View → Font size" also switches the editor size quickly. |
-| UI scaling | An extra 80%–200% on top of the Windows display scale. 100% means no extra scaling while still honoring system DPI. |
-| Reading and editing layout | Show or hide line numbers and the status bar, toggle word wrap; "Readable line width" narrows and centers the content column, handy for reading Markdown in wide windows. |
-| Library layout | "View → Layout" switches between the simple view and the library view with a file sidebar. |
-| Interaction animations | Turn hover/press feedback animations on or off. First launch uses the Windows animation preference; the in-app choice is remembered afterwards. |
-
-The font list comes from the local machine, and "Import font" accepts `.ttf`, `.otf`, or `.ttc` files; code fonts are checked for monospace. The program uses system fonts and hand-drawn UI icons, so the release package ships no font files.
-
-The status bar shows the current file name and location, the document's syntax mode, encoding, line endings, line count, and character count; clicking the syntax mode switches how the document is presented, and word wrap has its own toggle. When the window is narrow, some items collapse to fit.
-
-**Local theme import is still a beta feature.** Under "Appearance → Theme file (beta) → Theme library…", pick a local JSON or CSS file, or drop themes into `%APPDATA%\EUI-Edits\themes` and apply them from the library. Obsidian themes can be imported via their `manifest.json` (with `theme.css` in the same folder) or by selecting the CSS directly. Import maps recognizable color variables only; it never executes CSS and does not promise to reproduce the original theme's layout or plugin styles. The first entry in the library restores the built-in colors.
-
-## Getting started
-
-### Opening and saving documents
-
-The current public release is [EUI-Edits 0.1.0](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.0); download the EXE and SHA256 file from its release page.
-
-The release ships as a single `EUI-Edits-<version>-windows-x64.exe` with no installer or resource folder to unpack. Put the program where you plan to keep it and run it directly; if a `.exe.sha256` is provided alongside, use it to verify the file.
-
-1. **New:** choose "File → New → Text / Markdown". `Ctrl+N` creates a plain-text document; a new tab has no file on disk yet, and the first save picks its name and location.
-2. **Open:** use "File → Open…" or `Ctrl+O`, or drag files into the window. Documents open in tabs; opening the same file again locates its existing tab, and unsaved content in other tabs is preserved.
-3. **Save:** `Ctrl+S` saves the current tab, `Ctrl+Shift+S` is Save As. Existing files keep the encoding, BOM, and line endings they were read with; if the encoding cannot represent newly typed characters, an error is shown and the original file is left untouched.
-4. **Close:** `Ctrl+W` closes the current tab. Closing a modified tab or exiting the program asks whether to save, discard, or cancel; a failed save or a cancelled prompt never discards the content outright.
-
-If text shows up garbled, use "File → Reopen with encoding" to pick the right encoding. When files change in other programs, EUI-Edits checks for conflicts during the save flow so stale content never silently overwrites the newer file on disk.
-
-The program runs as a single instance by default. Launching it again with a file hands the request to the existing window, which opens or locates the document there.
-
-### Browsing files and common actions
-
-Choose "File → Open folder…" to pick a directory, or switch to the library view from "View → Layout". The file sidebar lists the folder structure and its files; content loads only when a file is opened. Press `F2` on a focused file or folder in the sidebar to rename it. Opened documents are marked with a dot, and the current document gets an additional selection highlight.
-
-| Action | Shortcut / method |
-| --- | --- |
-| New text / open file | `Ctrl+N` / `Ctrl+O` |
-| Save / Save As | `Ctrl+S` / `Ctrl+Shift+S` |
-| Close current tab | `Ctrl+W` |
-| Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
-| Go to tab | `Ctrl+1`–`Ctrl+8` pick the matching tab, `Ctrl+9` the last |
-| Find / replace | `Ctrl+F` / `Ctrl+H` |
-| Next / previous match | With the find bar open, `F3` / `Shift+F3`, or `Ctrl+G` / `Ctrl+Shift+G` |
-| Rename sidebar item | Focus the item in the library list and press `F2` |
-| Open settings | `Ctrl+,` |
-
-Click a local image inside Markdown to preview it: wheel to zoom, middle-drag to pan, left-click or `Esc` to close.
-
-### Settings and recovery drafts
-
-The program is install-free, but settings live in the current Windows user's profile directory and do not travel with the EXE:
-
-| Location | Contents |
-| --- | --- |
-| `%APPDATA%\EUI-Edits\settings.ini` | Preferences: appearance, fonts, layout, recent files, and more |
-| `%APPDATA%\EUI-Edits\session` | Tab sessions and recovery copies of unsaved content |
-| `%APPDATA%\EUI-Edits\themes` | Local themes listed by the theme library |
-
-Unsaved content is written to recovery copies periodically. After an abnormal exit, the next launch can restore them as separate drafts; the recovery flow never overwrites the original files automatically—review the content and save manually. A normal exit clears the session once saves or discard confirmations complete, so the same set of tabs will not reopen next time. Recovery copies are not instant per-keystroke saves; for important work, still press `Ctrl+S` yourself.
-
-### File associations
-
-Under "Settings → Files & system", choose the file types to add to Windows' "Open with". Before any association is registered, TXT and Markdown are preselected; other types, including BAT, CMD, PowerShell, and Python, can be checked as needed.
-
-Applying the selection only registers Open-with entries for the current user; it never changes the Windows default app for you. To make EUI-Edits the double-click default, choose it in Windows Settings or the file's "Open with" dialog. Association records point at the EXE's location, so moving or renaming the program requires registering again. Script files are edited as text—the program never executes their code.
-
-## Development
-
-### Build environment
-
-The commands below build the Windows x64 Win32 / Direct2D version. The application code lives in `apps/neo_editor`; the build entry point is the root [`CMakeLists.txt`](CMakeLists.txt), and the target is `neo_editor`.
-
-The product name is **EUI-Edits**. The source directory `apps/neo_editor`, build target and local output `neo_editor` / `neo_editor.exe`, CMake option `EUI_BUILD_NEOEDITOR_ONLY`, version variable `NEO_EDITOR_VERSION`, and the check and packaging script names below retain their original internal identifiers. They match the current build interfaces, so use them as written. The packaging script names release files `EUI-Edits-<version>-windows-x64.exe`. `EUI-NEO` is the upstream UI framework's name.
-
-| Tool or component | Requirement and purpose |
-| --- | --- |
-| Windows | Building the x64 binaries requires Windows; the scripts below target MSVC. |
-| Visual Studio / Build Tools | VS 2022 or VS 2026 with the "Desktop development with C++" workload and the MSVC x64 tools. |
-| Windows SDK | Windows 10 or 11 SDK, providing Win32, Direct2D, and other system libraries plus the resource compiler `rc.exe`. |
-| CMake | **3.21+** for the VS 2022 generator; **4.2+** for the VS 2026 generator. The CMake bundled with Visual Studio works. |
-| PowerShell | The check and packaging scripts require **5.1 or later**; PowerShell 7 also works. |
-| Python 3 | Needed for the development checks; the translation check uses only the standard library. The app build and single-EXE packaging themselves do not depend on Python. |
-| `dumpbin.exe` | Required by the single-EXE packaging script; ships with the MSVC tools and checks architecture and DLL dependencies. |
-
-The project uses **C++17 / C99**. Third-party dependency sources are kept in-repo under `3rd/`, including FreeType, zlib, libpng, MD4C, and yyjson. The instructions below use `bundled` mode, which builds from the in-repo sources—no separate installation or network downloads at configure time. Keep the full `3rd/`, `assets/`, and app license directories.
-
-The root project declares a minimum CMake of 3.14, but the Visual Studio generators above have higher requirements; pick versions per the table when building. Generator version notes: [VS 2022](https://cmake.org/cmake/help/latest/generator/Visual%20Studio%2017%202022.html) and [VS 2026](https://cmake.org/cmake/help/latest/generator/Visual%20Studio%2018%202026.html) in the CMake documentation.
-
-### Building the app
-
-Open PowerShell at the repository root and make sure `cmake` is on PATH; alternatively use the Visual Studio Developer PowerShell, or add CMake's `bin` directory to PATH. The example below uses VS 2022 and configures only the editor and its link dependencies, with the same Win32 / Direct2D backend and static MSVC runtime as the standalone release configuration:
-
-```powershell
-cmake -S . -B build-editor -G "Visual Studio 17 2022" -A x64 `
-  -DEUI_BUILD_NEOEDITOR_ONLY=ON `
-  -DEUI_WINDOW_BACKEND=win32 -DEUI_RENDER_BACKEND=d2d `
-  -DEUI_DEPS_MODE=bundled -DEUI_BUILD_SHARED=OFF `
-  -DEUI_ENABLE_INSTALL=OFF -DEUI_ENABLE_MODULES=OFF `
-  -DEUI_BUILD_TEST_FIXTURES=OFF `
-  -DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE `
-  '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>'
-
-cmake --build build-editor --config Release --target neo_editor --parallel 2
-.\build-editor\Release\neo_editor.exe
-```
-
-With VS 2026, switch the generator to `Visual Studio 18 2026` and use a CMake that supports it. The output is `build-editor\Release\neo_editor.exe`; for a debug build, replace `Release` with `Debug` in the build command and find the output in the matching `Debug` directory.
-
-The backends are selected explicitly because the root project's defaults pull in the framework's default backend and configure other examples. `EUI_BUILD_NEOEDITOR_ONLY=ON` builds only this app; `EUI_BUILD_SHARED=OFF` statically links the framework, and the MSVC runtime option statically links the CRT. Do not treat an ordinary local build with other settings as a verified standalone release package.
-
-### Running the development checks
-
-From the repository root:
-
-```powershell
-.\scripts\check-neoeditor.ps1
-```
-
-The script runs the translation check first, then configures, builds, and executes the selected Win32 / Direct2D correctness tests in a fresh build directory, covering file and save safety, encodings, tab state, recovery storage, settings, file associations, theme loading, and cache scheduling.
-
-The script locates Visual Studio, CMake, and Python on PATH automatically; pass `-Generator`, `-CMake`, or `-Python` to specify them explicitly when lookup fails. `-BuildDirectory` may point to an output directory, but it must not exist yet—the script never clears or reuses an existing build directory. Performance measurement and real-window interaction acceptance are separate efforts; this script does not launch the app's UI.
-
-### Producing the single-EXE release package
-
-After the checks pass, use [`scripts/package-neoeditor.ps1`](scripts/package-neoeditor.ps1) to build and verify the release files:
-
-```powershell
-.\scripts\package-neoeditor.ps1 -Version 0.1.0
-```
-
-The script builds only the editor's Release x64 configuration, statically links the framework and MSVC runtime, embeds the icon and the full license texts, and verifies the PE version, system DLL dependencies, absence of development-directory paths, and license export from an empty-settings run. The default output is:
-
-```text
-out/euiedits-0.1.0-single-exe/
-  EUI-Edits-0.1.0-windows-x64.exe
-  EUI-Edits-0.1.0-windows-x64.exe.sha256
-```
-
-`-BuildDirectory` selects a fresh build directory, and `-OutputDirectory` selects an output directory that does not exist or is empty; pass `-CMake`, `-Dumpbin`, or `-Generator` when tool lookup fails. The script never overwrites previous release files, pushes the repository, or publishes a release. Packaging verification is not the same as full GUI acceptance: a freshly packaged EXE still needs its real open, edit, save, recovery, and exit flows checked.
+Line count, Markdown structure, undo history, tab caches, and decoded images also affect memory. These results exclude editing and saving and are neither interaction peaks nor fixed ceilings. Large files need not have the footprint of small documents.
 
 ## Current scope
 
-EUI-Edits targets browsing and editing of local text, Markdown, source code, and configuration files. It provides no knowledge-base management, code completion, build/debug tooling, or script execution. Markdown coverage is detailed in the syntax table above.
+EUI-Edits focuses on local text editing. It provides no knowledge-base management, code completion, build/debug tools, script execution, or presentation mode.
 
-| Area | Current support and limits |
+| Area | Support and limits |
 | --- | --- |
-| Platform | The release configuration targets **Windows 10/11 x64**. The released 0.1.0 EXE has had startup and memory measurements repeated on Windows 11; Windows 10 has not received equivalent on-machine testing. The program is currently unsigned. |
-| File size | The default open limit is **64 MiB**. Oversized files, suspected binaries, and files that cannot be decoded reliably raise an error instead of loading as text. |
-| Encodings and line endings | UTF-8, UTF-16 LE / BE, and Windows ANSI code pages are supported. Text is processed in a unified form internally and written back with the file's original encoding, BOM, and LF / CRLF characteristics; unrepresentable characters are never silently replaced. |
-| Markdown | Covers common syntax and part of the extensions; no LaTeX formula typesetting, no remote images, and no presentation mode. HTML is kept as source, not executed as a web page. |
-| Library scanning | Scans directory and file metadata, including hidden and extensionless files; file contents are never pre-loaded. The scan does not recurse into the targets of symbolic links or directory junctions, to avoid escaping the root or loops. |
-| Recovery capacity | Recovery records hold up to **256 tab entries**; recovery bodies are additionally bounded by per-file **256 MiB** and total **1 GiB** protection limits. These are recovery-storage boundaries, not recommended everyday document sizes. |
-| Recovery failures | A damaged manifest or missing body is kept as-is and reported instead of being overwritten automatically, preserving evidence for diagnosis; recovery may be unavailable in that case, but manual saving still works. |
-| Custom themes | Local theme import is a beta feature; color mapping and compatibility are limited and not yet at the intended reliability and fidelity. |
+| Files | Default open limit: **64 MiB**; oversized files, suspected binaries, and unreliable decoding are rejected |
+| Encodings | UTF-8, UTF-16 LE / BE, Windows ANSI code pages; saves preserve encoding, BOM, and LF / CRLF characteristics |
+| Library | Does not recurse into symbolic-link or junction targets; some explicit file operations refresh synchronously and may take time in large directories |
+| Recovery | Up to **256 tab entries**; recovery-body read limits of **256 MiB per file**, **1 GiB total**; damaged manifests or missing bodies are retained and reported, and recovery may be unavailable |
+
+## Development
+
+Building requires Windows, Visual Studio 2022 / 2026 or Build Tools with the C++ desktop workload and Windows SDK, a CMake version supporting that generator, and PowerShell 5.1+. Checks also need Python 3; packaging uses MSVC's `dumpbin.exe`. Dependency sources are included in the repository.
+
+Run from PowerShell at the repository root:
+
+```powershell
+# Translation and selected Win32 / Direct2D correctness checks
+.\scripts\check-neoeditor.ps1
+
+# Build Release x64 and produce a single EXE with its SHA256 file
+.\scripts\package-neoeditor.ps1 -Version 0.1.0
+```
+
+The output is `out/euiedits-0.1.0-single-exe/EUI-Edits-0.1.0-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
+
+Scripts locate tools automatically; override with `-CMake` or `-Generator`, plus `-Python` for checks or `-Dumpbin` for packaging. For another build, select a fresh package output with `-OutputDirectory`; existing release files are never overwritten. After moving the source tree, use a fresh build directory rather than a CMake cache containing old paths.
+
+The source folder `apps/neo_editor`, CMake target `neo_editor`, and script names above retain internal identifiers; the product and release files are named **EUI-Edits**. Additional packaging options and historical acceptance records are in the [release build guide](docs/NeoEditor-发布构建说明-2026-10-02.md). Its old names and absolute paths are historical references; the scripts define the current package configuration.
 
 ## License and credits
 
-EUI-Edits is built on [EUI-NEO](https://github.com/sudoevolve/EUI-NEO). The framework source is retained in this repository; the framework's upstream documentation lives in the [EUI-NEO repository](https://github.com/sudoevolve/EUI-NEO).
+EUI-Edits is built on [EUI-NEO](https://github.com/sudoevolve/EUI-NEO), whose source remains in this repository, under the [Apache-2.0 license](LICENSE). Application and document icons are project-drawn assets. Third-party libraries retain their licenses and attribution; see the [third-party notices](apps/neo_editor/THIRD-PARTY-NOTICES.md) and [LICENSES](apps/neo_editor/LICENSES). Font handling uses the work of the FreeType Team.
 
-The project follows the repository's [Apache-2.0 license](LICENSE). The application icon is a redrawn project asset with a dedicated 16px design. Third-party libraries and fonts keep their respective licenses and attribution; see the [third-party notices](apps/neo_editor/THIRD-PARTY-NOTICES.md) and [LICENSES](apps/neo_editor/LICENSES). EUI-Edits uses the work of the FreeType Team for font handling.
-
-The complete license and attribution texts are also embedded in the executable and can be viewed and exported from "Settings → About".
+Complete license and attribution texts are embedded in the EXE and available in "Settings → About" for viewing and export.

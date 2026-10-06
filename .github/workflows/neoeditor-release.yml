@@ -1,10 +1,10 @@
-name: NeoEditor release candidate
+name: EUI-Edits release candidate
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'NeoEditor product version (major.minor.patch[-prerelease])'
+        description: 'EUI-Edits product version (major.minor.patch[-prerelease])'
         required: true
         default: '0.1.0'
         type: string
@@ -35,7 +35,7 @@ jobs:
             $env:GITHUB_REF_NAME.Substring('neoeditor-v'.Length)
           } else { $env:INPUT_VERSION }
           if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') {
-            throw 'Invalid NeoEditor product version.'
+            throw 'Invalid EUI-Edits product version.'
           }
           "NEOEDITOR_VERSION=$version" >> $env:GITHUB_ENV
       - name: Check translations and Win32/Direct2D correctness
@@ -46,10 +46,10 @@ jobs:
         run: ./scripts/package-neoeditor.ps1 -Version $env:NEOEDITOR_VERSION -OutputDirectory "$env:GITHUB_WORKSPACE/dist/neoeditor"
       - uses: actions/upload-artifact@v6
         with:
-          name: NeoEditor-${{ env.NEOEDITOR_VERSION }}-windows-x64
+          name: EUI-Edits-${{ env.NEOEDITOR_VERSION }}-windows-x64
           path: dist/neoeditor/*
           if-no-files-found: error
-      - name: Create draft release for a NeoEditor tag
+      - name: Create draft release for an EUI-Edits tag
         if: startsWith(github.ref, 'refs/tags/neoeditor-v')
         shell: pwsh
         env:
@@ -65,7 +65,7 @@ jobs:
             throw 'A draft release already exists. Inspect it before replacing any artifacts.'
           }
           $assets = @(Get-ChildItem dist/neoeditor -File | ForEach-Object { $_.FullName })
-          $releaseArgs = @('release','create',$tag,'--verify-tag','--draft','--title',"NeoEditor $env:NEOEDITOR_VERSION",'--notes-file',$notesPath)
+          $releaseArgs = @('release','create',$tag,'--verify-tag','--draft','--title',"EUI-Edits $env:NEOEDITOR_VERSION",'--notes-file',$notesPath)
           if ($env:NEOEDITOR_VERSION.Contains('-')) { $releaseArgs += '--prerelease' }
           & gh @releaseArgs @assets
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to create NeoEditor draft release.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to create EUI-Edits draft release.' }
