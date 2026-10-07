@@ -28,6 +28,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#ifdef _DEBUG
+#include <crtdbg.h>
+#endif
 
 namespace {
 
@@ -3312,6 +3315,10 @@ void testCursorLayoutTransitions() {
 }  // namespace
 
 int main() {
+#ifdef _DEBUG
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
     testStableEditLayout();
     testStableOffsetEditSnapshots();
     testEditedPagePublication();
@@ -4394,6 +4401,175 @@ int main() {
                 }
             }
             check(gapStillHidden, "反引号前的管道空隙仍必须隐藏");
+        }
+
+        // ⑤ 真实路径的表格点击：lp_plan 的 UTF-8 cell range → lp_decorations 的 holes/
+        //    cells → InputLayout 的 pointerHit → 在命中字节插入。合成 LineDecoration
+        //    容易漏掉 md4c 的实际 cell 起止与行内隐藏标记，所以在这里串起编辑器同款链路。
+        {
+            using InputModel = components::input_detail::InputModel;
+            const std::string pointerDoc =
+                "| 表头甲 | 表头乙 | 表头丙 |\n"
+                "| --- | --- | --- |\n"
+                "| 苹果梨 | **香蕉葡萄** | 西瓜柚子 |\n";
+            const neo::LpPlan pointerPlan = neo::buildLpPlan(pointerDoc);
+            std::vector<LineDecoration> pointerDecorations;
+            neo::lp::buildDecorations(pointerPlan, style, 0, pointerDecorations,
+                                      style.fontFamily, {}, nullptr, pointerDoc);
+            check(pointerPlan.lines.size() >= 3 && pointerDecorations.size() >= 3 &&
+                      pointerDecorations[2].cells.size() == 3,
+                  "real Markdown table fixture should expose three UTF-8 body cells");
+            if (pointerPlan.lines.size() >= 3 && pointerDecorations.size() >= 3 &&
+                pointerDecorations[2].cells.size() == 3) {
+                InputModel::InputState pointerState;
+                pointerState.text = pointerDoc;
+                pointerState.textRevision = 1;
+                constexpr float pointerWidth = 480.0f;
+                constexpr float pointerInset = 8.0f;
+                const auto pointerLayout = InputModel::InputLayout::build(
+                    pointerState, pointerWidth, 300.0f, pointerWidth,
+                    pointerInset, pointerInset, pointerInset, style.bodySize,
+                    style.fontFamily, style.bodySize, true, &pointerDecorations);
+                const core::Rect pointerBounds{35.0f, 50.0f, pointerWidth, 300.0f};
+                const auto* pointerColumns = pointerLayout.tableColumnsFor(
+                    pointerDecorations[2].tableId);
+                const auto& pointerCells = pointerDecorations[2].cells;
+                if (pointerColumns == nullptr || pointerColumns->count() != 3) {
+                    check(false, "real Markdown table layout should have three column geometries");
+                } else {
+                    const int visualRow = 2;
+                    const float rowY = pointerBounds.y + pointerInset +
+                        pointerLayout.geometryTable().top(visualRow) + 2.0f;
+                    for (int column = 1; column < 3; ++column) {
+                        const auto& cell = pointerCells[static_cast<std::size_t>(column)];
+                        const float x = pointerBounds.x + pointerInset +
+                            pointerColumns->x[static_cast<std::size_t>(column)] + 0.5f;
+                        const auto hit = pointerLayout.pointerHit(
+                            x, rowY, pointerBounds, pointerWidth, pointerInset);
+                        const bool inCell = hit.byteIndex >= cell.beg && hit.byteIndex <= cell.end;
+                        check(inCell, "real table click at column " + std::to_string(column + 1) +
+                                          " start should resolve inside its md4c cell range (got " +
+                                          std::to_string(hit.byteIndex) + ")");
+                        if (inCell) {
+                            std::string edited = pointerDoc;
+                            edited.insert(static_cast<std::size_t>(hit.byteIndex), "X");
+                            const auto& first = pointerCells[0];
+                            const std::string firstBefore = pointerDoc.substr(
+                                static_cast<std::size_t>(first.beg),
+                                static_cast<std::size_t>(first.end - first.beg));
+                            const std::string firstAfter = edited.substr(
+                                static_cast<std::size_t>(first.beg), firstBefore.size());
+                            const std::string targetAfter = edited.substr(
+                                static_cast<std::size_t>(cell.beg),
+                                static_cast<std::size_t>(cell.end - cell.beg + 1));
+                            check(firstAfter == firstBefore && targetAfter.find('X') != std::string::npos,
+                                  "insertion at real column " + std::to_string(column + 1) +
+                                      " caret must edit that cell, not the first cell");
+                        }
+                    }
+                    const auto& first = pointerCells[0];
+                    const auto& second = pointerCells[1];
+                    const float sharedBoundaryX = pointerColumns->x[1];
+                    const float sharedBoundaryY = rowY;
+                    const auto boundaryHit = pointerLayout.pointerHit(
+                        pointerBounds.x + pointerInset + sharedBoundaryX + 0.5f,
+                        sharedBoundaryY, pointerBounds, pointerWidth, pointerInset);
+                    check(boundaryHit.byteIndex >= second.beg && boundaryHit.byteIndex <= second.end,
+                          "real hidden pipe boundary click must belong to the next cell");
+                    const auto& mappedLine = pointerLayout.lineList()[visualRow];
+                    const float projectedFirstEndX = components::input_detail::caretXForDocOffset(
+                        mappedLine.metrics, mappedLine.holes, mappedLine.start, first.end);
+                    const float projectedSecondBegX = components::input_detail::caretXForDocOffset(
+                        mappedLine.metrics, mappedLine.holes, mappedLine.start, second.beg);
+                    const float mappedFirstEndX = InputModel::caretXInLine(mappedLine, first.end);
+                    const float mappedSecondBegX = InputModel::caretXInLine(mappedLine, second.beg);
+                    check(std::fabs(projectedFirstEndX - projectedSecondBegX) < 0.01f,
+                          "legacy projected metrics should demonstrate the shared boundary ambiguity");
+                    check(std::fabs(mappedFirstEndX - mappedSecondBegX) > 0.01f,
+                          "direct document caret stops must preserve both sides of a hidden pipe");
+                }
+            }
+        }
+
+        // ⑥ 实机复现：第二列居中、第三列右对齐时，`b` 后方的留白点击应落在 b 之后。
+        //    第 2 格末尾与第 3 格开头投影到同一 byte stop；当前聚合 metrics 会被第 3 格
+        //    的 right-aligned x 覆盖，字节范围 clamp 无法修复同一格内部的错位。
+        {
+            using InputModel = components::input_detail::InputModel;
+            const std::string pointerDoc =
+                "# Table check\n\n"
+                "| 第一列 | 第二列 | 第三列 | 第四列 |\n"
+                "| --- | :---: | ---: | --- |\n"
+                "| 甲乙 | 丙丁 | 戊己 | 庚辛 |\n"
+                "| a | b | c | d |\n"
+                "| 第一个很长很长内容 | 第二个很长内容 | 第三个内容 | 第四个内容 |\n";
+            const neo::LpPlan pointerPlan = neo::buildLpPlan(pointerDoc);
+            std::vector<LineDecoration> pointerDecorations;
+            neo::lp::buildDecorations(pointerPlan, style, 0, pointerDecorations,
+                                      style.fontFamily, {}, nullptr, pointerDoc);
+            const std::size_t bLine = pointerDoc.find("| a | b | c | d |");
+            const std::size_t bPos = pointerDoc.find('b', bLine);
+            int sourceRow = -1;
+            for (std::size_t i = 0; i < pointerPlan.lines.size(); ++i) {
+                if (pointerPlan.lines[i].srcBeg <= static_cast<int>(bPos) &&
+                    static_cast<int>(bPos) < pointerPlan.lines[i].srcEnd) {
+                    sourceRow = static_cast<int>(i);
+                    break;
+                }
+            }
+            check(sourceRow >= 0 && sourceRow < static_cast<int>(pointerDecorations.size()) &&
+                      pointerDecorations[static_cast<std::size_t>(sourceRow)].cells.size() == 4,
+                  "aligned four-column repro should expose its real md4c cells");
+            if (sourceRow >= 0 && sourceRow < static_cast<int>(pointerDecorations.size()) &&
+                pointerDecorations[static_cast<std::size_t>(sourceRow)].cells.size() == 4) {
+                InputModel::InputState pointerState;
+                pointerState.text = pointerDoc;
+                pointerState.textRevision = 1;
+                constexpr float pointerWidth = 760.0f;
+                constexpr float pointerInset = 8.0f;
+                const auto pointerLayout = InputModel::InputLayout::build(
+                    pointerState, pointerWidth, 500.0f, pointerWidth,
+                    pointerInset, pointerInset, pointerInset, style.bodySize,
+                    style.fontFamily, style.bodySize, true, &pointerDecorations);
+                const int visualRow = pointerLayout.lineIndexFor(static_cast<int>(bPos));
+                const auto& line = pointerLayout.lineList()[static_cast<std::size_t>(visualRow)];
+                const auto& cells = pointerDecorations[static_cast<std::size_t>(sourceRow)].cells;
+                const auto* columns = pointerLayout.tableColumnsFor(
+                    pointerDecorations[static_cast<std::size_t>(sourceRow)].tableId);
+                const auto run = std::find_if(line.runs.begin(), line.runs.end(),
+                    [bPos](const components::input_detail::TextRun& candidate) {
+                        return candidate.beg <= static_cast<int>(bPos) &&
+                               static_cast<int>(bPos) < candidate.end;
+                    });
+                if (columns == nullptr || columns->count() != 4 || run == line.runs.end()) {
+                    check(false, "aligned four-column repro should retain table geometry and b run");
+                } else {
+                    const auto& second = cells[1];
+                    const float clickLocalX = std::min(
+                        run->x + run->width + 24.0f,
+                        columns->x[1] + columns->width[1] - 0.5f);
+                    check(clickLocalX > run->x + run->width &&
+                              clickLocalX < columns->x[2],
+                          "repro click should be in second-column padding before column three");
+                    const core::Rect bounds{35.0f, 50.0f, pointerWidth, 500.0f};
+                    const float y = bounds.y + pointerInset +
+                        pointerLayout.geometryTable().top(visualRow) + 2.0f;
+                    const auto hit = pointerLayout.pointerHit(
+                        bounds.x + pointerInset + clickLocalX, y, bounds,
+                        pointerWidth, pointerInset);
+                    const int expected = second.end;
+                    if (hit.byteIndex != expected) {
+                        std::printf("  !! aligned second-cell tail hit returned %d, expected %d\n",
+                                    hit.byteIndex, expected);
+                    }
+                    check(hit.byteIndex == expected,
+                          "clicking right padding after b must resolve to b's end byte");
+                    std::string edited = pointerDoc;
+                    edited.insert(static_cast<std::size_t>(hit.byteIndex), "X");
+                    check(edited.find("| a | bX | c | d |") != std::string::npos,
+                          "typing after the aligned second-cell padding click must produce bX");
+                }
+            }
         }
     }
 

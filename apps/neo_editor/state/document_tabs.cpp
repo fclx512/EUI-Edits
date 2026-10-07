@@ -323,6 +323,7 @@ void afterSwitch(AppState& state) {
     core::window::cancelImeComposition(core::window::mainWindowHandle());
     state.pendingEditorCommand = EditorCommand::None;
     state.pendingTaskByte = -1; state.pendingImagePaste = false; state.pendingImageLink.clear();
+    state.pendingImageImport = false;
     state.contextMenuOpen = false; state.vaultContextMenuOpen = false;
     state.languageMenuOpen = false; state.openMenu = MenuKind::None;
     state.findEditorFocusPending = true; state.tabListReveal = state.tabId;

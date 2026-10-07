@@ -56,6 +56,8 @@ inline std::vector<MenuItem> editorContextMenuItems(bool onLink, bool hasSelecti
         MenuItem(i18n::tr("context.table")),
         MenuItem(i18n::tr("context.quote")),
         MenuItem(i18n::tr("context.divider")),
+        // 选择导入图片（2026-10-06）：系统文件对话框选图，绝对路径引用。
+        MenuItem(i18n::tr("context.image")),
     }));
     items.push_back(MenuItem(i18n::tr("context.cut")).withSeparatorBefore().withEnabled(hasSelection).withShortcut("Ctrl+X"));
     items.push_back(MenuItem(i18n::tr("context.copy")).withEnabled(hasSelection).withShortcut("Ctrl+C"));
@@ -144,6 +146,13 @@ inline void dispatchEditorContextItem(AppState& state, const std::vector<int>& p
             return;
         case 4:
             if (shifted.size() == 2) {
+                if (shifted[1] == 4) {
+                    // 图片…（2026-10-06）：置位后由每帧 tick 弹文件对话框（同图片
+                    // 粘贴的 IO 纪律），不走 InsertBlock 命令。
+                    state.pendingImageImport = true;
+                    app::requestUpdate();
+                    return;
+                }
                 state.pendingEditorCommand = EditorCommand::InsertBlock;
                 state.pendingBlockKind = shifted[1] + 1;
             }

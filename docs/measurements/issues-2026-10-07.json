@@ -1,0 +1,114 @@
+{
+  "date": "2026-10-07",
+  "sha256": "792de0930d8e15f63b3bf980e19d1d3efbb8c4c8fa163433fa1cd9c98e192fdf",
+  "candidate": "D:\\编译开发\\EUI-Edits\\out\\issues-review-20261007-r1\\EUI-Edits.exe",
+  "conditions": {
+    "platform": "Win32/Direct2D",
+    "build": "Release x64",
+    "software_renderer": true,
+    "isolated_profile": true,
+    "ui_scale": 1,
+    "editor_font_size": 20
+  },
+  "tests": {
+    "text": 10,
+    "actions": 7,
+    "total": 17,
+    "failed": 0
+  },
+  "table_click_matrix": [
+    {
+      "label": "cell1-head",
+      "x": 35,
+      "y": 276,
+      "expected": "| Qa | b | c | d |",
+      "actual": "| Qa | b | c | d |"
+    },
+    {
+      "label": "cell1-tail",
+      "x": 200,
+      "y": 276,
+      "expected": "| aQ | b | c | d |",
+      "actual": "| aQ | b | c | d |"
+    },
+    {
+      "label": "cell2-head",
+      "x": 350,
+      "y": 276,
+      "expected": "| a | Qb | c | d |",
+      "actual": "| a | Qb | c | d |"
+    },
+    {
+      "label": "cell2-tail",
+      "x": 405,
+      "y": 276,
+      "expected": "| a | bQ | c | d |",
+      "actual": "| a | bQ | c | d |"
+    },
+    {
+      "label": "cell3-head",
+      "x": 580,
+      "y": 276,
+      "expected": "| a | b | Qc | d |",
+      "actual": "| a | b | Qc | d |"
+    },
+    {
+      "label": "cell3-tail",
+      "x": 615,
+      "y": 276,
+      "expected": "| a | b | cQ | d |",
+      "actual": "| a | b | cQ | d |"
+    },
+    {
+      "label": "cell4-head",
+      "x": 635,
+      "y": 276,
+      "expected": "| a | b | c | Qd |",
+      "actual": "| a | b | c | Qd |"
+    },
+    {
+      "label": "cell4-tail",
+      "x": 730,
+      "y": 276,
+      "expected": "| a | b | c | dQ |",
+      "actual": "| a | b | c | dQ |"
+    }
+  ],
+  "image_pixel_matches": {
+    "middle-immediate.png": 12760,
+    "middle-undone.png": 0,
+    "middle-redone.png": 12760,
+    "eof-immediate.png": 25520
+  },
+  "image_source_copy_exact": true,
+  "image_png_pixels_equal": true,
+  "wrap_cases": {
+    "short_cell_down_next_source_row": "tDarget observed and saved, then undone",
+    "empty_cell_continuation": "E inserted in column 3; other cells preserved"
+  },
+  "normal_exits": {
+    "table": {
+      "pid": 5264,
+      "hwnd": 526304,
+      "exit_code": 0,
+      "sha256": "792de0930d8e15f63b3bf980e19d1d3efbb8c4c8fa163433fa1cd9c98e192fdf"
+    },
+    "images": {
+      "pid": 7768,
+      "hwnd": 590524,
+      "exit_code": 0,
+      "sha256": "792de0930d8e15f63b3bf980e19d1d3efbb8c4c8fa163433fa1cd9c98e192fdf"
+    },
+    "wrap": {
+      "pid": 23460,
+      "hwnd": 3146506,
+      "exit_code": 0,
+      "sha256": "792de0930d8e15f63b3bf980e19d1d3efbb8c4c8fa163433fa1cd9c98e192fdf"
+    }
+  },
+  "limits": [
+    "No full-suite or Chinese IME/multi-monitor DPI/long GPU stress claim",
+    "Cross-cell Backspace/Delete retain Markdown source interval editing",
+    "Inside fenced code image references retain code semantics"
+  ]
+}

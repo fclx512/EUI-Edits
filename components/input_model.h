@@ -13,6 +13,7 @@
 #include <cstring>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -563,6 +564,16 @@ using LineDecorationSnapshotProvider =
     std::function<LineDecorationSnapshot(const std::string&, const DecoratorEditInfo&)>;
 
 struct InputModel {
+    // A table row can have multiple document positions at one projected offset
+    // (hidden pipes/spaces), and aligned columns can assign those positions
+    // different x coordinates. Keep this editor mapping beside, not inside, the
+    // renderer's single-valued projected metrics.
+    struct TableDocCaretStop {
+        int byteIndex = 0;
+        float x = 0.0f;
+        int column = 0;
+    };
+
     struct TextLine {
         int start = 0;
         int end = 0;
@@ -635,6 +646,14 @@ struct InputModel {
         // only for the viewport or an explicit hit/navigation request.
         bool metricsDeferred = false;
         bool metricsTracked = false;
+        // 表格行的命中 clamp（2026-10-06）：本行各单元格的文档字节区间（与装饰层
+        // LineCell 同源，取前 columns 个）。格与格分界处上一格末尾与下一格开头共享
+        // 同一个投影停靠点，其字节经"歧义归洞之前"总解析到上一格 —— pointerHit
+        // 用这份区间把命中字节 clamp 回点击所在列。非表格行为空。放末尾、NSDMI。
+        std::vector<LineCell> tableCellRanges;
+        // Exact source-byte caret positions for this visual table segment. Unlike
+        // metrics.byteIndices, this preserves both sides of hidden cell borders.
+        std::vector<TableDocCaretStop> tableDocCaretStops;
     };
 
     struct TextSelectionRect {
@@ -1044,22 +1063,15 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 return 0;
             }
             const Line& line = lineListRef[static_cast<size_t>(std::clamp(lineIndex, 0, static_cast<int>(lineListRef.size()) - 1))];
+            const int tableHit = tableDocOffsetForX(line, targetX, tableColumnsFor(line.tableId));
+            if (tableHit >= 0) return tableHit;
             return docOffsetForX(line.metrics, line.holes, line.start, targetX);
         }
 
         // 表格换行续段的判定辅助（2026-09-26）：byteIndex 在这一段里有没有 caret
         // 停靠点。同一源行的各续段共享同一段字节区间，停靠点子集互不相同。
         bool lineHasCaretStop(const Line& line, int byteIndex) const {
-            const int clamped = std::clamp(byteIndex, line.start, line.end);
-            const int visible = visibleLength(line.holes, line.start, clamped);
-            const std::size_t count =
-                std::min(line.metrics.byteIndices.size(), line.metrics.caretX.size());
-            for (std::size_t i = 0; i < count; ++i) {
-                if (line.metrics.byteIndices[static_cast<std::size_t>(i)] == visible) {
-                    return true;
-                }
-            }
-            return false;
+            return lineHasDocCaretStop(line, byteIndex);
         }
 
         int lineIndexFor(int byteIndex) const {
@@ -1697,12 +1709,15 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         auto xFor = [&](int byteIndex) {
             const int lineIndex = lineIndexFor(lines, byteIndex);
             const InputLayout::Line& line = lines[static_cast<size_t>(lineIndex)];
-            return caretXForDocOffset(line.metrics, line.holes, line.start, byteIndex);
+            return caretXInLine(line, byteIndex);
         };
 
         auto closestOnLine = [&](int lineIndex, float targetX) {
             ensureLineDetails(state, lineIndex);
             const InputLayout::Line& line = lines[static_cast<size_t>(std::clamp(lineIndex, 0, static_cast<int>(lines.size()) - 1))];
+            const int tableHit = tableDocOffsetForX(
+                line, targetX, findTableColumns(state.cachedTables, state.cachedTableIndex, line.tableId));
+            if (tableHit >= 0) return tableHit;
             return docOffsetForX(line.metrics, line.holes, line.start, targetX);
         };
 
@@ -1729,8 +1744,28 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             state.preferredCursorX = xFor(state.cursor);
             state.hasPreferredCursorX = true;
         }
-        state.cursor = clampUtf8Boundary(state.text, closestOnLine(nextLine, state.preferredCursorX));
-        syncVerticalScroll(state, lines, nextLine, viewportHeight);
+        int targetLine = nextLine;
+        int targetByte = closestOnLine(targetLine, state.preferredCursorX);
+        // A short/empty cell has no caret stop on later wrapped segments. If the
+        // nearest position is therefore its existing tail, keep scanning through
+        // sibling segments so repeated Down/Up can reach the next real source row.
+        while (targetByte == state.cursor && targetLine + direction >= 0 &&
+               targetLine + direction < static_cast<int>(lines.size())) {
+            const int adjacent = targetLine + direction;
+            const InputLayout::Line& from = lines[static_cast<std::size_t>(targetLine)];
+            const InputLayout::Line& to = lines[static_cast<std::size_t>(adjacent)];
+            const bool sameWrappedRow = from.tableId >= 0 && from.tableId == to.tableId &&
+                                        from.start == to.start && from.end == to.end;
+            const InputLayout::Line& original = lines[static_cast<std::size_t>(currentLine)];
+            const bool leavingStalledWrappedRow =
+                from.tableId >= 0 && from.tableId == original.tableId &&
+                from.start == original.start && from.end == original.end && !sameWrappedRow;
+            if (!sameWrappedRow && !leavingStalledWrappedRow) break;
+            targetLine = adjacent;
+            targetByte = closestOnLine(targetLine, state.preferredCursorX);
+        }
+        state.cursor = clampUtf8Boundary(state.text, targetByte);
+        syncVerticalScroll(state, lines, targetLine, viewportHeight);
 
         if (keepSelection) {
             if (!hasTextSelection(state)) {
@@ -1749,8 +1784,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         if (lines.empty() || direction == 0) return;
         const int current = lineIndexFor(lines, state.cursor);
         if (!state.hasPreferredCursorX) {
-            state.preferredCursorX = caretXForDocOffset(lines[current].metrics, lines[current].holes,
-                                                        lines[current].start, state.cursor);
+            state.preferredCursorX = caretXInLine(lines[current], state.cursor);
             state.hasPreferredCursorX = true;
         }
         const float preferred = state.preferredCursorX;
@@ -1764,8 +1798,12 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             while (!visible(target) && target != current) target -= direction;
         }
         ensureLineDetails(state, target);
-        moveCursorTo(state, docOffsetForX(lines[target].metrics, lines[target].holes,
-                                         lines[target].start, preferred), keepSelection);
+        const int tableHit = tableDocOffsetForX(
+            lines[target], preferred,
+            findTableColumns(state.cachedTables, state.cachedTableIndex, lines[target].tableId));
+        moveCursorTo(state, tableHit >= 0 ? tableHit :
+                     docOffsetForX(lines[target].metrics, lines[target].holes,
+                                   lines[target].start, preferred), keepSelection);
         state.preferredCursorX = preferred;
         state.hasPreferredCursorX = true;
         syncVerticalScroll(state, lines, target, viewportHeight);
@@ -2062,6 +2100,14 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         for (TextRun& run : line.runs) {
             run.beg += deltaBytes;
             run.end += deltaBytes;
+        }
+        // 表格命中 clamp 的格区间同样是文档绝对偏移，随行一起平移（2026-10-06）。
+        for (LineCell& cell : line.tableCellRanges) {
+            cell.beg += deltaBytes;
+            cell.end += deltaBytes;
+        }
+        for (TableDocCaretStop& stop : line.tableDocCaretStops) {
+            stop.byteIndex += deltaBytes;
         }
     }
 
@@ -3237,6 +3283,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         for (float& caret : line.metrics.caretX) {
             caret += advance;
         }
+        for (TableDocCaretStop& stop : line.tableDocCaretStops) stop.x += advance;
         for (TextRun& run : line.runs) {
             run.x += advance;
         }
@@ -3251,6 +3298,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         for (float& caret : line.metrics.caretX) {
             caret += indent;
         }
+        for (TableDocCaretStop& stop : line.tableDocCaretStops) stop.x += indent;
         for (TextRun& run : line.runs) {
             run.x += indent;
         }
@@ -3605,6 +3653,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             int visBeg = 0;                      // 格内容起点（相对行投影文本）
             int visEnd = 0;                      // 格内容终点
             bool empty = false;
+            std::vector<LineHole> cellHoles;
         };
         std::vector<CellSegments> cells(static_cast<std::size_t>(columns));
         std::size_t maxSegments = 1;
@@ -3615,6 +3664,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             const float columnWidth = table.width[static_cast<std::size_t>(c)];
             rowWidth = std::max(rowWidth, columnX + columnWidth);
             CellSegments& wrapped = cells[static_cast<std::size_t>(c)];
+            wrapped.cellHoles = clipHoles(holes, cell.beg, cell.end);
             wrapped.visBeg = visibleLength(holes, start, cell.beg);
             wrapped.visEnd = visibleLength(holes, start, cell.end);
             if (cell.beg >= cell.end) {
@@ -3675,6 +3725,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         for (std::size_t v = 0; v < maxSegments; ++v) {
             core::TextPrimitive::TextMetrics metrics;
             std::vector<TextRun> outRuns;
+            std::vector<TableDocCaretStop> docStops;
             const bool lastSegment = v + 1 == maxSegments;
             for (int c = 0; c < columns; ++c) {
                 const float columnX = table.x[static_cast<std::size_t>(c)];
@@ -3683,12 +3734,14 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                     if (v == 0) {
                         // 空格子：给一个停靠点，光标/点击能落进这一列。
                         overrideCaretStop(metrics, wrapped.visBeg, columnX);
+                        docStops.push_back({decoration.cells[static_cast<std::size_t>(c)].beg,
+                                            columnX, c});
                     }
                     continue;
                 }
                 if (v >= wrapped.segs.size()) {
-                    // 这一格已经排完：空段给"格内容末尾"的停靠点，点击格下方的
-                    // 空白处光标落在格尾。
+                    // 这一格已经排完：这一物理续行不持有该格的 caret 停靠点；
+                    // 命中空白时由列几何回退到该格末尾，文档光标仍归回真正末段。
                     overrideCaretStop(metrics, wrapped.visEnd, columnX);
                     continue;
                 }
@@ -3697,9 +3750,16 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 const std::size_t stops = std::min(segment.metrics.byteIndices.size(),
                                                    segment.metrics.caretX.size());
                 for (std::size_t i = 0; i < stops; ++i) {
+                    const int cellVisibleOffset =
+                        wrapped.segFrom[v] + segment.metrics.byteIndices[i];
                     overrideCaretStop(metrics,
                                       segBase + segment.metrics.byteIndices[i],
                                       columnX + wrapped.cellOffset + segment.metrics.caretX[i]);
+                    docStops.push_back({unprojectVisible(
+                                            wrapped.cellHoles,
+                                            decoration.cells[static_cast<std::size_t>(c)].beg,
+                                            cellVisibleOffset),
+                                        columnX + wrapped.cellOffset + segment.metrics.caretX[i], c});
                 }
                 for (TextRun& run : segment.runs) {
                     if (run.beg >= run.end) {
@@ -3715,6 +3775,11 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             out.push_back({start, end, hardBreakAfter && lastSegment, std::move(metrics),
                            lineFontSize, lastSegment ? lineHeight : textLineHeight, 0.0f,
                            holes, lineColor, std::move(outRuns)});
+            out.back().tableDocCaretStops = std::move(docStops);
+            // 命中 clamp 用（2026-10-06）：每条可视行都带整行的格区间 —— 任一列在
+            // 这条可视行上都至少有一个停靠点，点击列归属按 x 几何即可判定。
+            out.back().tableCellRanges.assign(decoration.cells.begin(),
+                                              decoration.cells.begin() + columns);
         }
     }
 
@@ -3779,6 +3844,36 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         return lines;
     }
 
+    static bool lineHasDocCaretStop(const InputLayout::Line& line, int byteIndex) {
+        if (line.tableDocCaretStops.empty()) {
+            const int clamped = std::clamp(byteIndex, line.start, line.end);
+            const int visible = visibleLength(line.holes, line.start, clamped);
+            const std::size_t count =
+                std::min(line.metrics.byteIndices.size(), line.metrics.caretX.size());
+            for (std::size_t i = 0; i < count; ++i) {
+                if (line.metrics.byteIndices[i] == visible) return true;
+            }
+            return false;
+        }
+        for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+            if (stop.byteIndex == byteIndex) return true;
+        }
+        // Decoration cell.end can include concealed closing markup. Compare in the
+        // cell-local projection so that byte offsets inside that hidden suffix still
+        // resolve to the visual segment owning the cell's final caret.
+        for (std::size_t column = 0; column < line.tableCellRanges.size(); ++column) {
+            const LineCell& cell = line.tableCellRanges[column];
+            if (byteIndex < cell.beg || byteIndex > cell.end) continue;
+            const auto cellHoles = clipHoles(line.holes, cell.beg, cell.end);
+            const int visible = visibleLength(cellHoles, cell.beg, byteIndex);
+            for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+                if (stop.column == static_cast<int>(column) &&
+                    visibleLength(cellHoles, cell.beg, stop.byteIndex) == visible) return true;
+            }
+        }
+        return false;
+    }
+
     static int lineIndexFor(const std::vector<InputLayout::Line>& lines, int byteIndex) {
         if (lines.empty()) {
             return 0;
@@ -3798,6 +3893,14 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             !lines[static_cast<size_t>(index)].hardBreakAfter &&
             byteIndex >= lines[static_cast<size_t>(index)].end) {
             ++index;
+        }
+        while (index > 0 && !lines[static_cast<std::size_t>(index)].lineStart &&
+               lines[static_cast<std::size_t>(index - 1)].start ==
+                   lines[static_cast<std::size_t>(index)].start &&
+               lines[static_cast<std::size_t>(index - 1)].end ==
+                   lines[static_cast<std::size_t>(index)].end) {
+            if (lineHasDocCaretStop(lines[static_cast<std::size_t>(index)], byteIndex)) break;
+            --index;
         }
         return std::clamp(index, 0, static_cast<int>(lines.size()) - 1);
     }
@@ -3845,7 +3948,63 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
 
     // 行内光标 x：文档偏移 → x。落在隐藏区间里会被投影吸附，看得到的光标一定落在可见文本上。
     static float caretXInLine(const InputLayout::Line& line, int docOffset) {
+        for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+            if (stop.byteIndex == docOffset) return stop.x;
+        }
+        int ownerColumn = -1;
+        int closestByteDistance = std::numeric_limits<int>::max();
+        for (std::size_t column = 0; column < line.tableCellRanges.size(); ++column) {
+            const LineCell& cell = line.tableCellRanges[column];
+            if (docOffset < cell.beg || docOffset > cell.end) continue;
+            const int distance = std::min(std::abs(docOffset - cell.beg),
+                                          std::abs(docOffset - cell.end));
+            if (distance < closestByteDistance) {
+                ownerColumn = static_cast<int>(column);
+                closestByteDistance = distance;
+            }
+        }
+        if (ownerColumn >= 0) {
+            const TableDocCaretStop* nearest = nullptr;
+            int nearestDistance = std::numeric_limits<int>::max();
+            for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+                if (stop.column != ownerColumn) continue;
+                const int distance = std::abs(docOffset - stop.byteIndex);
+                if (distance < nearestDistance) {
+                    nearest = &stop;
+                    nearestDistance = distance;
+                }
+            }
+            if (nearest != nullptr) return nearest->x;
+        }
         return caretXForDocOffset(line.metrics, line.holes, line.start, docOffset);
+    }
+
+    static int tableDocOffsetForX(const InputLayout::Line& line, float targetX,
+                                  const TableColumns* columns) {
+        if (line.tableDocCaretStops.empty() || columns == nullptr) return -1;
+        const int count = std::min(columns->count(), static_cast<int>(line.tableCellRanges.size()));
+        if (count <= 0) return -1;
+        const float columnX = targetX - line.contentIndent - glyphAdvanceOf(line.glyph, line.fontSize);
+        int selected = 0;
+        for (int c = 1; c < count; ++c) {
+            const float boundary = (columns->x[static_cast<std::size_t>(c - 1)] +
+                                    columns->width[static_cast<std::size_t>(c - 1)] +
+                                    columns->x[static_cast<std::size_t>(c)]) * 0.5f;
+            if (columnX >= boundary) selected = c;
+        }
+        const TableDocCaretStop* best = nullptr;
+        float bestDistance = std::numeric_limits<float>::max();
+        for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+            if (stop.column != selected) continue;
+            const float distance = std::fabs(targetX - stop.x);
+            if (distance < bestDistance) {
+                best = &stop;
+                bestDistance = distance;
+            }
+        }
+        if (best != nullptr) return best->byteIndex;
+        const LineCell& cell = line.tableCellRanges[static_cast<std::size_t>(selected)];
+        return cell.beg == cell.end ? cell.beg : cell.end;
     }
 
     // 单行控件（无隐藏区间）的前后光标位置。
@@ -3867,6 +4026,13 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             return line.end;
         }
         if (byteIndex > line.start) {
+            if (!line.tableDocCaretStops.empty()) {
+                int best = line.start;
+                for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+                    if (stop.byteIndex < byteIndex && stop.byteIndex > best) best = stop.byteIndex;
+                }
+                if (best < byteIndex) return best;
+            }
             return previousVisibleCaret(line.metrics, line.holes, line.start, byteIndex);
         }
         if (lineIndex <= 0) {
@@ -3886,6 +4052,13 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             return std::min(static_cast<int>(text.size()), line.end + 1);
         }
         if (byteIndex < line.end) {
+            if (!line.tableDocCaretStops.empty()) {
+                int best = line.end;
+                for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+                    if (stop.byteIndex > byteIndex && stop.byteIndex < best) best = stop.byteIndex;
+                }
+                if (best > byteIndex) return best;
+            }
             return nextVisibleCaret(line.metrics, line.holes, line.start, byteIndex);
         }
         if (lineIndex + 1 >= static_cast<int>(lines.size())) {

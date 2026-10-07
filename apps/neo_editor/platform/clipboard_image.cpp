@@ -1,5 +1,10 @@
 #include "model/i18n.h"
+#include "model/attachment.h"
+#include "model/text_file.h"
 #include "platform/clipboard_image.h"
+
+#include <png.h>
+#include <filesystem>
 
 #if defined(_WIN32)
 #if !defined(WIN32_LEAN_AND_MEAN)
@@ -9,10 +14,13 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <utility>
 
 namespace neo::clipboardimage {
 namespace {
@@ -178,6 +186,41 @@ bool parseDib(const unsigned char* data, std::size_t size, ImageData& out, std::
     return true;
 }
 
+bool parsePng(const unsigned char* data, std::size_t size, ImageData& out, std::string& reason) {
+    out = ImageData{};
+    png_image image{};
+    image.version = PNG_IMAGE_VERSION;
+    if (data == nullptr || size == 0 || !png_image_begin_read_from_memory(&image, data, size)) {
+        reason = i18n::tr("clipboard.png_invalid");
+        png_image_free(&image);
+        return false;
+    }
+    const std::uint64_t pixels = static_cast<std::uint64_t>(image.width) * image.height;
+    if (image.width == 0 || image.height == 0 || pixels > static_cast<std::uint64_t>(kMaxPixels)) {
+        png_image_free(&image);
+        reason = i18n::tr("clipboard.pixel_limit");
+        return false;
+    }
+    image.format = PNG_FORMAT_RGBA;
+    const png_alloc_size_t bytes = PNG_IMAGE_SIZE(image);
+    if (bytes == 0 || bytes > static_cast<png_alloc_size_t>(kMaxPixels * 4ll)) {
+        png_image_free(&image);
+        reason = i18n::tr("clipboard.png_invalid");
+        return false;
+    }
+    out.width = static_cast<int>(image.width);
+    out.height = static_cast<int>(image.height);
+    out.rgba.resize(static_cast<std::size_t>(bytes));
+    if (!png_image_finish_read(&image, nullptr, out.rgba.data(), 0, nullptr)) {
+        out = ImageData{};
+        png_image_free(&image);
+        reason = i18n::tr("clipboard.png_invalid");
+        return false;
+    }
+    png_image_free(&image);
+    return true;
+}
+
 #if defined(_WIN32)
 namespace {
 
@@ -235,21 +278,67 @@ UINT preferredFormat() {
     return 0u;
 }
 
+UINT pngFormat() {
+    // CF_DIB is common, but some applications publish only a registered PNG payload.
+    UINT format = RegisterClipboardFormatW(L"PNG");
+    if (format != 0u && IsClipboardFormatAvailable(format)) return format;
+    format = RegisterClipboardFormatW(L"image/png");
+    return format != 0u && IsClipboardFormatAvailable(format) ? format : 0u;
+}
+
+bool captureDroppedFile(ClipboardPayload& out, std::string& reason) {
+    if (!IsClipboardFormatAvailable(CF_HDROP)) return false;
+    HANDLE handle = GetClipboardData(CF_HDROP);
+    if (handle == nullptr) {
+        reason = i18n::tr("clipboard.read");
+        return true;
+    }
+    const HDROP drop = static_cast<HDROP>(handle);
+    const UINT count = DragQueryFileW(drop, 0xFFFFFFFFu, nullptr, 0);
+    if (count != 1u) {
+        reason = i18n::tr("clipboard.file_count");
+        return true;
+    }
+    const UINT length = DragQueryFileW(drop, 0, nullptr, 0);
+    if (length == 0u) {
+        reason = i18n::tr("clipboard.read");
+        return true;
+    }
+    std::vector<wchar_t> path(static_cast<std::size_t>(length) + 1u, L'\0');
+    if (DragQueryFileW(drop, 0, path.data(), static_cast<UINT>(path.size())) == 0u) {
+        reason = i18n::tr("clipboard.read");
+        return true;
+    }
+    const std::filesystem::path native(path.data());
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(native, error) || error) {
+        reason = i18n::tr("clipboard.file_not_image");
+        return true;
+    }
+    const std::filesystem::path absolute = std::filesystem::absolute(native, error);
+    if (error) {
+        reason = i18n::tr("clipboard.read");
+        return true;
+    }
+    const std::string utf8 = neo::textfile::pathToUtf8(absolute.lexically_normal());
+    if (!neo::attachment::isSupportedImagePath(utf8)) {
+        reason = i18n::tr("clipboard.file_not_image");
+        return true;
+    }
+    out.kind = ClipboardPayload::Kind::File;
+    out.filePathUtf8 = utf8;
+    return true;
+}
+
 } // namespace
 
 bool available() {
-    return preferredFormat() != 0u;
+    return IsClipboardFormatAvailable(CF_HDROP) != FALSE || preferredFormat() != 0u || pngFormat() != 0u;
 }
 
-bool capture(ImageData& out, std::string& reason) {
-    out = ImageData{};
+bool capture(ClipboardPayload& out, std::string& reason) {
+    out = ClipboardPayload{};
     reason.clear();
-
-    const UINT format = preferredFormat();
-    if (format == 0u) {
-        reason = i18n::tr("clipboard.no_bitmap");
-        return false;
-    }
 
     ClipboardSession session;
     if (!session.opened()) {
@@ -257,19 +346,42 @@ bool capture(ImageData& out, std::string& reason) {
         return false;
     }
 
+    // Explorer file copy must win over any optional preview bitmap so the original
+    // file and its encoding/animation survive the attachment copy.
+    if (captureDroppedFile(out, reason)) return out.kind != ClipboardPayload::Kind::None;
+
+    UINT format = preferredFormat();
+    if (format == 0u) format = pngFormat();
+    if (format == 0u) {
+        reason = i18n::tr("clipboard.no_bitmap");
+        return false;
+    }
     HANDLE handle = GetClipboardData(format);
     if (handle == nullptr) {
         reason = i18n::tr("clipboard.read");
         return false;
     }
-
     GlobalSegment segment(static_cast<HGLOBAL>(handle));
     if (segment.data() == nullptr || segment.size() == 0) {
         reason = i18n::tr("clipboard.read");
         return false;
     }
+    const bool ok = format == CF_DIB || format == CF_DIBV5
+        ? parseDib(segment.data(), segment.size(), out.image, reason)
+        : parsePng(segment.data(), segment.size(), out.image, reason);
+    if (ok) out.kind = ClipboardPayload::Kind::Bitmap;
+    return ok;
+}
 
-    return parseDib(segment.data(), segment.size(), out, reason);
+bool capture(ImageData& out, std::string& reason) {
+    ClipboardPayload payload;
+    if (!capture(payload, reason) || payload.kind != ClipboardPayload::Kind::Bitmap) {
+        out = ImageData{};
+        if (reason.empty()) reason = i18n::tr("clipboard.file_not_image");
+        return false;
+    }
+    out = std::move(payload.image);
+    return true;
 }
 
 #else
@@ -280,6 +392,12 @@ bool available() {
 
 bool capture(ImageData& out, std::string& reason) {
     out = ImageData{};
+    reason = i18n::tr("clipboard.platform");
+    return false;
+}
+
+bool capture(ClipboardPayload& out, std::string& reason) {
+    out = ClipboardPayload{};
     reason = i18n::tr("clipboard.platform");
     return false;
 }

@@ -605,6 +605,12 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     // 同位（既有先例：文档库重扫也在这里），链接插入仍走本帧后面的 applyEditorCommand。
     if (state.pendingImagePaste) {
         neo::pasteImageAsAttachment(state);
+        ui.requestFocus(neo::editorInputId(state) + ".hit");
+    }
+    // 选择导入图片（2026-10-06）：与粘贴同位消费——弹系统文件对话框属于 IO。
+    if (state.pendingImageImport) {
+        neo::importImageFromPicker(state);
+        ui.requestFocus(neo::editorInputId(state) + ".hit");
     }
     vaultWatchTick(state);
     for(const auto& path:core::window::consumeDroppedPaths(core::window::mainWindowHandle())) {

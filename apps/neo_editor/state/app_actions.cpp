@@ -560,6 +560,21 @@ void requestReloadWithEncoding(AppState& state, std::size_t optionIndex) {
 void pasteImageAsAttachment(AppState& state) {
     state.pendingImagePaste = false;
 
+    if (state.unavailable) return;
+    if (!state.markdownCapable()) {
+        showToast(state, i18n::tr("safety.cannot_insert_image"), i18n::tr("safety.image_markdown_only"));
+        return;
+    }
+
+    // 先读剪贴板（只读、不落盘）：剪贴板里根本没有位图（复制的是文件/私有格式/
+    // 空剪贴板）时在这里就拒绝 —— 不能先弹"另存为"，那会让人以为存了图。
+    std::string error;
+    clipboardimage::ClipboardPayload payload;
+    if (!clipboardimage::capture(payload, error)) {
+        showToast(state, i18n::tr("safety.image_failed"), error);
+        return;
+    }
+
     // 未落盘的文档先要求另存；取消即放弃本次粘贴（不建目录、不插链接）。
     if (state.path.empty()) {
         saveDocumentAs(state);
@@ -567,42 +582,50 @@ void pasteImageAsAttachment(AppState& state) {
             showToast(state, i18n::tr("safety.cannot_insert_image"), i18n::tr("safety.save_before_image"));
             return;
         }
+        if (!state.markdownCapable()) {
+            showToast(state, i18n::tr("safety.cannot_insert_image"), i18n::tr("safety.image_markdown_only"));
+            return;
+        }
     }
 
     attachment::Target target;
-    std::string error;
     if (!attachment::resolveTarget(state.path, settings::current().attachmentMode, target, error)) {
         showToast(state, i18n::tr("safety.cannot_insert_image"), error);
         return;
     }
 
-    clipboardimage::ImageData image;
-    if (!clipboardimage::capture(image, error)) {
-        showToast(state, i18n::tr("safety.image_failed"), error);
-        return;
-    }
-
-    // PNG 全部在内存编完才动磁盘：编码失败时连附件目录都不创建。
-    std::string png;
-    if (!pngencode::encodeRgba(image.width, image.height, image.rgba.data(), png, error)) {
-        showToast(state, i18n::tr("safety.image_failed"), error);
-        return;
-    }
-
-    const std::string stem = "image";
-    const std::string fileName = attachment::uniqueFileName(target.absoluteDir, stem);
-
-    std::error_code fsError;
-    std::filesystem::create_directories(textfile::pathFromUtf8(target.absoluteDir), fsError);
-    if (fsError) {
-        showToast(state, i18n::tr("safety.image_failed"), i18n::format("safety.attachment_dir", {{"path", target.absoluteDir}}));
-        return;
-    }
-
-    const std::string separator = target.absoluteDir.back() == '/' ? "" : "/";
-    const std::string absoluteFile = target.absoluteDir + separator + fileName;
-    if (!atomicwrite::writeFile(textfile::pathFromUtf8(absoluteFile), png)) {
-        showToast(state, i18n::tr("safety.image_failed"), i18n::tr("safety.attachment_failed"));
+    std::string fileName;
+    if (payload.kind == clipboardimage::ClipboardPayload::Kind::File) {
+        // Explorer 给 CF_HDROP 时复制原字节，保留 GIF 动画、SVG 与源格式，不重编码。
+        fileName = attachment::copyImageFile(payload.filePathUtf8, target.absoluteDir, "image", error);
+        if (fileName.empty()) {
+            showToast(state, i18n::tr("safety.image_failed"), error);
+            return;
+        }
+    } else if (payload.kind == clipboardimage::ClipboardPayload::Kind::Bitmap) {
+        // 真正的剪贴板位图统一转 PNG。先完整编码，再建目录并原子落盘。
+        std::string png;
+        if (!pngencode::encodeRgba(payload.image.width, payload.image.height,
+                                   payload.image.rgba.data(), png, error)) {
+            showToast(state, i18n::tr("safety.image_failed"), error);
+            return;
+        }
+        fileName = attachment::uniqueFileName(target.absoluteDir, "image");
+        std::error_code fsError;
+        std::filesystem::create_directories(textfile::pathFromUtf8(target.absoluteDir), fsError);
+        if (fsError) {
+            showToast(state, i18n::tr("safety.image_failed"),
+                      i18n::format("safety.attachment_dir", {{"path", target.absoluteDir}}));
+            return;
+        }
+        const std::string separator = target.absoluteDir.back() == '/' ? "" : "/";
+        const std::string absoluteFile = target.absoluteDir + separator + fileName;
+        if (!atomicwrite::writeFile(textfile::pathFromUtf8(absoluteFile), png)) {
+            showToast(state, i18n::tr("safety.image_failed"), i18n::tr("safety.attachment_failed"));
+            return;
+        }
+    } else {
+        showToast(state, i18n::tr("safety.image_failed"), i18n::tr("clipboard.no_bitmap"));
         return;
     }
 
@@ -614,6 +637,40 @@ void pasteImageAsAttachment(AppState& state) {
     if (!state.vaultRoot.empty()) {
         refreshVault(state, false);
     }
+}
+
+// ── 选择导入图片（2026-10-06）────────────────────────────────────────────────
+void importImageFromPicker(AppState& state) {
+    state.pendingImageImport = false;
+    if (state.unavailable) {
+        return;
+    }
+    if (!state.markdownCapable()) {
+        showToast(state, i18n::tr("safety.cannot_insert_image"), i18n::tr("safety.image_markdown_only"));
+        return;
+    }
+    core::platform::FileDialogOptions options;
+    options.prompt = i18n::tr("safety.import_image_prompt");
+    options.filterName = i18n::tr("safety.import_image_filter");
+    options.allowedExtensions = attachment::supportedImageExtensions();
+    options.initialDirectory = vaultInitialDirectory(state);
+    const core::platform::FileDialogResult picked = core::platform::openFileDialog(options);
+    if (!picked.selected()) {
+        if (picked.status == core::platform::FileDialogStatus::Failed) {
+            showToast(state, i18n::tr("safety.cannot_insert_image"), picked.error);
+        }
+        return;
+    }
+    const std::string rawPath = picked.paths.front();
+    if (!attachment::isSupportedImagePath(rawPath)) {
+        showToast(state, i18n::tr("safety.cannot_insert_image"), i18n::tr("safety.image_unsupported"));
+        return;
+    }
+    // 绝对路径引用：不建附件目录、不写盘。链接统一 '/' 分隔，目标包 <> ——
+    // 带空格/中文的路径在 MD4C 与 Obsidian 都能往返。
+    state.pendingImageLink = attachment::markdownAbsoluteLink(rawPath);
+    state.pendingEditorCommand = EditorCommand::InsertImageLink;
+    app::requestUpdate();
 }
 
 bool saveDocumentAs(AppState& state) {

@@ -11,7 +11,6 @@
 #include "model/clean_ai.h"
 #include "model/settings.h"
 #include "platform/file_assoc.h"
-#include "platform/clipboard_image.h"
 #include "model/style_schema.h"
 #include "model/text_file.h"
 #include "model/file_safety.h"
@@ -350,6 +349,9 @@ struct AppState : DocumentSession {
     // EditorCommand::InsertImageLink 在 compose 里落到光标处（撤销一步）。
     bool pendingImagePaste = false;
     std::string pendingImageLink;
+    // 选择导入图片（2026-10-06）：右键菜单"插入 ▸ 图片…"置位，每帧 tick 消费——
+    // 弹系统文件对话框选一张图片，按**绝对路径**插链接（不建附件目录、不写盘）。
+    bool pendingImageImport = false;
     // "编辑链接"弹窗（文本输入在 components::input 里，值回写 linkEditorUrl）。
     bool linkEditorOpen = false;
     std::string linkEditorUrl;
@@ -1004,18 +1006,86 @@ inline void applyEditorCommand(eui::Ui& ui, AppState& appState) {
                 core::window::clipboardText(core::window::mainWindowHandle());
             if (!clipboardText.empty()) {
                 InputModel::insertAtCursor(inputState, InputModel::filteredText(clipboardText, true));
+            } else if (appState.markdownCapable()) {
+                // 无文本时尝试位图/单个 CF_HDROP 图片文件；不支持载荷由捕获层解释并提示。
+                appState.pendingImagePaste = true;
+                app::requestUpdate();
             } else {
-                appState.pendingImagePaste = neo::clipboardimage::available();
-                if (appState.pendingImagePaste) {
-                    app::requestUpdate();
-                }
+                appState.toastTitle = i18n::tr("safety.cannot_insert_image");
+                appState.toastMessage = i18n::tr("safety.image_markdown_only");
+                appState.toastVisible = true;
+                app::requestUpdate();
             }
             break;
         }
         case EditorCommand::InsertImageLink:
-            // 载荷由事件阶段的 pasteImageAsAttachment 生成（PNG 已落盘），
-            // 这里只是把链接按一次编辑插进光标处（有选区则替换）。
-            InputModel::insertAtCursor(inputState, appState.pendingImageLink);
+            // 图片链接作为独立块插入，并把光标放到其后的空行。否则纯图行会因
+            // 光标仍在活动块中而按设计显示源码，用户粘贴后只会看到链接文本。
+            if (!appState.markdownCapable()) {
+                appState.pendingImageLink.clear();
+                appState.toastTitle = i18n::tr("safety.cannot_insert_image");
+                appState.toastMessage = i18n::tr("safety.image_markdown_only");
+                appState.toastVisible = true;
+                app::requestUpdate();
+                break;
+            }
+            if (!appState.pendingImageLink.empty()) {
+                const int textSize = static_cast<int>(inputState.text.size());
+                const bool replacing = InputModel::hasTextSelection(inputState);
+                const auto selection = InputModel::selectionRange(inputState);
+                const int beg = InputModel::clampUtf8Boundary(
+                    inputState.text, replacing ? selection.first : inputState.cursor);
+                const int end = replacing
+                                    ? InputModel::clampUtf8Boundary(inputState.text, selection.second)
+                                    : beg;
+                const bool prefixHasLineBreak = beg > 0 && inputState.text[beg - 1] == '\n';
+                const bool prefixHasBlankLine = beg > 1 && inputState.text[beg - 1] == '\n' &&
+                                                inputState.text[beg - 2] == '\n';
+                const bool suffixStartsWithLineBreak = end < textSize && inputState.text[end] == '\n';
+                const bool suffixHasBlankLine = suffixStartsWithLineBreak && end + 1 < textSize &&
+                                                inputState.text[end + 1] == '\n';
+
+                std::string inserted;
+                if (beg > 0 && !prefixHasLineBreak) {
+                    inserted.push_back('\n');
+                }
+                inserted += appState.pendingImageLink;
+                const std::size_t linkEnd = inserted.size();
+
+                // Keep a blank editable line after the image. Reuse existing line breaks
+                // where possible so an image pasted at EOF does not accumulate newlines.
+                std::size_t caretOffset = linkEnd;
+                if (end == textSize) {
+                    inserted.push_back('\n');
+                    caretOffset = inserted.size();
+                } else if (!suffixStartsWithLineBreak) {
+                    inserted += "\n\n";
+                    caretOffset = linkEnd + 1;
+                } else if (end + 1 < textSize && !suffixHasBlankLine) {
+                    // There is only one existing separator before following text. Add one
+                    // more so the caret can sit on a blank line between the image and text.
+                    inserted.push_back('\n');
+                    caretOffset = inserted.size();
+                } else {
+                    // Existing consecutive line breaks already provide the blank line.
+                    caretOffset = linkEnd + 1;
+                }
+
+                // Keep an existing blank line before the image where available. Otherwise
+                // the image starts on a fresh line, even when the insertion splits a paragraph.
+                if (beg > 0 && prefixHasLineBreak && !prefixHasBlankLine) {
+                    inserted.insert(0, 1, '\n');
+                    ++caretOffset;
+                }
+
+                InputModel::beginEdit(inputState, beg, end);
+                inputState.text.replace(static_cast<std::size_t>(beg),
+                                        static_cast<std::size_t>(end - beg), inserted);
+                inputState.cursor = beg + static_cast<int>(caretOffset);
+                inputState.hasPreferredCursorX = false;
+                InputModel::clearSelection(inputState);
+                InputModel::endEdit(inputState);
+            }
             appState.pendingImageLink.clear();
             break;
         case EditorCommand::FormatInline:
@@ -1095,8 +1165,13 @@ inline void applyEditorCommand(eui::Ui& ui, AppState& appState) {
     // textRevision —— 排版缓存、装饰链、dirtyKey 同样只认 revision，组件侧必须自己失效）。
     const bool abortedText = InputModel::abortEdit(inputState);
 
-    // 撤销可能把光标带到很远处，视图要跟着回去。
-    inputState.followCaret = true;
+    // 撤销可能把光标带到很远处，视图要跟着回去。ToggleTask 例外：点击任务勾选框
+    // 本来就不移光标（input 组件对 glyph 命中提前 return），若这里开跟随，下一帧
+    // layout build 会按旧光标位置 syncVerticalScroll 把视口拉到上次编辑处 ——
+    // Obsidian 的行为是视口保持原位，所以保持 followCaret 原值不动。
+    if (command != EditorCommand::ToggleTask) {
+        inputState.followCaret = true;
+    }
 
     // 回写 doc.text 的判据：revision 快路径 + 两道 O(1) 兜底，**不做全文 memcmp**。
     //   · textRevision != revisionBefore —— 正常路径：endEdit / applyEditRecord 每次实际

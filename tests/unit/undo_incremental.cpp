@@ -860,6 +860,147 @@ void testApplyEditorCommandSyncsDivergedText() {
     check(appState.pendingTaskByte == -1, "ToggleTask 载荷应被消费");
 }
 
+void testTaskTogglePreservesViewport() {
+    eui::Ui ui;
+    neo::AppState appState;
+    appState.lastRecoveryWrite = std::chrono::steady_clock::now();
+    auto& input = ui.state<State>(neo::kEditorInputId);
+    input.text = "- [ ] task\n";
+    for (int i = 0; i < 100; ++i) input.text += "body\n";
+    appState.doc.text = input.text;
+    input.cursor = static_cast<int>(input.text.size());
+    Model::clearSelection(input);
+    input.dragAnchor = input.cursor;
+    input.followCaret = false;
+    input.verticalScroll = 40.0f;
+    auto build = [&] {
+        return Model::InputLayout::build(input, 400.0f, 100.0f, 420.0f,
+                                        10.0f, 10.0f, 10.0f, 20.0f,
+                                        "monospace", 16.0f, true);
+    };
+    build();
+    const int oldCursor = input.cursor;
+    const auto revision = input.textRevision;
+    for (const char expected : {'x', ' '}) {
+        appState.pendingTaskByte = 3;
+        appState.pendingEditorCommand = neo::EditorCommand::ToggleTask;
+        neo::applyEditorCommand(ui, appState);
+        build();
+        check(input.text[3] == expected && appState.doc.text == input.text,
+              "task toggle must synchronize text");
+        check(input.cursor == oldCursor && input.selectionStart == oldCursor &&
+                  input.selectionEnd == oldCursor && input.dragAnchor == oldCursor,
+              "task toggle must preserve caret and selection");
+        check(!input.followCaret && input.verticalScroll == 40.0f,
+              "task toggle and the following layout must preserve a scrolled viewport");
+    }
+    check(input.textRevision == revision + 2 && input.undoStack.size() == 2,
+          "two task toggles must produce two reversible edits");
+    appState.pendingEditorCommand = neo::EditorCommand::Undo;
+    neo::applyEditorCommand(ui, appState);
+    build();
+    check(input.text[3] == 'x' && input.followCaret && input.verticalScroll > 40.0f,
+          "undo must still follow the restored caret");
+    input.followCaret = false;
+    appState.pendingEditorCommand = neo::EditorCommand::Redo;
+    neo::applyEditorCommand(ui, appState);
+    check(input.text[3] == ' ' && input.followCaret,
+          "redo must still restore text and enable caret following");
+    appState.pendingTaskByte = 3;
+    appState.pendingEditorCommand = neo::EditorCommand::ToggleTask;
+    neo::applyEditorCommand(ui, appState);
+    check(input.followCaret, "task toggle must also preserve enabled caret following");
+}
+
+void testImageCommandRejectsPlainDocuments() {
+    eui::Ui ui;
+    neo::AppState appState;
+    appState.lastRecoveryWrite = std::chrono::steady_clock::now();
+    auto& input = ui.state<State>(neo::kEditorInputId);
+    input.text = "original";
+    input.cursor = 8;
+    Model::clearSelection(input);
+    appState.doc.text = input.text;
+    appState.path = "plain.txt";
+    const auto revision = input.textRevision;
+    appState.pendingImageLink = "![](<D:/image.png>)";
+    appState.pendingEditorCommand = neo::EditorCommand::InsertImageLink;
+    neo::applyEditorCommand(ui, appState);
+    check(input.text == "original" && appState.doc.text == input.text &&
+              input.textRevision == revision && input.undoStack.empty(),
+          "queued image insertion must not modify a plain document");
+    check(appState.toastVisible && appState.pendingImageLink.empty(),
+          "rejected image command must show a reason and consume its payload");
+    appState.path = "note.md";
+    appState.pendingImageLink = "![](<D:/image.png>)";
+    appState.pendingEditorCommand = neo::EditorCommand::InsertImageLink;
+    neo::applyEditorCommand(ui, appState);
+    const std::string imageBlock = "original\n![](<D:/image.png>)\n";
+    check(input.text == imageBlock && appState.doc.text == input.text &&
+              input.cursor == static_cast<int>(imageBlock.size()),
+          "Markdown image insertion must create a standalone block and leave the caret after it");
+    appState.pendingEditorCommand = neo::EditorCommand::Undo;
+    neo::applyEditorCommand(ui, appState);
+    check(input.text == "original" && appState.doc.text == input.text,
+          "image reference insertion must undo in one step");
+    appState.pendingEditorCommand = neo::EditorCommand::Redo;
+    neo::applyEditorCommand(ui, appState);
+    check(input.text == imageBlock && appState.doc.text == input.text &&
+              input.cursor == static_cast<int>(imageBlock.size()),
+          "redo must restore the standalone image block and its post-image caret");
+}
+
+void testImageCommandSeparatesParagraphAndReplacesSelection() {
+    const std::string link = "![](<D:/image.png>)";
+    {
+        eui::Ui ui;
+        neo::AppState appState;
+        appState.lastRecoveryWrite = std::chrono::steady_clock::now();
+        auto& input = ui.state<State>(neo::kEditorInputId);
+        input.text = "left right";
+        input.cursor = 5;
+        Model::clearSelection(input);
+        appState.doc.text = input.text;
+        appState.path = "note.md";
+        appState.pendingImageLink = link;
+        appState.pendingEditorCommand = neo::EditorCommand::InsertImageLink;
+        neo::applyEditorCommand(ui, appState);
+        const std::string expected = "left \n" + link + "\n\nright";
+        check(input.text == expected && appState.doc.text == expected,
+              "image insertion in paragraph text must split it around a standalone block");
+        check(input.cursor == static_cast<int>(("left \n" + link + "\n").size()),
+              "paragraph split must leave the caret on the blank line after the image");
+        appState.pendingEditorCommand = neo::EditorCommand::Undo;
+        neo::applyEditorCommand(ui, appState);
+        check(input.text == "left right" && appState.doc.text == input.text,
+              "paragraph image insertion must remain one undoable edit");
+    }
+    {
+        eui::Ui ui;
+        neo::AppState appState;
+        appState.lastRecoveryWrite = std::chrono::steady_clock::now();
+        auto& input = ui.state<State>(neo::kEditorInputId);
+        input.text = "hello replace tail";
+        input.cursor = 6;
+        input.selectionStart = 6;
+        input.selectionEnd = 13;
+        appState.doc.text = input.text;
+        appState.path = "note.md";
+        appState.pendingImageLink = link;
+        appState.pendingEditorCommand = neo::EditorCommand::InsertImageLink;
+        neo::applyEditorCommand(ui, appState);
+        const std::string expected = "hello \n" + link + "\n\n tail";
+        check(input.text == expected && appState.doc.text == expected,
+              "image insertion must replace only the selected text and keep surrounding text");
+        check(input.cursor == static_cast<int>(("hello \n" + link + "\n").size()),
+              "selection replacement must leave the caret after the image block");
+        appState.pendingEditorCommand = neo::EditorCommand::Undo;
+        neo::applyEditorCommand(ui, appState);
+        check(input.text == "hello replace tail" && appState.doc.text == input.text,
+              "selection replacement and image block must undo together");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -871,6 +1012,9 @@ int main() {
     testSingleRecordForCompoundEdits();
     testAbortEditDetectsUncommittedChange();
     testApplyEditorCommandSyncsDivergedText();
+    testTaskTogglePreservesViewport();
+    testImageCommandRejectsPlainDocuments();
+    testImageCommandSeparatesParagraphAndReplacesSelection();
 
     if (gFailures != 0) {
         std::cerr << gFailures << " / " << gChecks << " checks failed\n";

@@ -5,8 +5,15 @@
 #include <cmath>
 #include <iostream>
 #include <string>
+#ifdef _DEBUG
+#include <crtdbg.h>
+#endif
 
 int main() {
+#ifdef _DEBUG
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
     using Model = components::input_detail::InputModel;
 
     const core::KeyEvent left{
@@ -412,6 +419,135 @@ int main() {
                       << ", expected within [" << body2.beg << "," << body2.end << "]\n";
             return 1;
         }
+        // ④b 回归（2026-10-06）：点第 2 格**开头**（列间空隙的右缘）。格界共享停靠点
+        //     的字节过去会按"歧义归洞之前"解析到第 1 格末尾 —— 点第 2 格开头输入，
+        //     文字却插进第 1 格。命中字节必须 clamp 回第 2 格。
+        const float hitStartX = bounds.x + inset + row2.runs[1].x + 0.5f;
+        const auto hitStart = tableLayout.pointerHit(hitStartX, hitY, bounds, width, inset);
+        const int rawProjectedHit = components::input_detail::docOffsetForX(
+            row2.metrics, row2.holes, row2.start, row2.runs[1].x + 0.5f);
+        if (rawProjectedHit != body1.end) {
+            std::cerr << "fixture no longer exposes the hidden-cell-boundary ambiguity (raw hit="
+                      << rawProjectedHit << ", expected first-cell end=" << body1.end << ")\n";
+            return 1;
+        }
+        // The document-aware table map must keep both sides of each hidden pipe,
+        // including horizontal navigation and exact cell endpoints.
+        for (int column = 0; column < 3; ++column) {
+            const auto& cell = tableDecorations[2].cells[static_cast<std::size_t>(column)];
+            for (const int endpoint : {cell.beg, cell.end}) {
+                const float x = Model::caretXInLine(row2, endpoint);
+                const auto endpointHit = tableLayout.pointerHit(
+                    bounds.x + inset + x, hitY, bounds, width, inset);
+                if (endpointHit.byteIndex != endpoint) {
+                    std::cerr << "table endpoint hit for column " << column << " byte "
+                              << endpoint << " resolved to " << endpointHit.byteIndex << "\n";
+                    return 1;
+                }
+            }
+        }
+        if (Model::previousCaretIndex(tableLayout.lineList(), body2.beg) != body1.end ||
+            Model::nextCaretIndex(tableLayout.lineList(), tableState.text, body1.end) != body2.beg) {
+            std::cerr << "horizontal movement must cross a hidden pipe from one cell edge to the other\n";
+            return 1;
+        }
+        if (hitStart.byteIndex < body2.beg || hitStart.byteIndex > body2.end) {
+            std::cerr << "pointer at column-2 start resolved to byte " << hitStart.byteIndex
+                      << ", expected within [" << body2.beg << "," << body2.end << "]\n";
+            return 1;
+        }
+        // ④b.1 端到端回归：把点击结果当作输入插入位置。只检查 byteIndex 范围容易
+        //     漏掉消费者后续行为；这里确认第二格开头输入后，第一格字节完全未变，且
+        //     标记确实出现在第二格内容里。
+        const auto insertionKeepsTargetCell = [&](int byteIndex, const char* label) {
+            if (byteIndex < body2.beg || byteIndex > body2.end) {
+                std::cerr << label << " hit escaped column 2: " << byteIndex << "\n";
+                return false;
+            }
+            std::string edited = text;
+            edited.insert(static_cast<std::size_t>(byteIndex), "X");
+            const std::string firstCell = edited.substr(
+                static_cast<std::size_t>(body1.beg),
+                static_cast<std::size_t>(body1.end - body1.beg));
+            const std::string secondCell = edited.substr(
+                static_cast<std::size_t>(body2.beg),
+                static_cast<std::size_t>(body2.end - body2.beg + 1));
+            if (firstCell != text.substr(static_cast<std::size_t>(body1.beg),
+                                         static_cast<std::size_t>(body1.end - body1.beg)) ||
+                secondCell.find('X') == std::string::npos) {
+                std::cerr << label << " inserted outside column 2 (first=\"" << firstCell
+                          << "\", second=\"" << secondCell << "\")\n";
+                return false;
+            }
+            return true;
+        };
+        if (!insertionKeepsTargetCell(hitStart.byteIndex, "column-2 start")) return 1;
+        // 列内右侧留白（第二格 padding）也属于第二格；点击后输入应落在第二格尾部，
+        // 不能经隐藏管道的反投影跳回第一格末尾。
+        const auto* hitColumns = tableLayout.tableColumnsFor(7);
+        if (hitColumns == nullptr || hitColumns->count() < 2) {
+            std::cerr << "table column geometry missing for padding hit\n";
+            return 1;
+        }
+        const float secondCellRightPaddingX = bounds.x + inset +
+            hitColumns->x[1] + hitColumns->width[1] - 1.0f;
+        const auto hitPadding = tableLayout.pointerHit(
+            secondCellRightPaddingX, hitY, bounds, width, inset);
+        if (!insertionKeepsTargetCell(hitPadding.byteIndex, "column-2 right padding")) return 1;
+        // ④b.2 窄的缩进表格：内容和 caret 会被 contentIndent 整体右移，列所有权判界
+        //     也必须使用同一个坐标系。40px 缩进在压缩列宽下足以让第二列右侧 padding
+        //     越过未平移的第二/三列中线；漏加偏移会把点击归到第三格。
+        auto indentedDecorations = tableDecorations;
+        for (auto& decoration : indentedDecorations) decoration.contentIndent = 40.0f;
+        constexpr float indentedViewportWidth = 150.0f;
+        Model::InputState indentedState;
+        indentedState.text = text;
+        indentedState.textRevision = 1;
+        const Model::InputLayout indentedTableLayout = Model::InputLayout::build(
+            indentedState, indentedViewportWidth, viewportHeight, indentedViewportWidth,
+            inset, inset, inset, fontSize, "monospace", fontSize, true,
+            &indentedDecorations);
+        const Model::InputLayout::Line* indentedRow2 = nullptr;
+        for (const Model::InputLayout::Line& candidate : indentedTableLayout.lineList()) {
+            if (candidate.tableId == 7 && candidate.lineNumber == 3 && candidate.lineStart) {
+                indentedRow2 = &candidate;
+                break;
+            }
+        }
+        if (indentedRow2 == nullptr || indentedRow2->runs.size() < 2) {
+            std::cerr << "indented table body did not expose the second-column start run\n";
+            return 1;
+        }
+        const core::Rect indentedBounds{bounds.x, bounds.y, indentedViewportWidth, bounds.height};
+        const float indentedHitY = indentedBounds.y + inset +
+            indentedTableLayout.geometryTable().top(
+                static_cast<int>(indentedRow2 - indentedTableLayout.lineList().data())) + 2.0f;
+        const auto* indentedColumns = indentedTableLayout.tableColumnsFor(7);
+        if (indentedColumns == nullptr || indentedColumns->count() < 2) {
+            std::cerr << "indented table column geometry is missing\n";
+            return 1;
+        }
+        const float indentedColumn2PaddingX = indentedBounds.x + inset +
+            40.0f + indentedColumns->x[1] + indentedColumns->width[1] - 1.0f;
+        const auto indentedHit = indentedTableLayout.pointerHit(
+            indentedColumn2PaddingX, indentedHitY, indentedBounds,
+            indentedViewportWidth, inset);
+        if (indentedHit.byteIndex < body2.beg || indentedHit.byteIndex > body2.end) {
+            std::cerr << "column-2 right padding with contentIndent=40 resolved to byte "
+                      << indentedHit.byteIndex << ", expected within ["
+                      << body2.beg << "," << body2.end << "]\n";
+            return 1;
+        }
+        // ④c 列间空隙的**左半**归第 1 格：字节落在第 1 格区间（格尾）——与共享
+        //     停靠点把光标画在第 2 格开头的既有观感一致。
+        const float gapMidX =
+            bounds.x + inset + (row2.runs[0].x + row2.runs[0].width + row2.runs[1].x) * 0.5f;
+        const auto hitGap = tableLayout.pointerHit(gapMidX, hitY, bounds, width, inset);
+        if (hitGap.byteIndex < body1.beg || hitGap.byteIndex > body1.end) {
+            std::cerr << "pointer in gap left half resolved to byte " << hitGap.byteIndex
+                      << ", expected within [" << body1.beg << "," << body1.end << "]\n";
+            return 1;
+        }
         // ⑤ 全行 caret 表单调不减（列吸附的隐含约束；不单调会让光标左右乱跳）。
         int previousByte = -1;
         float previousX = -1.0f;
@@ -480,6 +616,128 @@ int main() {
         if (touchLayout.lineList()[0].holes.size() != 2) {
             std::cerr << "touching holes must stay separate, got "
                       << touchLayout.lineList()[0].holes.size() << "\n";
+            return 1;
+        }
+    }
+
+    // Wrapped table rows retain cell ownership on each physical segment. Empty
+    // cells are hit-testable below segment zero, and vertical movement skips
+    // duplicate short-cell tails instead of becoming stuck on the wrapped row.
+    {
+        using LineDecoration = components::input_detail::LineDecoration;
+        using LineCell = components::input_detail::LineCell;
+        using LineHole = components::input_detail::LineHole;
+        const std::string longText(160, 'a');
+        const std::string secondLongText(160, 'x');
+        const std::string wrappedText = std::string("| h1 | h2 | h3 |\n") +
+            "| --- | --- | --- |\n" +
+            "| " + longText + " | b | c |\n" +
+            "| " + secondLongText + " |  | c |";
+        std::vector<LineDecoration> decorations;
+        std::vector<std::vector<LineCell>> sourceCells;
+        int lineBeg = 0;
+        while (lineBeg < static_cast<int>(wrappedText.size())) {
+            const int lineEnd = static_cast<int>(wrappedText.find('\n', static_cast<std::size_t>(lineBeg)));
+            const int end = lineEnd < 0 ? static_cast<int>(wrappedText.size()) : lineEnd;
+            LineDecoration decoration;
+            decoration.fontSize = fontSize;
+            decoration.lineHeight = fontSize * 1.2f;
+            decoration.tableId = 42;
+            std::vector<LineCell> cells;
+            int pipe = wrappedText.find('|', static_cast<std::size_t>(lineBeg));
+            while (pipe >= 0 && pipe < end) {
+                const int next = static_cast<int>(wrappedText.find('|', static_cast<std::size_t>(pipe + 1)));
+                if (next < 0 || next > end) break;
+                int beg = pipe + 1;
+                int cellEnd = next;
+                while (beg < cellEnd && wrappedText[static_cast<std::size_t>(beg)] == ' ') ++beg;
+                while (cellEnd > beg && wrappedText[static_cast<std::size_t>(cellEnd - 1)] == ' ') --cellEnd;
+                cells.push_back({beg, cellEnd});
+                pipe = next;
+            }
+            if (wrappedText.compare(static_cast<std::size_t>(lineBeg),
+                                    static_cast<std::size_t>(end - lineBeg), "| --- | --- | --- |") == 0) {
+                decoration.tableSeparator = true;
+                decoration.lineHeight = 3.0f;
+                decoration.holes.push_back({lineBeg, end});
+            } else {
+                decoration.cells = cells;
+                int cursor = lineBeg;
+                for (const LineCell& cell : cells) {
+                    if (cursor < cell.beg) decoration.holes.push_back({cursor, cell.beg});
+                    cursor = cell.end;
+                }
+                if (cursor < end) decoration.holes.push_back({cursor, end});
+            }
+            sourceCells.push_back(cells);
+            decorations.push_back(std::move(decoration));
+            lineBeg = end + 1;
+        }
+        Model::InputState wrappedState;
+        wrappedState.text = wrappedText;
+        wrappedState.textRevision = 1;
+        constexpr float wrappedWidth = 220.0f;
+        constexpr float wrappedInset = 8.0f;
+        const Model::InputLayout wrappedLayout = Model::InputLayout::build(
+            wrappedState, wrappedWidth, 500.0f, wrappedWidth, wrappedInset,
+            wrappedInset, wrappedInset, fontSize, "monospace", fontSize, true, &decorations);
+        const auto& lines = wrappedLayout.lineList();
+        const int firstRowBeg = static_cast<int>(wrappedText.find(longText)) - 2;
+        const int foundRowEnd = static_cast<int>(wrappedText.find('\n',
+            static_cast<std::size_t>(firstRowBeg)));
+        const int firstRowEnd = foundRowEnd < 0 ? static_cast<int>(wrappedText.size()) : foundRowEnd;
+        const int emptyRowBeg = static_cast<int>(wrappedText.find(secondLongText)) - 2;
+        const int foundEmptyRowEnd = static_cast<int>(wrappedText.find('\n',
+            static_cast<std::size_t>(emptyRowBeg)));
+        const int emptyRowEnd = foundEmptyRowEnd < 0
+            ? static_cast<int>(wrappedText.size()) : foundEmptyRowEnd;
+        std::vector<int> wrappedSegments;
+        std::vector<int> emptySegments;
+        for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
+            if (lines[static_cast<std::size_t>(i)].tableId == 42 &&
+                lines[static_cast<std::size_t>(i)].start == firstRowBeg &&
+                lines[static_cast<std::size_t>(i)].end >= firstRowEnd) {
+                wrappedSegments.push_back(i);
+            }
+            if (lines[static_cast<std::size_t>(i)].tableId == 42 &&
+                lines[static_cast<std::size_t>(i)].start == emptyRowBeg &&
+                lines[static_cast<std::size_t>(i)].end >= emptyRowEnd) {
+                emptySegments.push_back(i);
+            }
+        }
+        if (wrappedSegments.size() < 2 || emptySegments.size() < 2) {
+            std::cerr << "long table fixture did not produce multiple visual segments for both rows\n";
+            return 1;
+        }
+        const LineCell& emptyCell = sourceCells[3][1];
+        const auto* columns = wrappedLayout.tableColumnsFor(42);
+        if (columns == nullptr || columns->count() != 3 || emptyCell.beg != emptyCell.end) {
+            std::cerr << "wrapped fixture must expose its empty second-column cell\n";
+            return 1;
+        }
+        const int continuation = emptySegments[1];
+        const auto& continuationLine = lines[static_cast<std::size_t>(continuation)];
+        const float emptyCellX = wrappedInset + columns->x[1] + columns->width[1] * 0.5f;
+        const float emptyCellY = wrappedInset + wrappedLayout.geometryTable().top(continuation) + 2.0f;
+        const core::Rect wrappedBounds{0.0f, 0.0f, wrappedWidth, 500.0f};
+        const auto emptyHit = wrappedLayout.pointerHit(
+            emptyCellX, emptyCellY, wrappedBounds, wrappedWidth, wrappedInset);
+        const bool hasContinuationEmptyStop = std::any_of(
+            continuationLine.tableDocCaretStops.begin(), continuationLine.tableDocCaretStops.end(),
+            [](const Model::TableDocCaretStop& stop) { return stop.column == 1; });
+        if (emptyHit.byteIndex != emptyCell.beg || hasContinuationEmptyStop) {
+            std::cerr << "empty cell hit on wrapped continuation escaped its cell (got "
+                      << emptyHit.byteIndex << ")\n";
+            return 1;
+        }
+        const LineCell& shortCell = sourceCells[2][1];
+        wrappedState.cursor = shortCell.end;
+        Model::moveCursorVertical(wrappedState, 1, false, "monospace", fontSize,
+                                  wrappedWidth, 500.0f);
+        if (wrappedState.cursor != emptyCell.beg) {
+            std::cerr << "Down from short cell tail got stuck inside wrapped siblings (got "
+                      << wrappedState.cursor << ", expected next row empty cell "
+                      << emptyCell.beg << ")\n";
             return 1;
         }
     }

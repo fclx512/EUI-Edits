@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -40,10 +41,15 @@ const fs::path& workDir() {
 }
 
 std::string writeBytes(const std::string& name, const std::string& bytes) {
-    const fs::path path = workDir() / name;
+    const fs::path path = workDir() / neo::textfile::pathFromUtf8(name);
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     return neo::textfile::pathToUtf8(path);
+}
+
+std::string readBytes(const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
 // 小端写入器：拼 DIB 头与像素用。
@@ -218,6 +224,13 @@ void testPngEncode() {
     check(neo::pngencode::encodeRgba(3, 2, rgba.data(), png, error), "PNG 编码应成功：" + error);
     check(png.size() > 8 && png.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0, "输出应有 PNG magic");
 
+    neo::clipboardimage::ImageData clipboardPng;
+    check(neo::clipboardimage::parsePng(reinterpret_cast<const unsigned char*>(png.data()), png.size(),
+                                         clipboardPng, error),
+          "注册 PNG 剪贴板载荷应可解析：" + error);
+    check(clipboardPng.width == 3 && clipboardPng.height == 2 && clipboardPng.rgba == rgba,
+          "注册 PNG 应解成一致的 top-down RGBA 像素");
+
     int width = 0;
     int height = 0;
     int channels = 0;
@@ -273,6 +286,45 @@ void testAttachment() {
     const std::string second = neo::attachment::uniqueFileName(dirUtf8, "image");
     check(second != first && second.find("-2.png") != std::string::npos,
           "撞名后应自增 -2 且不覆盖已有文件");
+
+    // 粘贴 Explorer 文件：共享列表也用于文件对话框，避免过滤器与二次校验漂移。
+    const auto& extensions = neo::attachment::supportedImageExtensions();
+    const std::vector<std::string> expected = {"png", "jpg", "jpeg", "bmp", "gif", "svg", "tga",
+                                                "hdr", "ppm", "pgm", "pnm", "psd", "pic"};
+    check(extensions == expected, "图片类型列表应与渲染器当前格式一致");
+    check(neo::attachment::isSupportedImagePath("D:/图片/测试.JPEG"), "扩展名匹配应忽略大小写并保留中文路径");
+    check(!neo::attachment::isSupportedImagePath("D:/图片/测试.webp"), "WebP 不应出现在当前支持列表");
+    check(neo::attachment::imageExtension("D:/图片/测试.JPEG") == "jpeg", "源格式扩展名应标准化为小写");
+
+    const std::string sourcePath = writeBytes("原图 测试.PNG", std::string("PNG original bytes\0with tail", 28));
+    const std::string targetDir = neo::textfile::pathToUtf8(workDir() / neo::textfile::pathFromUtf8("附件 图片"));
+    std::string copyError;
+    const std::string copiedName = neo::attachment::copyImageFile(sourcePath, targetDir, "image", copyError);
+    check(!copiedName.empty() && copyError.empty(), "支持格式应复制到附件目录：" + copyError);
+    check(copiedName.size() > 4 && copiedName.substr(copiedName.size() - 4) == ".png",
+          "复制附件应保留源文件格式扩展名");
+    check(readBytes(neo::textfile::pathFromUtf8(targetDir) / neo::textfile::pathFromUtf8(copiedName)) ==
+              std::string("PNG original bytes\0with tail", 28),
+          "复制附件应逐字节保留源文件内容");
+    const std::string copiedAgain = neo::attachment::copyImageFile(sourcePath, targetDir, "image", copyError);
+    check(!copiedAgain.empty() && copiedAgain != copiedName,
+          "相同秒内重复复制不得覆盖已有附件");
+
+    const std::string gifPath = writeBytes("动画.gif", "GIF original bytes");
+    const std::string gifName = neo::attachment::copyImageFile(gifPath, targetDir, "image", copyError);
+    check(gifName.size() > 4 && gifName.substr(gifName.size() - 4) == ".gif" &&
+              readBytes(neo::textfile::pathFromUtf8(targetDir) / neo::textfile::pathFromUtf8(gifName)) ==
+                  "GIF original bytes",
+          "GIF 粘贴应保留扩展名和原始字节");
+    const std::string rejectedTarget = neo::textfile::pathToUtf8(
+        workDir() / neo::textfile::pathFromUtf8("不应创建"));
+    check(neo::attachment::copyImageFile("D:/source.webp", rejectedTarget, "image", copyError).empty() &&
+              !fs::exists(neo::textfile::pathFromUtf8(rejectedTarget)),
+          "不支持格式不得创建附件目录或写文件");
+
+    check(neo::attachment::markdownAbsoluteLink("D:\\笔记 库\\子(1)\\图 #100%.png") ==
+              "![](<D:/笔记 库/子(1)/图 #100%.png>)",
+          "绝对图片链接应统一斜线并原样保留空格、中文、括号、# 与 %");
 }
 
 } // namespace

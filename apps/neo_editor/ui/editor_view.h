@@ -6,6 +6,7 @@
 #include "model/lp_decorations.h"
 #include "model/text_file.h"
 #include "platform/clipboard_image.h"
+#include "state/app_actions.h"
 #include "state/app_state.h"
 #include "state/tabs_trace.h"
 #include "ui/metrics.h"
@@ -211,10 +212,17 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
         })
         // 图片粘贴（R2）：Ctrl+V 且剪贴板无文本、有位图时转附件流程。只在编辑器
         // 实例挂回调——查找栏/弹窗输入不挂，纯文本粘贴行为原样不变。
+        // 剪贴板里既无文本、位图也无单个受支持图片文件：明确拒绝，不静默吞掉。
         .onImagePaste([&state] {
-            if (neo::clipboardimage::available()) {
+            if (!state.markdownCapable()) {
+                showToast(state, i18n::tr("safety.cannot_insert_image"),
+                          i18n::tr("safety.image_markdown_only"));
+            } else if (neo::clipboardimage::available()) {
                 state.pendingImagePaste = true;
                 app::requestUpdate();
+            } else {
+                showToast(state, i18n::tr("safety.paste_rejected"),
+                          i18n::tr("safety.paste_no_image"));
             }
         })
         // 命中回调（S3f 批次 A/E）。四个分支，互不叠加：

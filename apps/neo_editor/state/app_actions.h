@@ -84,10 +84,15 @@ const std::vector<ReopenEncodingOption>& reopenEncodingOptions();
 void requestReloadWithEncoding(AppState& state, std::size_t optionIndex);
 void performReloadWithEncoding(AppState& state, const textfile::ForcedEncoding& forced);
 
-// 图片粘贴落盘（R2）。pendingImagePaste 置位后的每帧 tick 消费者：读剪贴板位图、
-// PNG 编码、附件目录原子落盘，最后排队 InsertImageLink 在 compose 插入链接。
+// 图片粘贴落盘（R2）。pendingImagePaste 的 tick 消费者：剪贴板位图转 PNG，或将
+// 单个 CF_HDROP 文件按原字节复制到附件目录，再排队 InsertImageLink。
 // 只能在主线程调用（touch state/file IO/对话框）。
 void pasteImageAsAttachment(AppState& state);
+
+// 选择导入图片（2026-10-06）。pendingImageImport 置位后的每帧 tick 消费者：弹系统
+// 文件对话框选一张图片，按绝对路径插链接（不建附件目录、不写盘），同样排队
+// InsertImageLink。只能在主线程调用（弹系统对话框）。
+void importImageFromPicker(AppState& state);
 
 void chooseVaultDirectory(AppState& state);
 // 地址栏回车：解析这段文本并跳过去（目录=进入并展开，文件=展开到它并打开）。
