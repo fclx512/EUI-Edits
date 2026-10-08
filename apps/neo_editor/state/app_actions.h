@@ -98,6 +98,8 @@ void chooseVaultDirectory(AppState& state);
 // 地址栏回车：解析这段文本并跳过去（目录=进入并展开，文件=展开到它并打开）。
 void navigateToVaultPath(AppState& state, std::string text);
 void refreshVault(AppState& state, bool resetScroll);
+// 启动/打开文档：复用已有快照并后台核验；冷根显示加载态，不等待整库扫描。
+void prepareVault(AppState& state, bool resetScroll);
 // 采纳/请求共享扫描快照（阶段 B）：命中同根快照直接复用，未命中排后台扫描（不阻塞）。
 void adoptVaultScan(AppState& state, bool resetScroll);
 // 每帧轻量采纳：共享快照代次变了才重建 rows。

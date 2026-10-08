@@ -41,7 +41,9 @@ Markdown 覆盖常见写作语法与部分扩展，不保证完整 Obsidian 兼�
 
 ## 开始使用
 
-从 [0.1.0 发布页](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.0)下载 `EUI-Edits-0.1.0-windows-x64.exe`，放在准备长期使用的位置直接运行，无需解压资源目录。旁置 `.exe.sha256` 文件可用于校验。程序面向 Windows 10/11 x64，目前未签名；Windows 11 已进行实机验证，Windows 10 尚未完成同等范围的测试。
+从 [0.1.1 发布页](https://github.com/fclx512/EUI-Edits/releases/tag/neoeditor-v0.1.1)下载 `EUI-Edits-0.1.1-windows-x64.exe`，放在准备长期使用的位置直接运行，无需解压资源目录。旁置 `.exe.sha256` 文件可用于校验。程序面向 Windows 10/11 x64，目前未签名；Windows 11 已进行实机验证，Windows 10 尚未完成同等范围的测试。
+
+**0.1.1 更新：** 修正表格光标与图片插入，减少长行布局复制和静止拖选重复构建，启动时后台加载目录。变化与测试边界见[发布说明](apps/neo_editor/RELEASE-NOTES.md)。
 
 ### 常用操作
 
@@ -131,10 +133,10 @@ EUI-Edits 聚焦本地文本编辑，不提供知识库管理、代码补全、�
 .\scripts\check-neoeditor.ps1
 
 # 编译 Release x64，并生成单 EXE 与 SHA256 校验文件
-.\scripts\package-neoeditor.ps1 -Version 0.1.0
+.\scripts\package-neoeditor.ps1 -Version 0.1.1
 ```
 
-产物位于 `out/euiedits-0.1.0-single-exe/`，文件名为 `EUI-Edits-0.1.0-windows-x64.exe`。打包采用 Win32 / Direct2D、静态框架与 MSVC 运行库，嵌入图标和许可证，并检查版本、DLL 依赖与许可证导出；真实窗口的交互验收需另行进行。
+产物位于 `out/euiedits-0.1.1-single-exe/`，文件名为 `EUI-Edits-0.1.1-windows-x64.exe`。打包采用 Win32 / Direct2D、静态框架与 MSVC 运行库，嵌入图标和许可证，并检查版本、DLL 依赖与许可证导出；真实窗口的交互验收需另行进行。
 
 脚本自动寻找工具；查找失败可用 `-CMake`、`-Generator`，检查脚本另有 `-Python`，打包脚本另有 `-Dumpbin`。重新构建时可用 `-OutputDirectory` 指定新的打包输出目录，已有发行文件不会被覆盖。源码迁移后使用新构建目录，勿复用仍记录旧路径的 CMake 缓存。
 

@@ -3,6 +3,7 @@
 #include "model/i18n.h"
 
 #include "state/app_actions.h"
+#include "state/vault_cache.h"
 #include "platform/vault_rename.h"
 #include "ui/metrics.h"
 #include "ui/outline_view.h"
@@ -189,15 +190,19 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
 
     // 地址栏跳转后把目标行滚进视野。行号要等 rows 重建完才存在，
     // 所以跳转那一帧只记了相对路径，这里消费。
-    if (!state.vaultPendingReveal.empty()) {
+    if (!state.vaultPendingReveal.empty() && state.vaultScan) {
+        bool revealed = false;
         for (std::size_t i = 0; i < state.rows.size(); ++i) {
             if (state.rows[i].relative == state.vaultPendingReveal) {
                 // 留两行余量，目标不会贴在列表顶端。
                 state.vaultScroll = std::max(0.0f, static_cast<float>(i) * rowHeight - rowHeight * 2.0f);
+                revealed = true;
                 break;
             }
         }
-        state.vaultPendingReveal.clear();
+        // 暖快照可能尚未包含刚出现的目标；后台核验完成前保留请求。
+        // 扫描已结束仍未命中时清掉，避免不存在/被过滤的目标永久挂起。
+        if (revealed || !vaultcache::query(state.vaultRoot).scanning) state.vaultPendingReveal.clear();
     }
     const float listHeight = std::max(0.0f,
                                       height - 16.0f - tabsHeight - kHeaderHeight - kRootHeight - kGap * 3.0f);

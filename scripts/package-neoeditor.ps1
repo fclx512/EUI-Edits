@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$')]
-    [string]$Version = '0.1.0',
+    [string]$Version = '0.1.1',
     [string]$BuildDirectory,
     [string]$OutputDirectory,
     [string]$CMake,
@@ -94,9 +94,14 @@ foreach ($dll in $dlls) {
 }
 # Explicit source-path audit; /pathmap is applied by the standalone CMake option.
 $binary = [IO.File]::ReadAllBytes($exe)
+$utf8Binary = [Text.Encoding]::UTF8.GetString($binary)
+$utf16Binary = [Text.Encoding]::Unicode.GetString($binary)
 foreach ($path in @($repo, $BuildDirectory)) {
     foreach ($candidate in @($path, $path.Replace('\','/'))) {
-        if ([Text.Encoding]::ASCII.GetString($binary).Contains($candidate) -or [Text.Encoding]::Unicode.GetString($binary).Contains($candidate)) {
+        # ASCII decoding loses Chinese source paths. Audit UTF-8 narrow strings
+        # and UTF-16 wide strings, including casing differences on Windows.
+        if ($utf8Binary.IndexOf($candidate, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            $utf16Binary.IndexOf($candidate, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
             throw 'Executable contains a development source/build path.'
         }
     }

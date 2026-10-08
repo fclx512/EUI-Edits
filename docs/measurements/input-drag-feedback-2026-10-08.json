@@ -1,0 +1,176 @@
+{
+  "schema": 1,
+  "date": "2026-10-08",
+  "conclusion": "Unchanged held input selection stops requesting compose/paint. No whole-GUI CPU improvement claim.",
+  "git_head": "44123ad8412010f01632763aa99824e7545bbbec",
+  "candidate": {
+    "path": "out/performance-20261008-r3/EUI-Edits.exe",
+    "sha256": "bcf554ea339cbebd377ba76df97ae6661615acd16bb927da09fc965e00355ec5"
+  },
+  "full_rebuild": {
+    "path": "build-issues-20261006/Release/neo_editor.exe",
+    "sha256": "24740c7306cfea1e73072b525f8e46f6e4e5576808557e053c48a7a896201e28",
+    "gui_tested": false,
+    "note": "Separate rebuild artifact; GUI conclusions bind to the preserved candidate."
+  },
+  "source_sha256": {
+    "components/input.h": "bd98bea09a5b5123de3f9b98b0d0f2a963b7abe5485dcb3b1cec771e8f00e9fe",
+    "components/input_model.h": "b9edd95899eb4d698f6e6977fa64e51e88d01d69b8857a661fe1e9dbfb90e4ba",
+    "core/dsl.h": "e7d2552f0f072eeb5c593fb0e90318b02d1414f4d021e3a82b2d26a380bb0b17",
+    "core/runtime/runtime_input.h": "c06664400c16f978df044da5c07f83f37c0958143552c51d99f0d060088deeaf",
+    "core/input/input_state.h": "e591ca73428529f001446d5609a38feeb87606407e97c26da1934221114b47a2",
+    "core/app/dsl_window_runtime.h": "cd1fdfb0008f750d66f3c6071953419b46d4eda9be41343cb29e70565e0cc34b",
+    "tests/unit/input_drag_feedback.cpp": "2b1ddb1937d9a41d088754d510a2fb793218420c6b967d413c9844924cfb1495",
+    "tests/unit/input_callback_layout.cpp": "2dd42473354d54eb18b05ee0597afaaec5fabdd26d9837a154b8b06f7bb5326d",
+    "tests/unit/input_pointer_feedback.cpp": "76fdcf589b0491092ba34d751edfd167c503a3fe3ccfc27fb977b9a537d78aa4"
+  },
+  "script_sha256": {
+    "negative-test.py": "39220654ce6be33350a411df864ff26b0a6c59f835be8f46342a41317262f700",
+    "launch-monitor.py": "6eaeb17cbe223eb03eb92b8a766ead8612aab0c3f048cca43fe3b6c3c89671ef",
+    "summarize.py": "db3f04cf637cfd9dd4e457bd90829a8c81f509367b50cf9215bc52f1d94931f2"
+  },
+  "regression": {
+    "status": "PASS",
+    "baseline": [
+      {
+        "scenario": "singleline",
+        "compose": 60,
+        "paint_requests": 60,
+        "updates": 60,
+        "single_informational_ms": 37.8831
+      },
+      {
+        "scenario": "multiline",
+        "compose": 60,
+        "paint_requests": 60,
+        "updates": 60,
+        "single_informational_ms": 1.7979
+      }
+    ],
+    "optimized": [
+      {
+        "scenario": "singleline",
+        "compose": 0,
+        "paint_requests": 0,
+        "updates": 60,
+        "single_informational_ms": 4.9442
+      },
+      {
+        "scenario": "multiline",
+        "compose": 0,
+        "paint_requests": 0,
+        "updates": 60,
+        "single_informational_ms": 0.2753
+      }
+    ],
+    "method": "Real InputBuilder + Runtime + updateWindowFrame; synthetic pointer queue; timers/transitions disabled; 60 updates per scenario.",
+    "render_scope": "Compose and host paint-request flags, not actual D2D frames.",
+    "negative": {
+      "baseline_input_sha256": "527670b992f757e7149ff56651ad0297009cdd7c03cec31593b0c2dafc16915a",
+      "optimized_input_sha256": "bd98bea09a5b5123de3f9b98b0d0f2a963b7abe5485dcb3b1cec771e8f00e9fe",
+      "restored_exact": true,
+      "negative_exit": 1,
+      "optimized_exit": 0
+    },
+    "negative_expected_failures": 5,
+    "timing_is_informational": true
+  },
+  "checks": {
+    "targeted_ctest": {
+      "passed": 18,
+      "total": 18,
+      "log": "out/performance-20261008-r3/ctest.log"
+    },
+    "full_unit_ctest": {
+      "passed": 88,
+      "total": 88,
+      "label": "unit",
+      "log": "out/performance-20261008-r3/full-ctest.log"
+    },
+    "full_release_build": true,
+    "i18n": "PASS"
+  },
+  "gui_correctness": [
+    {
+      "pid": 4748,
+      "sha256": "bcf554ea339cbebd377ba76df97ae6661615acd16bb927da09fc965e00355ec5",
+      "fixture_sha256": "c6a41091c9f2794032b279582cacc983128d167312eace98301fde3702901485",
+      "document": "D:\\编译开发\\EUI-Edits\\out\\performance-20261008-r3\\verification\\J80.json",
+      "exit_code": 0,
+      "software_d2d": true,
+      "window_dc": true,
+      "trace_enabled": true,
+      "label": "candidate-json",
+      "status": "PASS",
+      "evidence": "out/performance-20261008-r3/candidate-json",
+      "foreground_samples": 802,
+      "total_samples": 807,
+      "edit_check": {
+        "marker_exact": true,
+        "selected_start": 8,
+        "selected_end": 97,
+        "selected_chars": 89,
+        "replacement_exact": true,
+        "original_sha256": "c6a41091c9f2794032b279582cacc983128d167312eace98301fde3702901485",
+        "edited_sha256": "fc5776a1225435797e4c77b9bed1596350be7b3db442da3efa6fb7a613cdde5f",
+        "restored_sha256": "c6a41091c9f2794032b279582cacc983128d167312eace98301fde3702901485",
+        "undo_save_exact": true
+      }
+    },
+    {
+      "pid": 13796,
+      "sha256": "bcf554ea339cbebd377ba76df97ae6661615acd16bb927da09fc965e00355ec5",
+      "fixture_sha256": "a9749c6b9bee2602423746918b9bbc9f6fb1433185ba79030fa452bc5172177d",
+      "document": "D:\\编译开发\\EUI-Edits\\out\\performance-20261008-r3\\verification\\table-cn.md",
+      "exit_code": 0,
+      "software_d2d": true,
+      "window_dc": true,
+      "trace_enabled": true,
+      "label": "candidate-table",
+      "status": "INTERRUPTED",
+      "evidence": "out/performance-20261008-r3/candidate-table",
+      "foreground_samples": 96,
+      "total_samples": 157
+    },
+    {
+      "pid": 24492,
+      "sha256": "bcf554ea339cbebd377ba76df97ae6661615acd16bb927da09fc965e00355ec5",
+      "fixture_sha256": "a9749c6b9bee2602423746918b9bbc9f6fb1433185ba79030fa452bc5172177d",
+      "document": "D:\\编译开发\\EUI-Edits\\out\\performance-20261008-r3\\verification\\table-cn.md",
+      "exit_code": 0,
+      "software_d2d": true,
+      "window_dc": true,
+      "trace_enabled": true,
+      "label": "candidate-table-resumed",
+      "status": "PASS",
+      "evidence": "out/performance-20261008-r3/candidate-table-resumed",
+      "foreground_samples": 1395,
+      "total_samples": 1397,
+      "edit_check": {
+        "first_column_exact": true,
+        "original_sha256": "a9749c6b9bee2602423746918b9bbc9f6fb1433185ba79030fa452bc5172177d",
+        "first_edit_sha256": "4f3223861f6439522fadda93c26d51ab24528e007fc7eab4cea3e62a2c48120c",
+        "first_undo_save_exact": true,
+        "last_column_reverse_exact": true,
+        "last_edit_sha256": "c6e238d20c2307d17aab08d13c6e25dfa139985a4d0f55170914ebcabc5def0d",
+        "restored_sha256": "a9749c6b9bee2602423746918b9bbc9f6fb1433185ba79030fa452bc5172177d",
+        "last_undo_save_exact": true
+      }
+    }
+  ],
+  "not_covered": [
+    "multi-round fixed-trajectory GUI CPU/memory A/B",
+    "end-to-end input/present latency",
+    "low-end hardware",
+    "default hardware GPU",
+    "real Chinese IME",
+    "multi-monitor DPI",
+    "edge auto-scroll acceptance",
+    "OPT-002 cross-viewport selection",
+    "long-term stability",
+    "remaining directory and C-group cases",
+    "performance-label benchmarks"
+  ],
+  "next_measurement": "Compare r2/r3 with identical environments and 3 new processes per sample; separate actual movement, held stationary, and released idle phases before selecting another production change.",
+  "no_commit_or_push": true
+}

@@ -175,7 +175,7 @@ bool loadDocument(AppState& state, const std::string& path) {
     // 文档库跟随当前文档：换到它所在目录（已在根内则不动）。放在最后 —— 根变了
     // 随后必须重扫，否则上一份目录树还挂在旧根上（展开项、行都是旧根的）。
     if (followDocumentDirectory(state, path) | mergeRelatedVaultRoots(state)) {
-        refreshVault(state, true);
+        prepareVault(state, true);
     }
     const auto relative = vaultRelativePath(state, path);
     if (!relative.empty() && documentWithinRoot(path, state.vaultRoot)) {
@@ -735,7 +735,7 @@ void adoptVaultScan(AppState& state, bool resetScroll) {
     const vaultcache::ScanView view = vaultcache::query(state.vaultRoot);
     if (!view.scan) {
         // 首次没有快照：显示明确加载态（rows 空）并排一次后台扫描，不在主线程阻塞。
-        vaultcache::requestScan(state.vaultRoot);
+        if (!view.scanning) vaultcache::requestScan(state.vaultRoot);
         state.vaultScan.reset();
         state.vaultRowsGeneration = 0;
         state.rows.clear();
@@ -745,6 +745,7 @@ void adoptVaultScan(AppState& state, bool resetScroll) {
     if (state.vaultRowsGeneration == view.generation) {
         return;  // 同一代次：直接复用快照与该页视图，不重建 rows。
     }
+    tracelog::Span span("vault-adopt");
     const bool firstRows = state.vaultRowsGeneration == 0;
     if (firstRows || resetScroll) {
         state.vaultScroll = 0.0f;
@@ -762,19 +763,35 @@ void adoptVaultScan(AppState& state, bool resetScroll) {
     }
     state.vaultRowsGeneration = view.generation;
     rebuildRows(state);
-    if (!view.scan->warning.empty()) {
+    if (!view.scan->ok) {
+        showToast(state, i18n::tr("safety.vault_failed"), view.scan->error);
+    } else if (!view.scan->warning.empty()) {
         showToast(state, i18n::tr("safety.vault_partial"), view.scan->warning);
     }
+    vaultcache::prune(state.vaultRoot);
 }
 
 // 每帧轻量采纳：共享快照代次变了才重建 rows（切页/后台扫描完成后各发生一次）。
 void tickVaultScan(AppState& state) {
-    if (state.vaultRoot.empty() || !state.vaultScan) {
+    if (state.vaultRoot.empty()) {
         return;
     }
     const vaultcache::ScanView view = vaultcache::query(state.vaultRoot);
-    if (view.scan && view.generation != state.vaultRowsGeneration) {
+    if (view.scan && (!state.vaultScan || view.generation != state.vaultRowsGeneration)) {
         adoptVaultScan(state, false);
+    }
+}
+
+void prepareVault(AppState& state, bool resetScroll) {
+    tracelog::Span span("vault-prepare");
+    mergeRelatedVaultRoots(state);
+    refreshTabPresentation(state);
+    adoptVaultScan(state, resetScroll);
+    if (!state.vaultRoot.empty()) {
+        const auto view = vaultcache::query(state.vaultRoot);
+        // adoptVaultScan 已为冷根排队。暖根在后台核验，启动重复调用只复用在飞任务，
+        // 不将读取同一快照误当作目录变化而追加第二次扫描。
+        if (view.scan && !view.scanning) requestVaultRefresh(state);
     }
 }
 

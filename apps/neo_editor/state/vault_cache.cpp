@@ -72,6 +72,7 @@ std::string foldCase(std::string value) {
 }
 
 vault::ScanResult runScan(const std::string& root) {
+    tracelog::Span span("vault-root-scan");
     Store& s = store();
     if (s.scanner) {
         return s.scanner(root);
@@ -120,15 +121,30 @@ void pruneLocked(Store& s, const std::string& activeKey) {
     }
 }
 
-void publishLocked(Store& s, const std::string& key, std::shared_ptr<const vault::ScanResult> scan) {
+struct PreparedScan {
+    std::shared_ptr<const vault::ScanResult> scan;
+    std::size_t bytes = 0;
+};
+
+PreparedScan prepareScan(const std::string& root) {
+    PreparedScan prepared;
+    prepared.scan = std::make_shared<const vault::ScanResult>(runScan(root));
+    // Walking a large tree belongs to the scan worker, not the UI completion
+    // callback or the shared store lock. Publish only the immutable snapshot
+    // and its already computed estimate.
+    prepared.bytes = estimateBytes(*prepared.scan);
+    return prepared;
+}
+
+void publishLocked(Store& s, const std::string& key, PreparedScan prepared) {
     auto found = s.entries.find(key);
     if (found == s.entries.end()) {
         s.scansDropped++;  // 根已被丢弃/换根：旧结果不得污染新根。
         return;
     }
     Entry& entry = found->second;
-    entry.scan = std::move(scan);
-    entry.bytes = entry.scan ? estimateBytes(*entry.scan) : 0;
+    entry.scan = std::move(prepared.scan);
+    entry.bytes = prepared.bytes;
     ++entry.generation;
     entry.hasSnapshot = true;
     ++s.scansCompleted;
@@ -147,8 +163,8 @@ void scheduleLocked(Store& s, const std::string& key, const std::string& root) {
     // restart：同一 root key 完成后再重扫时状态是 Done，runOnce 会被 beginTask 拒绝；
     // 协调查询已保证同一时刻只有一个 in-flight，restart 只用于复用 key 的后续重扫。
     core::async::restart("neo.vault.scan." + key,
-                         [root]() { return runScan(root); },
-                         [key, requestEpoch](core::async::Result<vault::ScanResult> result) {
+                         [root]() { return prepareScan(root); },
+                         [key, requestEpoch](core::async::Result<PreparedScan> result) {
                              Store& inner = store();
                              std::lock_guard<std::mutex> lock(inner.mutex);
                              auto found = inner.entries.find(key);
@@ -165,8 +181,7 @@ void scheduleLocked(Store& s, const std::string& key, const std::string& root) {
                              }
                              entry.asyncEpoch = 0;
                              if (entry.requestEpoch == requestEpoch) {
-                                 publishLocked(inner, key,
-                                               std::make_shared<const vault::ScanResult>(std::move(result.value)));
+                                 publishLocked(inner, key, std::move(result.value));
                              } else {
                                  // A newer synchronous publication owns the snapshot.
                                  inner.scansDropped++;
@@ -295,7 +310,7 @@ std::uint64_t requestScanSync(const std::string& root) {
         entry.rescanPending = false;  // This scan covers requests already pending.
     }
 
-    vault::ScanResult scan = runScan(root);
+    PreparedScan prepared = prepareScan(root);
     std::lock_guard<std::mutex> lock(s.mutex);
     auto found = s.entries.find(key);
     if (found == s.entries.end()) {
@@ -306,7 +321,7 @@ std::uint64_t requestScanSync(const std::string& root) {
     if (entry.syncEpoch != requestEpoch || entry.requestEpoch != requestEpoch) {
         ++s.scansDropped;
     } else {
-        publishLocked(s, key, std::make_shared<const vault::ScanResult>(std::move(scan)));
+        publishLocked(s, key, std::move(prepared));
     }
     if (entry.syncEpoch == requestEpoch) {
         entry.syncEpoch = 0;

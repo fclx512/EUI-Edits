@@ -8,6 +8,8 @@ using Window = void;
 constexpr int True = 1, False = 0, Iconified = 1;
 bool initialize();
 void shutdownHost();
+// Bounded pump; pending messages continue on the next host iteration so input
+// floods cannot monopolize the interval between frames. FIFO remains intact.
 void pollEvents();
 void waitEvents();
 void waitEventsTimeout(double seconds);

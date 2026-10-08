@@ -1,0 +1,361 @@
+{
+  "schema": 1,
+  "date": "2026-10-08",
+  "repo": "D:\\编译开发\\EUI-Edits",
+  "branch": "main",
+  "head": "44123ad8412010f01632763aa99824e7545bbbec",
+  "remote_origin": "https://github.com/fclx512/EUI-Edits.git",
+  "remote_fetched_this_turn": false,
+  "version": "0.1.0",
+  "target_release_version": null,
+  "new_commit": false,
+  "new_push": false,
+  "new_tag": false,
+  "new_public_release": false,
+  "inventory_self_hash_excluded": true,
+  "modified": 15,
+  "untracked": 21,
+  "files": [
+    {
+      "status": " M",
+      "path": "CMakeLists.txt",
+      "group": "production_build",
+      "bytes": 70721,
+      "sha256": "0cf939469b62d71333e61193fca437066b51dfc7e6b4cc27aa445688c90985db"
+    },
+    {
+      "status": " M",
+      "path": "apps/neo_editor/app.cpp",
+      "group": "production_build",
+      "bytes": 38951,
+      "sha256": "5505a417ecf55b8f0d0d332175c7f1f374221057e7e2da3af3369b43c1d60e60"
+    },
+    {
+      "status": " M",
+      "path": "apps/neo_editor/state/app_actions.cpp",
+      "group": "production_build",
+      "bytes": 75361,
+      "sha256": "d39ae9ee8a0b0bf08f2a774640b0739d679dcce9814704b40dc981edd9dda509"
+    },
+    {
+      "status": " M",
+      "path": "apps/neo_editor/state/app_actions.h",
+      "group": "production_build",
+      "bytes": 10266,
+      "sha256": "5dc6da03950ba38ffb7cc4722c929e116969d7847477c947d5b0f6dd27ad0748"
+    },
+    {
+      "status": " M",
+      "path": "apps/neo_editor/state/vault_cache.cpp",
+      "group": "production_build",
+      "bytes": 14005,
+      "sha256": "c9d7f053d74510d6a56770446fd97785088e345c4320a904b1179c865f49b294"
+    },
+    {
+      "status": " M",
+      "path": "apps/neo_editor/ui/vault_view.h",
+      "group": "production_build",
+      "bytes": 33274,
+      "sha256": "790700d8c13762651837e8009247cb79e827548ad13885642d557f3f850878de"
+    },
+    {
+      "status": " M",
+      "path": "components/input.h",
+      "group": "production_build",
+      "bytes": 107907,
+      "sha256": "bd98bea09a5b5123de3f9b98b0d0f2a963b7abe5485dcb3b1cec771e8f00e9fe"
+    },
+    {
+      "status": " M",
+      "path": "core/dsl.h",
+      "group": "production_build",
+      "bytes": 63994,
+      "sha256": "e7d2552f0f072eeb5c593fb0e90318b02d1414f4d021e3a82b2d26a380bb0b17"
+    },
+    {
+      "status": " M",
+      "path": "core/runtime/runtime_input.h",
+      "group": "production_build",
+      "bytes": 23789,
+      "sha256": "c06664400c16f978df044da5c07f83f37c0958143552c51d99f0d060088deeaf"
+    },
+    {
+      "status": " M",
+      "path": "core/window/win32_backend.cpp",
+      "group": "production_build",
+      "bytes": 30250,
+      "sha256": "fe71f3f5cd74191a2dc7c43e96ca8e0cc963a4cb205c1b468d81c74f47cb3f62"
+    },
+    {
+      "status": " M",
+      "path": "core/window/win32_host.h",
+      "group": "production_build",
+      "bytes": 1760,
+      "sha256": "baedee5a0b1fc4773ef57a46df4c5591ce96848b65f2a8e400cc5ebc7358d8ac"
+    },
+    {
+      "status": " M",
+      "path": "docs/EUI-Edits-后续优化方向-2026-10-05.md",
+      "group": "documentation",
+      "bytes": 19495,
+      "sha256": "0ebf3bb9ddf957e3e58db504271e808beecca205629cc8d2ae38b79e36b6d046"
+    },
+    {
+      "status": "??",
+      "path": "docs/EUI-Edits-性能优化进度与发版交接-2026-10-08.md",
+      "group": "documentation",
+      "bytes": 9582,
+      "sha256": "04d710cb99f8d98a22c942e2c9893713f9eb1e47213af47bf09c2ea6d75e8641"
+    },
+    {
+      "status": " M",
+      "path": "docs/EUI-Edits-性能测试计划与结果-2026-10-05.md",
+      "group": "documentation",
+      "bytes": 53804,
+      "sha256": "caaca257d99e822458f096a493f392d69bfef228a7d313d32d107dd2f77e60de"
+    },
+    {
+      "status": "??",
+      "path": "docs/EUI-NEO-Win32与D2D后端技术要点-2026-10-08.md",
+      "group": "documentation",
+      "bytes": 56540,
+      "sha256": "e0bb84f08f9b71aa113f13e6d157fdb09815d71f7e9fd896be7612e7fe77aa15"
+    },
+    {
+      "status": "??",
+      "path": "docs/EUI-NEO-框架自定义改动快速参考-2026-10-07.md",
+      "group": "documentation",
+      "bytes": 108555,
+      "sha256": "c2b143f635ce66f5a351889c6bf7a736c40383a35e3c63e6c5b41a2e9e0f300c"
+    },
+    {
+      "status": "??",
+      "path": "docs/measurements/input-callbacks-2026-10-07.json",
+      "group": "documentation",
+      "bytes": 108773,
+      "sha256": "dbfe7994f93464e26ffcfdd5f7fdeb8a017f5cbfefd2fbb62964f25a4ddbb47a"
+    },
+    {
+      "status": "??",
+      "path": "docs/measurements/input-drag-feedback-2026-10-08.json",
+      "group": "documentation",
+      "bytes": 7361,
+      "sha256": "971f0901ac32efd3ef8a9334dab7e433d4a0a10555f87e54effcb98159a7b236"
+    },
+    {
+      "status": "??",
+      "path": "docs/measurements/input-horizontal-2026-10-07.json",
+      "group": "documentation",
+      "bytes": 10792,
+      "sha256": "8ced2b4d20b1fb68924162a48a02326514617901ee9c7b0a5a9236fcb29765e4"
+    },
+    {
+      "status": "??",
+      "path": "docs/measurements/release-preparation-2026-10-08.json",
+      "group": "documentation",
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "status": "??",
+      "path": "docs/measurements/vault-startup-2026-10-08.json",
+      "group": "documentation",
+      "bytes": 8917,
+      "sha256": "f92ea5b9d1134adb9769d4592af3c5829f397382a86dc8d99dc807814d60c929"
+    },
+    {
+      "status": "??",
+      "path": "docs/measurements/win32-event-pump-2026-10-08.json",
+      "group": "documentation",
+      "bytes": 4703,
+      "sha256": "9eedd5da59b3cc67b6acacaa0606734199e70f831427924de7e56efa170f8c32"
+    },
+    {
+      "status": "??",
+      "path": "docs/性能优化第三批结果-2026-10-08.md",
+      "group": "documentation",
+      "bytes": 7198,
+      "sha256": "cd37851f75ca9bcb358aba987bb12e009755bfbb8b852dd09e0999fa9c7ef7c2"
+    },
+    {
+      "status": "??",
+      "path": "docs/性能优化第二批结果-2026-10-07.md",
+      "group": "documentation",
+      "bytes": 6838,
+      "sha256": "0dc0bf2c22aaf8784bd733893cc1a5a12109a987e64318d8f31d2a54bd83471c"
+    },
+    {
+      "status": "??",
+      "path": "docs/性能优化第五批结果-2026-10-08.md",
+      "group": "documentation",
+      "bytes": 4880,
+      "sha256": "fba6af6582dea73298acfbc3bcaf53620cacc1dfe25f90659fb037edba589f17"
+    },
+    {
+      "status": "??",
+      "path": "docs/性能优化第四批结果-2026-10-08.md",
+      "group": "documentation",
+      "bytes": 6576,
+      "sha256": "7e717c95ed992b586f8152cead41063b2c6bbc9f0c4a901b1f68f16b59c0b0c6"
+    },
+    {
+      "status": "??",
+      "path": "docs/性能优化首批结果-2026-10-07.md",
+      "group": "documentation",
+      "bytes": 4637,
+      "sha256": "b34659afa03d60a934b7e17db8aad9c4fe91018226e883b1b37d0ffcfb964dc5"
+    },
+    {
+      "status": "??",
+      "path": "docs/性能参考仓库评估-2026-10-07.md",
+      "group": "documentation",
+      "bytes": 8167,
+      "sha256": "f0fd3c3c639c17733853d09a8ce1630b585e22ef19e2c66510ec06dfa9808ce7"
+    },
+    {
+      "status": " M",
+      "path": "scripts/check-neoeditor.ps1",
+      "group": "release_checks",
+      "bytes": 5336,
+      "sha256": "70328c7f7c2cae68e406b8baad643321a5355be7976422d0dfdcc11ee6488f34"
+    },
+    {
+      "status": "??",
+      "path": "tests/unit/document_vault_loading.cpp",
+      "group": "tests",
+      "bytes": 16158,
+      "sha256": "682c7007d4525e833891239a6e7633e3da9e22c99478c7f5a74e11ed6e7696b9"
+    },
+    {
+      "status": "??",
+      "path": "tests/unit/input_callback_layout.cpp",
+      "group": "tests",
+      "bytes": 13112,
+      "sha256": "2dd42473354d54eb18b05ee0597afaaec5fabdd26d9837a154b8b06f7bb5326d"
+    },
+    {
+      "status": "??",
+      "path": "tests/unit/input_drag_feedback.cpp",
+      "group": "tests",
+      "bytes": 7118,
+      "sha256": "2b1ddb1937d9a41d088754d510a2fb793218420c6b967d413c9844924cfb1495"
+    },
+    {
+      "status": "??",
+      "path": "tests/unit/input_horizontal_viewport.cpp",
+      "group": "tests",
+      "bytes": 4627,
+      "sha256": "e05f2c3e058a05cb9f0bb39bf6ea5f5085b43124cb51ead35de1a30dc527995f"
+    },
+    {
+      "status": " M",
+      "path": "tests/unit/input_pointer_feedback.cpp",
+      "group": "tests",
+      "bytes": 12573,
+      "sha256": "76fdcf589b0491092ba34d751edfd167c503a3fe3ccfc27fb977b9a537d78aa4"
+    },
+    {
+      "status": "??",
+      "path": "tests/unit/virtual_list_wheel.cpp",
+      "group": "tests",
+      "bytes": 5256,
+      "sha256": "77c67348ce16ccd7ebb236102e42ba9282ce57f98706c4680198a6f5d3c75e2c"
+    },
+    {
+      "status": "??",
+      "path": "tests/unit/win32_event_pump.cpp",
+      "group": "tests",
+      "bytes": 2387,
+      "sha256": "134442dd1d8bbc5d59960f5af2e0c5f12b9fce4c7cc2045f9356c91f47cf63ee"
+    }
+  ],
+  "current_candidate": {
+    "path": "out/performance-20261008-r5/EUI-Edits.exe",
+    "sha256": "4c592ced08b36f4b4d01872eba2f97a0e81d844782cd176e5f9b70bf2f64b9a8",
+    "gui_normal_exit": 0,
+    "formal_release_package": false
+  },
+  "checks": {
+    "full_release_build": true,
+    "unit_pass": 91,
+    "unit_total": 91,
+    "i18n": true,
+    "whitespace": true,
+    "release_script_parser": true,
+    "release_gate_selection_count": 47,
+    "release_gate_tests": [
+      "file_safety",
+      "document_tabs",
+      "session_storage",
+      "text_file_encoding",
+      "settings_atomic",
+      "settings_confirmation",
+      "i18n",
+      "menu_commands",
+      "file_assoc_registration",
+      "context_menu",
+      "toast_layout",
+      "input_scrollbar",
+      "pointer_input",
+      "vault_delete_state",
+      "file_operations",
+      "vault_rename",
+      "portable_resource_paths",
+      "theme_loader",
+      "image_viewport",
+      "dsl_main_handle",
+      "win32_input",
+      "text_metrics_cache",
+      "text_atlas_growth",
+      "text_atlas_overflow",
+      "session_write_scheduler",
+      "document_tab_cache",
+      "input_viewport_metrics",
+      "file_check_scheduler",
+      "vault_scan_scheduler",
+      "tab_presentation",
+      "system_appearance",
+      "input_placeholder_refresh",
+      "input_vertical_alignment",
+      "input_horizontal_viewport",
+      "input_callback_layout",
+      "input_drag_feedback",
+      "input_pointer_feedback",
+      "document_vault_loading",
+      "virtual_list_wheel",
+      "win32_event_pump",
+      "runtime_scroll_sync",
+      "main_window_frame_reentry",
+      "dsl_window_resize_throttle",
+      "settings_language_zh",
+      "settings_language_en",
+      "settings_language_invalid",
+      "settings_language_legacy"
+    ],
+    "fresh_release_gate_run": false,
+    "new_package_built": false
+  },
+  "retained_ignored_evidence": [
+    "out/performance-20261007-r1",
+    "out/performance-20261007-r2",
+    "out/performance-20261008-r3",
+    "out/performance-20261008-r4",
+    "out/performance-20261008-r5",
+    "out/acceptance/optimization-20261005-e87620d0123e4f3d8d2ed9f0ab55a37e"
+  ],
+  "pending": [
+    "determine product version and verify remote releases/tags",
+    "run fresh 47-test gate in new directory",
+    "new static package and SHA256",
+    "new-package GUI verification",
+    "Chinese then English release notes",
+    "review exact commit file list",
+    "external Git/release actions require explicit next-conversation scope"
+  ],
+  "unresolved": [
+    "OPT-001 original high-frequency wheel stall",
+    "OPT-002 selection beyond viewport",
+    "total sustained drag CPU A/B",
+    "remaining B/C and missing hardware/IME/DPI environments"
+  ]
+}

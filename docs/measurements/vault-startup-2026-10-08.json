@@ -1,0 +1,244 @@
+{
+  "schema": 1,
+  "date": "2026-10-08",
+  "git_head": "44123ad8412010f01632763aa99824e7545bbbec",
+  "source_sha256": {
+    "CMakeLists.txt": "0cf939469b62d71333e61193fca437066b51dfc7e6b4cc27aa445688c90985db",
+    "apps/neo_editor/app.cpp": "5505a417ecf55b8f0d0d332175c7f1f374221057e7e2da3af3369b43c1d60e60",
+    "apps/neo_editor/state/app_actions.cpp": "d39ae9ee8a0b0bf08f2a774640b0739d679dcce9814704b40dc981edd9dda509",
+    "apps/neo_editor/state/app_actions.h": "5dc6da03950ba38ffb7cc4722c929e116969d7847477c947d5b0f6dd27ad0748",
+    "apps/neo_editor/state/vault_cache.cpp": "c9d7f053d74510d6a56770446fd97785088e345c4320a904b1179c865f49b294",
+    "apps/neo_editor/ui/vault_view.h": "790700d8c13762651837e8009247cb79e827548ad13885642d557f3f850878de",
+    "tests/unit/document_vault_loading.cpp": "682c7007d4525e833891239a6e7633e3da9e22c99478c7f5a74e11ed6e7696b9"
+  },
+  "script_sha256": {
+    "create-monitor.py": "c1f5a4074660d206e433229a8608c3b77ce872e46868f909d6d6413db6a13c28",
+    "create-test.py": "870a365c79e3fb7987cf892ab8618b87c5a55692b3d80190419a6247eee136b1",
+    "launch-monitor.py": "74ccd8a073f9c1049d744363435bd17455d6d0e78bf468abfed34d15e4331de4",
+    "negative-test.py": "734dfc7fbab5973939ed06b084fe0e9707e8334055d58d369f92bfeeb0837819",
+    "summarize.py": "910fe93665270081c7c115779e0668f9e4c3c852cd701f41b3efd377ede95962",
+    "validate.py": "6970f4d726c6ed2f8ac74939235378c88d6e3f3d5d7fd406b28eec1ea6e70f80"
+  },
+  "baseline_sha256": "24740c7306cfea1e73072b525f8e46f6e4e5576808557e053c48a7a896201e28",
+  "candidate_sha256": "f232a5bfb50cedee2a77944c3c5f95665efb821e3fb1adc7b3def2a7f4777c29",
+  "fixture": {
+    "root": "D:\\编译开发\\EUI-Edits\\out\\acceptance\\optimization-20261005-e87620d0123e4f3d8d2ed9f0ab55a37e\\fixtures\\D50",
+    "files": 50018,
+    "directories": 513,
+    "sorted_path_list_sha256": "cd9b3a8cece0086b8086b8cba94dba19c54da6626449db7a1f6c6bc285596621",
+    "expected_manifest_sha256": "0c6e1c638a80d8224708b90b47e3ab8736810f4995624cf9f2d8623fad82befa",
+    "current_sha256": "9a0a6d151c49cd2e54af4f5979c636a77e0d6187e513ac8a77dd571bfb8a3132"
+  },
+  "clock_validation": {
+    "qpc_frequency": 10000000,
+    "perf_before_us": 43835566729,
+    "qpc_us": 43835566731,
+    "perf_after_us": 43835566732,
+    "shared_epoch_checked": true
+  },
+  "rounds": [
+    {
+      "label": "baseline-D50-r1",
+      "pid": 22716,
+      "sha256": "24740c7306cfea1e73072b525f8e46f6e4e5576808557e053c48a7a896201e28",
+      "exit_code": 0,
+      "first_editor_compose_s": 2.451182,
+      "scan_count": 2,
+      "scan_total_s": 2.008484,
+      "scan_threads": [
+        24840
+      ],
+      "compose_thread": 24840,
+      "synchronous_scan_s": 2.008484,
+      "first_adopt_s": null,
+      "first_adopt_work_us": null,
+      "editor_before_scan_complete": false,
+      "profile": "out/performance-20261008-r4/baseline-D50-r1",
+      "foreground_samples": 194,
+      "sample_count": 215,
+      "render_size": [
+        1400,
+        950
+      ],
+      "resize_dropped": 0
+    },
+    {
+      "label": "baseline-D50-r2",
+      "pid": 25168,
+      "sha256": "24740c7306cfea1e73072b525f8e46f6e4e5576808557e053c48a7a896201e28",
+      "exit_code": 0,
+      "first_editor_compose_s": 2.161782,
+      "scan_count": 2,
+      "scan_total_s": 2.055814,
+      "scan_threads": [
+        4588
+      ],
+      "compose_thread": 4588,
+      "synchronous_scan_s": 2.055814,
+      "first_adopt_s": null,
+      "first_adopt_work_us": null,
+      "editor_before_scan_complete": false,
+      "profile": "out/performance-20261008-r4/baseline-D50-r2",
+      "foreground_samples": 286,
+      "sample_count": 308,
+      "render_size": [
+        1400,
+        950
+      ],
+      "resize_dropped": 0
+    },
+    {
+      "label": "baseline-D50-r3",
+      "pid": 24880,
+      "sha256": "24740c7306cfea1e73072b525f8e46f6e4e5576808557e053c48a7a896201e28",
+      "exit_code": 0,
+      "first_editor_compose_s": 2.117881,
+      "scan_count": 2,
+      "scan_total_s": 2.02392,
+      "scan_threads": [
+        25388
+      ],
+      "compose_thread": 25388,
+      "synchronous_scan_s": 2.02392,
+      "first_adopt_s": null,
+      "first_adopt_work_us": null,
+      "editor_before_scan_complete": false,
+      "profile": "out/performance-20261008-r4/baseline-D50-r3",
+      "foreground_samples": 241,
+      "sample_count": 263,
+      "render_size": [
+        1400,
+        950
+      ],
+      "resize_dropped": 0
+    },
+    {
+      "label": "candidate-D50-r2",
+      "pid": 4888,
+      "sha256": "f232a5bfb50cedee2a77944c3c5f95665efb821e3fb1adc7b3def2a7f4777c29",
+      "exit_code": 0,
+      "first_editor_compose_s": 0.452305,
+      "scan_count": 1,
+      "scan_total_s": 1.03503,
+      "scan_threads": [
+        11204
+      ],
+      "compose_thread": 9024,
+      "synchronous_scan_s": 0.0,
+      "first_adopt_s": 1.409784,
+      "first_adopt_work_us": 248,
+      "editor_before_scan_complete": true,
+      "profile": "out/performance-20261008-r4/candidate-D50-r2",
+      "foreground_samples": 196,
+      "sample_count": 198,
+      "render_size": [
+        1400,
+        950
+      ],
+      "resize_dropped": 0
+    },
+    {
+      "label": "candidate-D50-r3",
+      "pid": 23344,
+      "sha256": "f232a5bfb50cedee2a77944c3c5f95665efb821e3fb1adc7b3def2a7f4777c29",
+      "exit_code": 0,
+      "first_editor_compose_s": 0.106492,
+      "scan_count": 1,
+      "scan_total_s": 1.061108,
+      "scan_threads": [
+        26620
+      ],
+      "compose_thread": 22804,
+      "synchronous_scan_s": 0.0,
+      "first_adopt_s": 1.095433,
+      "first_adopt_work_us": 204,
+      "editor_before_scan_complete": true,
+      "profile": "out/performance-20261008-r4/candidate-D50-r3",
+      "foreground_samples": 214,
+      "sample_count": 216,
+      "render_size": [
+        1400,
+        950
+      ],
+      "resize_dropped": 0
+    },
+    {
+      "label": "candidate-D50-r4",
+      "pid": 8660,
+      "sha256": "f232a5bfb50cedee2a77944c3c5f95665efb821e3fb1adc7b3def2a7f4777c29",
+      "exit_code": 0,
+      "first_editor_compose_s": 0.107348,
+      "scan_count": 1,
+      "scan_total_s": 1.067984,
+      "scan_threads": [
+        18792
+      ],
+      "compose_thread": 16816,
+      "synchronous_scan_s": 0.0,
+      "first_adopt_s": 1.101427,
+      "first_adopt_work_us": 213,
+      "editor_before_scan_complete": true,
+      "profile": "out/performance-20261008-r4/candidate-D50-r4",
+      "foreground_samples": 462,
+      "sample_count": 464,
+      "render_size": [
+        1400,
+        950
+      ],
+      "resize_dropped": 0
+    }
+  ],
+  "medians": {
+    "baseline": {
+      "first_editor_compose_s": 2.161782,
+      "scan_total_s": 2.02392,
+      "synchronous_scan_s": 2.02392,
+      "scan_count": 2
+    },
+    "candidate": {
+      "first_editor_compose_s": 0.107348,
+      "scan_total_s": 1.061108,
+      "synchronous_scan_s": 0.0,
+      "scan_count": 1,
+      "first_adopt_s": 1.101427
+    }
+  },
+  "environment": {
+    "platform": "win32",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.9 (tags/v3.12.9:fdb8142, Feb  4 2025, 15:27:58) [MSC v.1942 64 bit (AMD64)]"
+  },
+  "method": "Same-machine D50, isolated fresh profiles, software D2D/window DC, zh-CN UI14 editor16 scale1 mode1 animations0; existing OS disk cache retained. Launch QPC immediately before Popen to first editor-view span completion; compose timing is not visibility or input latency. No concurrent builds/tests during measured rounds.",
+  "excluded": [
+    {
+      "label": "candidate-D50-r1",
+      "sha256": "5ad38f9bd1af20ca95eed4b4274e5374da543d571f4791645c244c8ddbb0458f",
+      "reason": "Pre-final warm pending-reveal fix; normal exit 0, retained raw evidence but excluded from final candidate metrics."
+    }
+  ],
+  "checks": {
+    "full_release_build": true,
+    "unit_pass": 89,
+    "unit_total": 89,
+    "negative": {
+      "negative_exit": 1,
+      "optimized_exit": 0,
+      "source_restored_exact": true,
+      "test_only_baseline_adapter": true
+    },
+    "baseline_expected_failures": 12,
+    "i18n": true,
+    "whitespace": true,
+    "settled_gui": true,
+    "post_scan_keyboard_and_sidebar_scroll": true
+  },
+  "limits": [
+    "first-window visibility and before-scan input latency not directly measured",
+    "only D50 startup has new three-round GUI timing",
+    "hardware GPU, low-end device, IME, cross-monitor DPI not covered",
+    "OPT-001 fast wheel stall, B07-B11/B14 and C cases unchanged",
+    "explicit mutation/manual choose-directory still uses synchronous refresh",
+    "snapshot estimation/publication remains on UI thread; scan cancellation/chunked adoption not changed",
+    "whole-process CPU and memory are not controlled comparisons here"
+  ]
+}

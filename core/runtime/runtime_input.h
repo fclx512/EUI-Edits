@@ -534,9 +534,9 @@ inline void Runtime::updateInteraction(
         return;
     }
 
-    if (enabled && instance.state.pressed && element.onDrag &&
+    if (enabled && instance.state.pressed && (element.onDrag || element.onDragUpdate) &&
         (event.deltaX != 0.0 || event.deltaY != 0.0 || instance.state.drag)) {
-        element.onDrag({
+        const DragEvent dragEvent{
             event.x / dpiScale,
             event.y / dpiScale,
             event.deltaX / dpiScale,
@@ -546,9 +546,17 @@ inline void Runtime::updateInteraction(
             instance.state.activeButton,
             event.buttons,
             event.modifiers
-        });
-        composeRequested_ = true;
-        paintRequested_ = true;
+        };
+        bool changed = true;
+        if (element.onDragUpdate) {
+            changed = element.onDragUpdate(dragEvent);
+        } else {
+            element.onDrag(dragEvent);
+        }
+        if (changed) {
+            composeRequested_ = true;
+            paintRequested_ = true;
+        }
     }
 }
 

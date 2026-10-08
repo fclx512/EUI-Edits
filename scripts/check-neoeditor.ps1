@@ -56,7 +56,11 @@ $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encod
     'portable_resource_paths', 'theme_loader', 'image_viewport', 'dsl_main_handle', 'win32_input',
     'text_metrics_cache', 'text_atlas_growth', 'text_atlas_overflow', 'session_write_scheduler',
     'document_tab_cache', 'input_viewport_metrics', 'file_check_scheduler', 'vault_scan_scheduler',
-    'tab_presentation', 'system_appearance', 'input_placeholder_refresh', 'input_vertical_alignment')
+    'tab_presentation', 'system_appearance', 'input_placeholder_refresh', 'input_vertical_alignment',
+    'input_horizontal_viewport', 'input_callback_layout', 'input_drag_feedback', 'input_pointer_feedback',
+    'document_vault_loading', 'virtual_list_wheel', 'win32_event_pump', 'runtime_scroll_sync',
+    'main_window_frame_reentry', 'dsl_window_resize_throttle',
+    'input_model', 'lp_decorations', 'undo_incremental', 'image_attach')
 $tests = @($targets) + @('settings_language_zh', 'settings_language_en', 'settings_language_invalid', 'settings_language_legacy')
 $filter = '^(' + (($tests | ForEach-Object { [Regex]::Escape($_) }) -join '|') + ')$'
 # CTest can otherwise succeed with an accidentally empty or incomplete selection.

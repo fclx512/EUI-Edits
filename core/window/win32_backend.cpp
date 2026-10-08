@@ -440,7 +440,21 @@ bool initialize() {
     return true;
 }
 void shutdownHost() { while(!states.empty()) destroyWindow(states.begin()->first); mainHandle=nullptr; }
-void pollEvents() {MSG m{};while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)) {TranslateMessage(&m);DispatchMessageW(&m);}}
+void pollEvents() {
+    // Yield to the desktop frame loop even if producers keep the native queue
+    // nonempty. Preserve FIFO and leave excess messages for the next pump.
+    // The time budget is soft: a single native/modal handler may run longer.
+    constexpr unsigned maxMessages = 256;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+    MSG message{};
+    unsigned processed = 0;
+    while (processed < maxMessages && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+        ++processed;
+        if (std::chrono::steady_clock::now() >= deadline) break;
+    }
+}
 void waitEventsTimeout(double seconds) {const auto ms=static_cast<DWORD>(std::clamp(std::ceil(seconds*1000),0.0,static_cast<double>(INFINITE-1))); MsgWaitForMultipleObjectsEx(0,nullptr,ms,QS_ALLINPUT,MWMO_INPUTAVAILABLE);pollEvents();}
 void waitEvents() {MsgWaitForMultipleObjectsEx(0,nullptr,INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);pollEvents();}
 bool shouldClose(Window* window) {auto s=state(window);return !s || s->close;}

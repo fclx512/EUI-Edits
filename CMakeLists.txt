@@ -1070,7 +1070,8 @@ if(EUI_BUILD_TEST_FIXTURES)
             target_include_directories(${unit_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
         endif()
         if(unit_name STREQUAL "vault_delete_state" OR unit_name STREQUAL "file_safety" OR unit_name STREQUAL "document_tabs"
-           OR unit_name STREQUAL "document_tab_cache" OR unit_name STREQUAL "document_activation_check")
+           OR unit_name STREQUAL "document_tab_cache" OR unit_name STREQUAL "document_activation_check"
+           OR unit_name STREQUAL "document_vault_loading")
             # Exercise real action dispatch with test doubles for Shell/dialogs/settings.
             # app_actions 引用 png_encode/attachment/clipboard_image（图片粘贴路径），一并编入。
             # 切页/缓存/后台任务相关的应用侧模块（阶段 B～E）也必须编入：document_tabs 与

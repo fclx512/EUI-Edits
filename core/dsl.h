@@ -183,6 +183,9 @@ struct Element {
     std::function<void(const ScrollEvent&)> onScroll;
     std::function<void(float)> onScrollOffsetChanged;
     std::function<void(const DragEvent&)> onDrag;
+    // Like onMove: return true when the callback changed compose-visible state.
+    // Still dispatched on stationary drag ticks; legacy onDrag always composes.
+    std::function<bool(const DragEvent&)> onDragUpdate;
     std::function<void()> onTimer;
     std::function<void(float)> onFrame;
     float timerSeconds = 0.0f;
@@ -762,6 +765,14 @@ public:
     Derived& onDrag(std::function<void(const DragEvent&)> callback) {
         element_->interactive = true;
         element_->onDrag = std::move(callback);
+        element_->onDragUpdate = {};
+        return self();
+    }
+
+    Derived& onDragUpdate(std::function<bool(const DragEvent&)> callback) {
+        element_->interactive = true;
+        element_->onDrag = {};
+        element_->onDragUpdate = std::move(callback);
         return self();
     }
 
@@ -1738,6 +1749,7 @@ private:
                element.onScroll ||
                element.onScrollOffsetChanged ||
                element.onDrag ||
+               element.onDragUpdate ||
                element.onTimer ||
                element.onFrame ||
                element.timerSeconds > 0.0f ||
@@ -1786,6 +1798,7 @@ private:
                element.onScroll ||
                element.onScrollOffsetChanged ||
                element.onDrag ||
+               element.onDragUpdate ||
                element.onTimer ||
                element.onFrame ||
                element.timerSeconds > 0.0f ||

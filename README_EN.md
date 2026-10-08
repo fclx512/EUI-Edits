@@ -41,7 +41,9 @@ Markdown covers common writing syntax and some extensions; full Obsidian compati
 
 ## Getting started
 
-Download `EUI-Edits-0.1.0-windows-x64.exe` from the [0.1.0 release page](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.0), put it where you plan to keep it, and run it directly. No resource folder needs unpacking; the adjacent `.exe.sha256` file is available for verification. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing.
+Download `EUI-Edits-0.1.1-windows-x64.exe` from the [0.1.1 release page](https://github.com/fclx512/EUI-Edits/releases/tag/neoeditor-v0.1.1), put it where you plan to keep it, and run it directly. No resource folder needs unpacking; the adjacent `.exe.sha256` file is available for verification. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing.
+
+**Changes in 0.1.1:** Corrected table cursor mapping and image insertion, reduced long-line layout copying and repeated stationary-drag builds, and moved startup directory loading to the background. See the [release notes](apps/neo_editor/RELEASE-NOTES.md) for changes and validation limits.
 
 ### Common actions
 
@@ -131,10 +133,10 @@ Run from PowerShell at the repository root:
 .\scripts\check-neoeditor.ps1
 
 # Build Release x64 and produce a single EXE with its SHA256 file
-.\scripts\package-neoeditor.ps1 -Version 0.1.0
+.\scripts\package-neoeditor.ps1 -Version 0.1.1
 ```
 
-The output is `out/euiedits-0.1.0-single-exe/EUI-Edits-0.1.0-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
+The output is `out/euiedits-0.1.1-single-exe/EUI-Edits-0.1.1-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
 
 Scripts locate tools automatically; override with `-CMake` or `-Generator`, plus `-Python` for checks or `-Dumpbin` for packaging. For another build, select a fresh package output with `-OutputDirectory`; existing release files are never overwritten. After moving the source tree, use a fresh build directory rather than a CMake cache containing old paths.
 

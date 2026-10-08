@@ -223,6 +223,50 @@ int main() {
               "later request publishes exactly one newer generation");
     }
 
+    // A nested snapshot must retain the same byte accounting through worker
+    // preparation and synchronous refresh; byte-budget eviction still applies.
+    neo::vaultcache::resetForTest();
+    {
+        auto large = makeScan(32768);
+        large.directoryCount = 256;
+        large.roots.clear();
+        for (int dir = 0; dir < 256; ++dir) {
+            neo::vault::Entry folder;
+            folder.isDir = true;
+            folder.name = "folder-" + std::to_string(dir);
+            folder.relative = folder.name;
+            for (int file = 0; file < 128; ++file) {
+                neo::vault::Entry leaf;
+                leaf.name = "document-" + std::to_string(file) + ".md";
+                leaf.relative = folder.relative + "/" + leaf.name;
+                folder.children.push_back(std::move(leaf));
+            }
+            large.roots.push_back(std::move(folder));
+        }
+        const std::string root = "/tmp/neo-scan-byte-budget";
+        neo::vaultcache::setScannerForTest([large](const std::string&) { return large; });
+        check(neo::vaultcache::requestScan(root).scheduled, "large nested snapshot starts in worker");
+        check(pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }),
+              "large nested snapshot completes worker preparation and publication");
+        const auto view = neo::vaultcache::query(root);
+        const auto asyncBytes = neo::vaultcache::stats().estimatedBytes;
+        check(view.scan && view.scan->roots.size() == 256 &&
+                  view.scan->roots.back().children.size() == 128 &&
+                  asyncBytes >= neo::vaultcache::estimateBytes(large),
+              "prepared snapshot retains the entire tree and its nested byte estimate");
+        neo::vaultcache::requestScanSync(root);
+        check(neo::vaultcache::stats().estimatedBytes == asyncBytes,
+              "sync and worker preparation produce identical byte accounting");
+        neo::vaultcache::setScannerForTest([](const std::string&) { return makeScan(1); });
+        const std::string active = "/tmp/neo-scan-small-active";
+        neo::vaultcache::requestScanSync(active);
+        neo::vaultcache::setRootBudgetBytes(asyncBytes);
+        neo::vaultcache::prune(active);
+        check(!neo::vaultcache::query(root).scan && neo::vaultcache::query(active).scan &&
+                  neo::vaultcache::stats().estimatedBytes < asyncBytes,
+              "byte budget evicts large inactive snapshot while preserving the active root");
+    }
+
     neo::vaultcache::resetForTest();
     neo::vaultcache::clear();
     std::cout << (failures == 0 ? "PASS" : "FAIL") << ": vault_scan_scheduler (" << failures << " failures)\n";

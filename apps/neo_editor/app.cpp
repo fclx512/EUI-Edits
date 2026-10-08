@@ -95,6 +95,7 @@ std::string commandLineDocumentPath() {
 
 // 启动时恢复上次的会话。对话框与文件 IO 都不在这里做，避免启动卡顿。
 void restoreSession(neo::AppState& state) {
+    neo::tracelog::Span span("startup-restore");
     neo::sessionRecoveryWriter() = &neo::persistDocumentSession;
     // 会话写的 commit ack（主线程）：只有完整会话提交成功才清旧单页恢复并消警告；
     // 失败保留上一完整快照与内存脏稿，给持续提示（不再无声吞错）。
@@ -180,7 +181,7 @@ void restoreSession(neo::AppState& state) {
     neo::mergeRelatedVaultRoots(state);
 
     if (!state.vaultRoot.empty()) {
-        neo::refreshVault(state, true);
+        neo::prepareVault(state, true);
     } else {
         // 没有根就不扫：清掉可能残留的旧行，侧栏显示空提示。
         state.vaultScan.reset();

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -317,7 +318,14 @@ public:
         const auto snapshot = snapshotDecorator_ ? snapshotDecorator_(display.text, editInfo)
                                                   : input_detail::LineDecorationSnapshot{};
         const input_detail::LineDecorationView table = snapshot ? input_detail::LineDecorationView(snapshot.get()) : input_detail::LineDecorationView(decorations.empty() ? nullptr : &decorations);
-        const InputLayout layout = InputLayout::build(display, textWidth, textHeight, width, inset, rightInset, textY, textLineHeight, fontFamily_, fontSize, multiline_, table, snapshot, &decorationChanges);
+        // All pointer callbacks use the same frame's layout. In particular, a
+        // long cursor line's metrics must not be deep-copied into each closure.
+        // Keep the layout object alive after build() returns; its cache pointers
+        // retain their existing InputState lifetime and are replaced next frame.
+        const auto callbackLayout = std::make_shared<const InputLayout>(InputLayout::build(
+            display, textWidth, textHeight, width, inset, rightInset, textY, textLineHeight,
+            fontFamily_, fontSize, multiline_, table, snapshot, &decorationChanges));
+        const InputLayout& layout = *callbackLayout;
         // 输入光标用字体字号的近似高度；将它放到单行行盒中心，使其与由实际墨迹范围
         // 居中的文字共享同一中心。多行仍采用布局给出的行内坐标。
         const float cursorFontSize = layout.cursorLineFontSize();
@@ -402,7 +410,8 @@ public:
                     .transition(transition_)
                     .focusable()
                     .imeRect(caretX, caretY, 1.5f, std::max(1.0f, layout.cursorLineHeight()))
-                    .onPress([&state, controlWidth, inset, baseInset, layout, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
+                    .onPress([&state, controlWidth, inset, baseInset, callbackLayout, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
+                        const auto& layout = *callbackLayout;
                         state.lastBounds = bounds;
                         const InputModel::PointerHit hit =
                             layout.pointerHit(event.x, event.y, bounds, controlWidth, inset);
@@ -449,7 +458,8 @@ public:
                             onPointerHit(payload);
                         }
                     })
-                    .onRelease([&state, layout, controlWidth, inset, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
+                    .onRelease([&state, callbackLayout, controlWidth, inset, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
+                        const auto& layout = *callbackLayout;
                         const int pressed = state.pressedGlyphLine;
                         const int pressedLink = state.pressedLinkByte;
                         state.pressedLinkByte = -1;
@@ -474,8 +484,9 @@ public:
                             }
                         }
                     })
-                    .onContextMenu([&state, controlWidth, inset, layout, documentIndex,
+                    .onContextMenu([&state, controlWidth, inset, callbackLayout, documentIndex,
                                     onContextMenu](const core::PointerEvent& event, const core::Rect& bounds) {
+                        const auto& layout = *callbackLayout;
                         // 与左键同一套落点换算（IME 区间映射回文档坐标）。
                         const InputModel::PointerHit hit =
                             layout.pointerHit(event.x, event.y, bounds, controlWidth, inset);
@@ -518,7 +529,8 @@ public:
                             state.pointerHoverLinkBeg = state.pointerHoverLinkEnd = -1;
                         }
                     })
-                    .onMove([&state, layout, controlWidth, inset](const core::PointerEvent& event, const core::Rect& bounds) {
+                    .onMove([&state, callbackLayout, controlWidth, inset](const core::PointerEvent& event, const core::Rect& bounds) {
+                        const auto& layout = *callbackLayout;
                         // 记下悬停位置并换算成可视行；行号位据此决定画箭头还是行号。
                         const float localY = static_cast<float>(event.y) - bounds.y;
                         const int line = layout.lineIndexFromY(localY);
@@ -536,13 +548,20 @@ public:
                         }
                         return false;
                     })
-                    .onDrag([&state, width, controlWidth, inset, baseInset, textWidth, fontSize, fontFamily, allowMultiline, textHeight, layout, documentIndex](const core::dsl::DragEvent& event) {
+                    .onDragUpdate([&state, controlWidth, inset, textWidth, fontSize, fontFamily, allowMultiline, textHeight, callbackLayout, documentIndex](const core::dsl::DragEvent& event) {
+                        const auto& layout = *callbackLayout;
+                        const int oldPressedLinkByte = state.pressedLinkByte;
                         if (state.pressedLinkByte >= 0 &&
                             (std::fabs(static_cast<float>(event.x) - state.pressedLinkX) >= 4.0f ||
                              std::fabs(static_cast<float>(event.y) - state.pressedLinkY) >= 4.0f)) {
                             state.pressedLinkByte = -1;
                         }
-                        if (!state.selecting) return;
+                        if (!state.selecting) return oldPressedLinkByte != state.pressedLinkByte;
+                        const int oldCursor = state.cursor;
+                        const int oldSelectionStart = state.selectionStart;
+                        const int oldSelectionEnd = state.selectionEnd;
+                        const float oldHorizontalScroll = state.horizontalScroll;
+                        const float oldVerticalScroll = state.verticalScroll;
                         state.cursor = InputModel::clampUtf8Boundary(state.text, documentIndex(layout.cursorFromPointer(event.x, event.y, state.lastBounds, controlWidth, inset)));
                         state.hasPreferredCursorX = false;
                         state.selectionStart = state.dragAnchor;
@@ -552,19 +571,30 @@ public:
                         } else {
                             InputModel::syncScroll(state, textWidth, fontFamily, fontSize);
                         }
+                        // Keep stationary ticks for scroll-following, but avoid a
+                        // full compose/paint when the selected byte and scrolls
+                        // stayed unchanged (including the host's update(0)).
+                        return oldCursor != state.cursor ||
+                               oldSelectionStart != state.selectionStart ||
+                               oldSelectionEnd != state.selectionEnd ||
+                               oldHorizontalScroll != state.horizontalScroll ||
+                               oldVerticalScroll != state.verticalScroll ||
+                               oldPressedLinkByte != state.pressedLinkByte;
                     })
                     // 必须放在所有回调之后：onPress/onDrag/onMove 会把元素 cursor 隐式
                     // 设成 Hand（应用配置再把 Hand 映射成箭头），覆盖回去 = 悬停编辑区
                     // 显示 I-beam（否则全应用只有默认箭头，实测 2026-09-25）。
                     .cursor(cursor_)
-                    .cursorAt([layout, controlWidth, inset, cursor = cursor_](const core::PointerEvent& event, const core::Rect& bounds) {
+                    .cursorAt([callbackLayout, controlWidth, inset, cursor = cursor_](const core::PointerEvent& event, const core::Rect& bounds) {
+                        const auto& layout = *callbackLayout;
                         const auto hit = layout.pointerHit(event.x, event.y, bounds, controlWidth, inset);
                         if (hit.onGlyph || hit.onImage || hit.onLink) return core::CursorShape::Hand;
                         if (hit.onGutter) return core::CursorShape::Arrow;
                         return cursor;
                     });
                 if (allowMultiline && (layout.maxVerticalScroll > 0.0f || !state.wordWrap)) {
-                    hit.onScroll([&state, layout, fontSize](const core::ScrollEvent& event) {
+                    hit.onScroll([&state, callbackLayout, fontSize](const core::ScrollEvent& event) {
+                        const auto& layout = *callbackLayout;
                         const float step = std::max(12.0f, fontSize * 2.2f);
                         state.followCaret = false;
                         if(!state.wordWrap && event.x != 0) state.horizontalScroll=std::clamp(state.horizontalScroll-static_cast<float>(event.x)*step,0.0f,std::max(0.0f,layout.textWidth-layout.viewportWidth+fontSize));
@@ -1222,8 +1252,18 @@ public:
                                 } else {
                                     // 逐段画。段宽由测量阶段给出（各段字体参数不同，宽度只能实测），
                                     // 所以这里只负责"按 x 摆放 + 上色 + 点缀（底色块 / 删除线）"。
+                                    // Horizontal clipping in the renderer does not avoid creating
+                                    // nodes/layouts for every token of an unwrapped source line.
+                                    // Keep complete runs for editing/hit tests, but emit only those
+                                    // near the viewport; the margin retains ink/chip overhang.
+                                    const float runMargin = std::max(32.0f, lineFontSize * 2.0f);
+                                    const float runViewportLeft = layout.scroll - runMargin;
+                                    const float runViewportRight = layout.scroll + textWidth + runMargin;
                                     for (std::size_t runIndex = 0; runIndex < line.runs.size(); ++runIndex) {
                                         const input_detail::TextRun& run = line.runs[runIndex];
+                                        if (run.x + run.width < runViewportLeft || run.x > runViewportRight) {
+                                            continue;
+                                        }
                                         const std::string runId = id_ + ".text." + std::to_string(index) + "r" +
                                             std::to_string(runIndex);
                                         const std::string runText = input_detail::projectText(

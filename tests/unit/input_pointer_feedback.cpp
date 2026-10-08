@@ -236,7 +236,7 @@ bool linkActionWaitsForValidRelease() {
     core::dsl::DragEvent drag;
     drag.x = down.x + 8.0f;
     drag.y = down.y;
-    hit->onDrag(drag);
+    hit->onDragUpdate(drag);
     release(down);
     if (linkActions != 1) {
         std::cerr << "dragging out and back did not cancel the pending link action\n";

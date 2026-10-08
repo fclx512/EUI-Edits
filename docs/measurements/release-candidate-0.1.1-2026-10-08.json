@@ -1,0 +1,1332 @@
+{
+  "schema": 1,
+  "date": "2026-10-08",
+  "version": "0.1.1",
+  "repo": "D:\\编译开发\\EUI-Edits",
+  "branch": "main",
+  "head": "44123ad8412010f01632763aa99824e7545bbbec",
+  "remote_origin": "https://github.com/fclx512/EUI-Edits.git",
+  "remote_fetched_this_turn": false,
+  "remote_public_release_at_query": "v0.1.0",
+  "target_tag": "neoeditor-v0.1.1",
+  "new_commit": false,
+  "new_push": false,
+  "new_tag": false,
+  "new_public_release": false,
+  "inventory_self_hash_excluded": true,
+  "self_path": "docs/measurements/release-candidate-0.1.1-2026-10-08.json",
+  "files": [
+    {
+      "path": ".github/workflows/neoeditor-release.yml",
+      "bytes": 3110,
+      "sha256": "429ba0e121ea26aa8c6115825beef3e779bbc401b3e723363342eed14e4c9fc8",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "CMakeLists.txt",
+      "bytes": 70721,
+      "sha256": "0cf939469b62d71333e61193fca437066b51dfc7e6b4cc27aa445688c90985db",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "README.md",
+      "bytes": 11256,
+      "sha256": "b91a2c91c8cf0dd6550db035376f751e7605e6e5d4b1179eeb5777299f98c772",
+      "status": " M",
+      "group": "user_docs"
+    },
+    {
+      "path": "README_EN.md",
+      "bytes": 12365,
+      "sha256": "268e49fce551afe6e9970078e6d3ecb1ef042d18073fa131b21b1aa05c077230",
+      "status": " M",
+      "group": "user_docs"
+    },
+    {
+      "path": "apps/neo_editor/README.md",
+      "bytes": 5905,
+      "sha256": "b626418e42a1a9b5109247394c660b9615a63c542ca65c865522567228b60f86",
+      "status": " M",
+      "group": "user_docs"
+    },
+    {
+      "path": "apps/neo_editor/RELEASE-NOTES.md",
+      "bytes": 7713,
+      "sha256": "d3ab4c351e5e337b3533941501b017c2fb48241b45a556157e5498d54574b083",
+      "status": " M",
+      "group": "user_docs"
+    },
+    {
+      "path": "apps/neo_editor/app.cpp",
+      "bytes": 38951,
+      "sha256": "5505a417ecf55b8f0d0d332175c7f1f374221057e7e2da3af3369b43c1d60e60",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "apps/neo_editor/state/app_actions.cpp",
+      "bytes": 75361,
+      "sha256": "d39ae9ee8a0b0bf08f2a774640b0739d679dcce9814704b40dc981edd9dda509",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "apps/neo_editor/state/app_actions.h",
+      "bytes": 10266,
+      "sha256": "5dc6da03950ba38ffb7cc4722c929e116969d7847477c947d5b0f6dd27ad0748",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "apps/neo_editor/state/vault_cache.cpp",
+      "bytes": 14360,
+      "sha256": "9cd82d513ee7bc04f15ab897efee7f412cf05176d9546ecce5393abe18e28614",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "apps/neo_editor/ui/vault_view.h",
+      "bytes": 33274,
+      "sha256": "790700d8c13762651837e8009247cb79e827548ad13885642d557f3f850878de",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "cmake/NeoEditorVersion.cmake",
+      "bytes": 1559,
+      "sha256": "56005861fda5490f560e33c27d4ff6cb3e1b8109b7a36666ac4fca0828bc31fb",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "components/input.h",
+      "bytes": 107907,
+      "sha256": "bd98bea09a5b5123de3f9b98b0d0f2a963b7abe5485dcb3b1cec771e8f00e9fe",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "core/dsl.h",
+      "bytes": 63994,
+      "sha256": "e7d2552f0f072eeb5c593fb0e90318b02d1414f4d021e3a82b2d26a380bb0b17",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "core/runtime/runtime_input.h",
+      "bytes": 23789,
+      "sha256": "c06664400c16f978df044da5c07f83f37c0958143552c51d99f0d060088deeaf",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "core/window/win32_backend.cpp",
+      "bytes": 30250,
+      "sha256": "fe71f3f5cd74191a2dc7c43e96ca8e0cc963a4cb205c1b468d81c74f47cb3f62",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "core/window/win32_host.h",
+      "bytes": 1760,
+      "sha256": "baedee5a0b1fc4773ef57a46df4c5591ce96848b65f2a8e400cc5ebc7358d8ac",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "docs/EUI-Edits-后续优化方向-2026-10-05.md",
+      "bytes": 19495,
+      "sha256": "0ebf3bb9ddf957e3e58db504271e808beecca205629cc8d2ae38b79e36b6d046",
+      "status": " M",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/EUI-Edits-性能测试计划与结果-2026-10-05.md",
+      "bytes": 53804,
+      "sha256": "caaca257d99e822458f096a493f392d69bfef228a7d313d32d107dd2f77e60de",
+      "status": " M",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "scripts/check-neoeditor.ps1",
+      "bytes": 5409,
+      "sha256": "3d5940a5bfdd8b939f37f8640a3bdfae089e9fc56da3e22b9de76eac2ab31658",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "scripts/package-neoeditor.ps1",
+      "bytes": 9501,
+      "sha256": "9d53af7a197b27dcf09620fab7d2510b6631a1952139fa7763b1e0ea25cd0462",
+      "status": " M",
+      "group": "production_build"
+    },
+    {
+      "path": "tests/unit/input_pointer_feedback.cpp",
+      "bytes": 12573,
+      "sha256": "76fdcf589b0491092ba34d751edfd167c503a3fe3ccfc27fb977b9a537d78aa4",
+      "status": " M",
+      "group": "tests"
+    },
+    {
+      "path": "tests/unit/vault_scan_scheduler.cpp",
+      "bytes": 12670,
+      "sha256": "66431ee83c79be53cec35292fd8f7668e538fda2a61b02718b9e209ce6829ad5",
+      "status": " M",
+      "group": "tests"
+    },
+    {
+      "path": "docs/EUI-Edits-0.1.1-候选验收与发版清单-2026-10-08.md",
+      "bytes": 7146,
+      "sha256": "effe4135a9bfd88867cf30d436603ae1f90fe49537dd4dfa154999215fed55c1",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/EUI-Edits-性能优化进度与发版交接-2026-10-08.md",
+      "bytes": 10562,
+      "sha256": "6d0214db56383e64fceb8068c93d3ade5b18bf907deafe0f1a1c11bc01aeca46",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/EUI-NEO-Win32与D2D后端技术要点-2026-10-08.md",
+      "bytes": 56540,
+      "sha256": "e0bb84f08f9b71aa113f13e6d157fdb09815d71f7e9fd896be7612e7fe77aa15",
+      "status": "??",
+      "group": "reference_docs"
+    },
+    {
+      "path": "docs/EUI-NEO-框架自定义改动快速参考-2026-10-07.md",
+      "bytes": 108555,
+      "sha256": "c2b143f635ce66f5a351889c6bf7a736c40383a35e3c63e6c5b41a2e9e0f300c",
+      "status": "??",
+      "group": "reference_docs"
+    },
+    {
+      "path": "docs/measurements/input-callbacks-2026-10-07.json",
+      "bytes": 108773,
+      "sha256": "dbfe7994f93464e26ffcfdd5f7fdeb8a017f5cbfefd2fbb62964f25a4ddbb47a",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/measurements/input-drag-feedback-2026-10-08.json",
+      "bytes": 7361,
+      "sha256": "971f0901ac32efd3ef8a9334dab7e433d4a0a10555f87e54effcb98159a7b236",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/measurements/input-horizontal-2026-10-07.json",
+      "bytes": 10792,
+      "sha256": "8ced2b4d20b1fb68924162a48a02326514617901ee9c7b0a5a9236fcb29765e4",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/measurements/quick-release-audit-2026-10-08.md",
+      "bytes": 4562,
+      "sha256": "98c512aa5a52c57f5aa896ae17197b0030dfa0e7c7080678644a8ddd72269fa6",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/measurements/release-preparation-2026-10-08.json",
+      "bytes": 11741,
+      "sha256": "571db5eb3598be9299e789f540d69d85ea2c675329887b36ca119f8ecfdccbed",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/measurements/vault-startup-2026-10-08.json",
+      "bytes": 8917,
+      "sha256": "f92ea5b9d1134adb9769d4592af3c5829f397382a86dc8d99dc807814d60c929",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/measurements/win32-event-pump-2026-10-08.json",
+      "bytes": 4703,
+      "sha256": "9eedd5da59b3cc67b6acacaa0606734199e70f831427924de7e56efa170f8c32",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/性能优化第三批结果-2026-10-08.md",
+      "bytes": 7198,
+      "sha256": "cd37851f75ca9bcb358aba987bb12e009755bfbb8b852dd09e0999fa9c7ef7c2",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/性能优化第二批结果-2026-10-07.md",
+      "bytes": 6838,
+      "sha256": "0dc0bf2c22aaf8784bd733893cc1a5a12109a987e64318d8f31d2a54bd83471c",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/性能优化第五批结果-2026-10-08.md",
+      "bytes": 4880,
+      "sha256": "fba6af6582dea73298acfbc3bcaf53620cacc1dfe25f90659fb037edba589f17",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/性能优化第四批结果-2026-10-08.md",
+      "bytes": 6576,
+      "sha256": "7e717c95ed992b586f8152cead41063b2c6bbc9f0c4a901b1f68f16b59c0b0c6",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/性能优化首批结果-2026-10-07.md",
+      "bytes": 4637,
+      "sha256": "b34659afa03d60a934b7e17db8aad9c4fe91018226e883b1b37d0ffcfb964dc5",
+      "status": "??",
+      "group": "progress_evidence"
+    },
+    {
+      "path": "docs/性能参考仓库评估-2026-10-07.md",
+      "bytes": 8167,
+      "sha256": "f0fd3c3c639c17733853d09a8ce1630b585e22ef19e2c66510ec06dfa9808ce7",
+      "status": "??",
+      "group": "reference_docs"
+    },
+    {
+      "path": "tests/unit/document_vault_loading.cpp",
+      "bytes": 16158,
+      "sha256": "682c7007d4525e833891239a6e7633e3da9e22c99478c7f5a74e11ed6e7696b9",
+      "status": "??",
+      "group": "tests"
+    },
+    {
+      "path": "tests/unit/input_callback_layout.cpp",
+      "bytes": 13112,
+      "sha256": "2dd42473354d54eb18b05ee0597afaaec5fabdd26d9837a154b8b06f7bb5326d",
+      "status": "??",
+      "group": "tests"
+    },
+    {
+      "path": "tests/unit/input_drag_feedback.cpp",
+      "bytes": 7118,
+      "sha256": "2b1ddb1937d9a41d088754d510a2fb793218420c6b967d413c9844924cfb1495",
+      "status": "??",
+      "group": "tests"
+    },
+    {
+      "path": "tests/unit/input_horizontal_viewport.cpp",
+      "bytes": 4627,
+      "sha256": "e05f2c3e058a05cb9f0bb39bf6ea5f5085b43124cb51ead35de1a30dc527995f",
+      "status": "??",
+      "group": "tests"
+    },
+    {
+      "path": "tests/unit/virtual_list_wheel.cpp",
+      "bytes": 5256,
+      "sha256": "77c67348ce16ccd7ebb236102e42ba9282ce57f98706c4680198a6f5d3c75e2c",
+      "status": "??",
+      "group": "tests"
+    },
+    {
+      "path": "tests/unit/win32_event_pump.cpp",
+      "bytes": 2387,
+      "sha256": "134442dd1d8bbc5d59960f5af2e0c5f12b9fce4c7cc2045f9356c91f47cf63ee",
+      "status": "??",
+      "group": "tests"
+    }
+  ],
+  "recommended_stage_paths": [
+    ".github/workflows/neoeditor-release.yml",
+    "CMakeLists.txt",
+    "README.md",
+    "README_EN.md",
+    "apps/neo_editor/README.md",
+    "apps/neo_editor/RELEASE-NOTES.md",
+    "apps/neo_editor/app.cpp",
+    "apps/neo_editor/state/app_actions.cpp",
+    "apps/neo_editor/state/app_actions.h",
+    "apps/neo_editor/state/vault_cache.cpp",
+    "apps/neo_editor/ui/vault_view.h",
+    "cmake/NeoEditorVersion.cmake",
+    "components/input.h",
+    "core/dsl.h",
+    "core/runtime/runtime_input.h",
+    "core/window/win32_backend.cpp",
+    "core/window/win32_host.h",
+    "docs/EUI-Edits-后续优化方向-2026-10-05.md",
+    "docs/EUI-Edits-性能测试计划与结果-2026-10-05.md",
+    "scripts/check-neoeditor.ps1",
+    "scripts/package-neoeditor.ps1",
+    "tests/unit/input_pointer_feedback.cpp",
+    "tests/unit/vault_scan_scheduler.cpp",
+    "docs/EUI-Edits-0.1.1-候选验收与发版清单-2026-10-08.md",
+    "docs/EUI-Edits-性能优化进度与发版交接-2026-10-08.md",
+    "docs/EUI-NEO-Win32与D2D后端技术要点-2026-10-08.md",
+    "docs/EUI-NEO-框架自定义改动快速参考-2026-10-07.md",
+    "docs/measurements/input-callbacks-2026-10-07.json",
+    "docs/measurements/input-drag-feedback-2026-10-08.json",
+    "docs/measurements/input-horizontal-2026-10-07.json",
+    "docs/measurements/quick-release-audit-2026-10-08.md",
+    "docs/measurements/release-candidate-0.1.1-2026-10-08.json",
+    "docs/measurements/release-preparation-2026-10-08.json",
+    "docs/measurements/vault-startup-2026-10-08.json",
+    "docs/measurements/win32-event-pump-2026-10-08.json",
+    "docs/性能优化第三批结果-2026-10-08.md",
+    "docs/性能优化第二批结果-2026-10-07.md",
+    "docs/性能优化第五批结果-2026-10-08.md",
+    "docs/性能优化第四批结果-2026-10-08.md",
+    "docs/性能优化首批结果-2026-10-07.md",
+    "docs/性能参考仓库评估-2026-10-07.md",
+    "tests/unit/document_vault_loading.cpp",
+    "tests/unit/input_callback_layout.cpp",
+    "tests/unit/input_drag_feedback.cpp",
+    "tests/unit/input_horizontal_viewport.cpp",
+    "tests/unit/virtual_list_wheel.cpp",
+    "tests/unit/win32_event_pump.cpp"
+  ],
+  "artifacts": [
+    {
+      "path": "out/release-0.1.1-20261008/fresh-check.log",
+      "bytes": 95586,
+      "sha256": "acdcc05425b05fb07a98f28f2344a57aac4c5a97d2e3cd968a218bd912d62215"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/01-markdown-open.png",
+      "bytes": 54834,
+      "sha256": "fdad4ed97961cc469a46261f56a664b19fdebc84454886e82e404990f575a22f"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/02-table-edit-saved.png",
+      "bytes": 56798,
+      "sha256": "3bca803d9877e0d62c4903ba5a9a88f06a183c8108f0a122bb3cc30cb88de403"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/03-image-inserted.png",
+      "bytes": 52429,
+      "sha256": "c2d245936c0af155d30a4639a81b0eb5999f82979282b0c49255a2122934be44"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/04-image-undone.png",
+      "bytes": 54878,
+      "sha256": "675068eed6ff1d4b5f668ad6777f993641793e16f3ac8b2c1e2915d6dc352963"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/05-library-first-root.png",
+      "bytes": 78121,
+      "sha256": "be1fe6bf405036ccc7eb693acd0f914c152e15116363b44bda294f49c7584433"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/06-wheel-down.png",
+      "bytes": 83271,
+      "sha256": "3f9016b4e4275a04309a6897dec7ddd25c72f1e24f2d41d951267fe74bbc9aa1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/07-plain-saved.png",
+      "bytes": 60967,
+      "sha256": "4b781b8024c232b3b11932ba18265a11ec5bcf2affb411e976b740b70714e30e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/08-new-root.png",
+      "bytes": 43303,
+      "sha256": "9f918ada5abfdeb27fe070068ebc3e4a58ce91308cc821ad928d7f357e9c0a3e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/09-warm-root-return.png",
+      "bytes": 85580,
+      "sha256": "b7ba7d02392ed4ceb71937b1c45ffa04385b4a562e2c697099748dc5813dd63e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/appdata/EUI-Edits/settings.ini",
+      "bytes": 558,
+      "sha256": "bdf472fd02926d53b1ed7f7176436cbb74c195b8ada76914fa7ab811d815f4f1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/fixture.png",
+      "bytes": 252,
+      "sha256": "b17f60aa06fd1f3eca13abd5be6ef49d07876c7eeb452eecdd74dc30875694e1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-000.txt",
+      "bytes": 11,
+      "sha256": "d3a1561e07a5c261afe0169a70238d2cf641677a56cf134f1781cef7fb38e1c4"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-001.txt",
+      "bytes": 11,
+      "sha256": "a7464290e389574fae55c9c23249a20c4d0adb670419d7588aa53c3d4f245a67"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-002.txt",
+      "bytes": 11,
+      "sha256": "ce60f9ff5e3bb3f5ee093bdac91e3fe9098f50c8159bdaeb442d216d0386c525"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-003.txt",
+      "bytes": 11,
+      "sha256": "f8131a91339461a83367c482418e701321582050a4773f8d5247037aa636dab1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-004.txt",
+      "bytes": 11,
+      "sha256": "d2e2dbdf38d7b8fccaa46c9ab549daaa885be33f7ea3840ade49d85906e7d858"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-005.txt",
+      "bytes": 11,
+      "sha256": "8ba0cdd1679ad0c1687717bf76b1ca5d5d8956a87091211cb4bdfbd8e4eb7855"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-006.txt",
+      "bytes": 11,
+      "sha256": "22de55a49c8a4bda43dcc634dd6973a9936bc2a29cb88cbbb584f6280683d6d4"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-007.txt",
+      "bytes": 11,
+      "sha256": "d121ec65718d18be1c09c835d00d24000e5d08a062e900b8db276da98f681d4d"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-008.txt",
+      "bytes": 11,
+      "sha256": "0427bf8a46640276f1acfb0b346f68474b6cce92ff27be3081e5c8b38e0d08c0"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-009.txt",
+      "bytes": 11,
+      "sha256": "0f37129f53e4dc54cddaa797f93e2e514b6bd4d551f451ba9aef59cabde12dee"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-010.txt",
+      "bytes": 12,
+      "sha256": "0113c6f0610a7e9e847e74ac9eb3eefcbb8ed92a7266fadc051aa0108d3b3a61"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-011.txt",
+      "bytes": 12,
+      "sha256": "26e8f8a6c34269359e6c7eb9309df9504181f5303a5d8b4ff7d4909155a33af0"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-012.txt",
+      "bytes": 12,
+      "sha256": "e68b477f44c37e05596f8ca8f1849a1d4b58bd7b09edf6f3bebb0e699ebd3875"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-013.txt",
+      "bytes": 12,
+      "sha256": "332b5f9dcf71ca4dd8029e07a9fab89a25edf3ad8cfdaac219f983a9e5a2ce00"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-014.txt",
+      "bytes": 12,
+      "sha256": "4b31b8fc5834e3080d9f858aeac223c7d7714411350fdd2bf8516dcf3f4561b4"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-015.txt",
+      "bytes": 12,
+      "sha256": "71ceef8a9979b779c09503c3739d9904bd69a3dbe6621de09edf56910d1647cb"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-016.txt",
+      "bytes": 12,
+      "sha256": "37094bf978cbd7f9e28815877928e63ab12e2550214e4da74d6b8059963b4861"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-017.txt",
+      "bytes": 12,
+      "sha256": "b690a2c365ddd9c71f7ea89a31b1920c4c6961f7e803989dfd8d16a198b4b451"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-018.txt",
+      "bytes": 12,
+      "sha256": "2a7c43e8de3bd956c86b5a5137058082723c3c86ae8afed72a1a71c29e2dad52"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-019.txt",
+      "bytes": 12,
+      "sha256": "001e2371cc99ab858f1eca9f47368729d2e4e68b37cc5a0cbf9f69de229aff85"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-020.txt",
+      "bytes": 12,
+      "sha256": "3e90f73c573dd68a6a59245045aa9e6aadadeaaa671ec5f0d7c99fafc722b235"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-021.txt",
+      "bytes": 12,
+      "sha256": "fcf5d3228e32942cf15872f143df3bf160ef366c004fc7e771e91c63f42379ac"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-022.txt",
+      "bytes": 12,
+      "sha256": "46516a591baa5a610c6061e0c03fbf7a5ef77e392b27ff76846e756e98d8ca30"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-023.txt",
+      "bytes": 12,
+      "sha256": "f424096443a8aac6474f1b0effeaff13551d3634e186692aff0dd027417a4b81"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-024.txt",
+      "bytes": 12,
+      "sha256": "145c06a465eaf9cbc61a0f640b282d0c3fb18858e0dabd6b62aa90d865db2e19"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-025.txt",
+      "bytes": 12,
+      "sha256": "b9bd02c8fbe7601e3cbbf5c90edc18ed50b10ff3e0ab4ff4233bd232c8b2dc2f"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-026.txt",
+      "bytes": 12,
+      "sha256": "6186619e4802ea79c18a0d218d9c054a2af9d5387bc11b7265b321edc82fd970"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-027.txt",
+      "bytes": 12,
+      "sha256": "3afd000ba81b955703f7bbc248d4f80745089d82ab6b4ab75868cde297aa0d7f"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-028.txt",
+      "bytes": 12,
+      "sha256": "dd09bba3e24dcd8cea471e281b24b52d0f0fdbf11bd9c5142f3354484e3e4439"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-029.txt",
+      "bytes": 12,
+      "sha256": "839322de1d311530718bdd39c3c1461e2fe5d6a92b54b00bf03361c1ddf9fd1c"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-030.txt",
+      "bytes": 12,
+      "sha256": "8a9b83d87e606ea97fca0e08981f449bc393a5b46abb8c16e63d64c604f3a901"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-031.txt",
+      "bytes": 12,
+      "sha256": "4bf01f7dbce742a9dec9ed7beb3c648fc7c32baa807ed17a38d8e9a4d2a88f92"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-032.txt",
+      "bytes": 12,
+      "sha256": "9169092cd360bd0defd589c0de8a103a84506eb09d3da36424b67d8818d3a9ac"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-033.txt",
+      "bytes": 12,
+      "sha256": "f90c471b6bd92415a94fbe4ce10a2f2cfb8d055ead1b9b003799303f414d2787"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-034.txt",
+      "bytes": 12,
+      "sha256": "f650e7f09d7f7e2445af0d6e9c8aebc2de2dba13579a8bb0c352eb4c651605f3"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-035.txt",
+      "bytes": 12,
+      "sha256": "a38071aa4fbb269d3515271c078911fe5da824f517851507bf6a012fedb9fd6d"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-036.txt",
+      "bytes": 12,
+      "sha256": "2381404f63201ac2b357f8cb73e1e486a1d7b83e6e3b57b3381ec73e83f41e67"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-037.txt",
+      "bytes": 12,
+      "sha256": "9e24ffcb2cd8c69fc261761b7fc57c3b99d500ec7adcb64b445f75d016257165"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-038.txt",
+      "bytes": 12,
+      "sha256": "23df8ca8908d5ae688f2dc375c2fb85f79c63f77aed7375800b42de4b5e34eda"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-039.txt",
+      "bytes": 12,
+      "sha256": "d8e7cc2d04bdb89e5e1e69980bfbae43691885dbe0dd808d2f151000c2e2e43a"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-040.txt",
+      "bytes": 12,
+      "sha256": "617226e0e7d94345f967b6c89332abb4441d78f22015d92381377732c040cfc1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-041.txt",
+      "bytes": 12,
+      "sha256": "80c328beab254c03cd16cb9559093120fd97f6777b9ff5387618b55394376d30"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-042.txt",
+      "bytes": 12,
+      "sha256": "58c8c2336cf4017243ebe7d4ecb9723035b0e3e7a7f29c6d73ca75032d6088ef"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-043.txt",
+      "bytes": 12,
+      "sha256": "e98133662fdbed9cc7acedcbf5825abb15180684f5b54ee892dddf00f479e2b5"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-044.txt",
+      "bytes": 12,
+      "sha256": "57abcad7b3892814d4220846b1b9eb173eb8ead5aabac7fdf260590921077c12"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-045.txt",
+      "bytes": 12,
+      "sha256": "197c14031fe03054c39511788e9f07957db37df3b54d61b4c91f603018f6e15b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-046.txt",
+      "bytes": 12,
+      "sha256": "7a4e60cd9f15955496ed895d7c6f8fac86d027bd96683069c1a5d0e4e35c453c"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-047.txt",
+      "bytes": 12,
+      "sha256": "374eee7cda5392947d23e7567a3812b1936945fdad820975a8caf252c5be0c12"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-048.txt",
+      "bytes": 12,
+      "sha256": "8e2650fd00573b959ebad9fde4a81088dce7b470737c36e6e32a0b0fbb22588d"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-049.txt",
+      "bytes": 12,
+      "sha256": "bc127bd383c15c8acff8e12d27c7f6072fc2c0565e6590cfc673c5641d3ccdfb"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-050.txt",
+      "bytes": 12,
+      "sha256": "319b5ae2420c099656a0405bd7205edfe329487d3661eb4b65c18b12aeeadef8"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-051.txt",
+      "bytes": 12,
+      "sha256": "0d7a43c5e3942de69e5204dd1d2bc23c4e5feac42648580e481ae5cda25d6824"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-052.txt",
+      "bytes": 12,
+      "sha256": "6df681aa8710a01195bad5bcfb65e690eed5f25d9f05bb8339912173c74e0f1b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-053.txt",
+      "bytes": 12,
+      "sha256": "97caa5c995ce9945cc131b734380fd5563fbf1cb6a3e7eb646c9d0a5d1bcb686"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-054.txt",
+      "bytes": 12,
+      "sha256": "2bb287dd6ce2cbe99f87dd773a1d82b6e0b006a603c4b386379a34c852004827"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-055.txt",
+      "bytes": 12,
+      "sha256": "39ab025ddd09c8ec27aa3c13a111b745353ac6146a09ea3f0c922495f97eb5f2"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-056.txt",
+      "bytes": 12,
+      "sha256": "89fe8b2f5242ea6c91edee40082e78fad6cf4cb0cf81d541b562a9201eed2903"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-057.txt",
+      "bytes": 12,
+      "sha256": "f5ca37abd433a44cf37775323ed8a783c9ce705f1f4788759510b2e716b5e592"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-058.txt",
+      "bytes": 12,
+      "sha256": "a5266c59b4c937eb6fc5176e608983df22f00fd76110623305a07ce1aef4a41b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-059.txt",
+      "bytes": 12,
+      "sha256": "8b83836bf22a978f79c3478c0509f270ba9f12cf9bb56f1c701326097ac54391"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-060.txt",
+      "bytes": 12,
+      "sha256": "aac763b0e3596e4dbcff26005ba2681fd98ecaadb942f323167252f6449b14c1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-061.txt",
+      "bytes": 12,
+      "sha256": "43d431a7022358f767d795c9db7692b79732d05883694e38a273f33b5d344c68"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-062.txt",
+      "bytes": 12,
+      "sha256": "c343da0b4622ae597e00929659a0fafbcc6482f05c3c7858674693616bceecd1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-063.txt",
+      "bytes": 12,
+      "sha256": "000eff80133002374bf5f0614f8a050ca0b3c00545783c53e1a1b1dde2d448d0"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-064.txt",
+      "bytes": 12,
+      "sha256": "5beefdca5859e93739b425de4cb0291e7c7cd881e6b1503daeda498009af2a3b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-065.txt",
+      "bytes": 12,
+      "sha256": "cd739cf6dc219a5c013573f97187ec47de81f7071603021d51ff583e79efbdd9"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-066.txt",
+      "bytes": 12,
+      "sha256": "8164794fcf97c6de79d2f7e3de5a6156854484cd7fe8c34b58d7d1ee8753f75f"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-067.txt",
+      "bytes": 12,
+      "sha256": "d8435f6b696d3a7e6c500d7762b394c244ced56182db2448b1cde45e160b4b71"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-068.txt",
+      "bytes": 12,
+      "sha256": "a40c98b4d62757fa07ae2a8d019d66ce8e382b86c0dbe19c981100bc494beaa9"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-069.txt",
+      "bytes": 12,
+      "sha256": "93a88cdeee5574855baa01e817ddfd342888d3df797ae08688a80b39c4180e46"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-070.txt",
+      "bytes": 12,
+      "sha256": "529d707b44c6cf60a8efa6a80cc7c2104b3b4a6286b1ae396b2cbfb5af3e3aab"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-071.txt",
+      "bytes": 12,
+      "sha256": "99132e752b504cdc157d41de978462ad2f0b9f8b59e7c19879a7c08ca01468be"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-072.txt",
+      "bytes": 12,
+      "sha256": "1c077175a4c63521a0de338ed9769f2ac95ef2f53d1548e382fda41c326956ab"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-073.txt",
+      "bytes": 12,
+      "sha256": "60e686c06c32b45f969dba278051053446ba0d06f2931dc38c03141188905517"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-074.txt",
+      "bytes": 12,
+      "sha256": "57554bffe3a6fdba1a5273feac5db26f5b3ebeae1320082a1126e347b795e978"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-075.txt",
+      "bytes": 12,
+      "sha256": "b60d2c37d1e180dd7147f1bcfc5cabb172f528347c0523f74752a887fff7a47f"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-076.txt",
+      "bytes": 12,
+      "sha256": "eabe8f6853c32522656cd7a28637aeb7e664a84c222dae33b7fbbf4ed610ee24"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-077.txt",
+      "bytes": 12,
+      "sha256": "4621e0f1caad25d5b101c49e34e669a76d865c2e5bb6b6ccd711e58fe25090e9"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-078.txt",
+      "bytes": 12,
+      "sha256": "18780a21809b8021dfcd5a41ea7c2edf5bdb291212f46eb93078b488fd0b46f7"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-079.txt",
+      "bytes": 12,
+      "sha256": "e8c8108e98514e8d34d6dc4591d3f529761547aa9481624c5e86435d983e7657"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-080.txt",
+      "bytes": 12,
+      "sha256": "d0463541d70b45fb0bb3a3224d831c275338dcc1530c9965c84602e6d7fa80d1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-081.txt",
+      "bytes": 12,
+      "sha256": "8c588a0fa7cf8ccd2b864b3244534026e06231866500ce422b19479c80981cea"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-082.txt",
+      "bytes": 12,
+      "sha256": "fb207609ea3006e039a91182ab500e40a20f772ce60356303945bd8240a8738a"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-083.txt",
+      "bytes": 12,
+      "sha256": "e782b820fed3df6538ab5c594fd83f9d0f453d1cd72957a616554c6f97a6c7ab"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-084.txt",
+      "bytes": 12,
+      "sha256": "ffa0b47f38bc833d76a5619625a9d7f3ccf94c8b99e6836fc05108b4cd295675"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-085.txt",
+      "bytes": 12,
+      "sha256": "2202eebcb943186cc42de8e02b075109b5418e5dca249dd7efc3222ecc235356"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-086.txt",
+      "bytes": 12,
+      "sha256": "863f0c57b794bd43e9864cb6c8e557d043843017fd5548def8cf1d8f722c1b87"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-087.txt",
+      "bytes": 12,
+      "sha256": "0c34a5cdee69fd23f10390d3e861836390b598714a25f7c9d272470d4bd787c9"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-088.txt",
+      "bytes": 12,
+      "sha256": "62bc930ee3aeaccb81a635abdd3fb3ea9eda17c7dbccc24902ccde0773342854"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-089.txt",
+      "bytes": 12,
+      "sha256": "cbf80ba5cdcf7e52df81a97d8aa7d6eaf4a76d207c9a51cd858c8c068e823a2e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-090.txt",
+      "bytes": 12,
+      "sha256": "b5f1931e6f2067e745f19a265cc5e47187bae1517b1409fd96cf58c947746f16"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-091.txt",
+      "bytes": 12,
+      "sha256": "edd136dc83188cb996b77c4ab4bc98eeb8ce77bdeb689ef3dbf501742f01dceb"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-092.txt",
+      "bytes": 12,
+      "sha256": "9475802dea555bbb7dc48a81bb08cb67d039b1c41894d323df7a80e870a580db"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-093.txt",
+      "bytes": 12,
+      "sha256": "522774ef9d0aec6179e7e670a36562b816011cdf72d3e09789fee08cc05898a1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-094.txt",
+      "bytes": 12,
+      "sha256": "f3415a52b156ec947b1fcffd6f53e85749c240976dc2ceebd27738ff76267b45"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-095.txt",
+      "bytes": 12,
+      "sha256": "c46aed416940252d488bc8bfe005d6f52ce9977721660eda8df21f2911e58e14"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-096.txt",
+      "bytes": 12,
+      "sha256": "158395db33a462221e4319f1c3d2122298918c5a40ab66b0b9b9cf72aed0b67c"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-097.txt",
+      "bytes": 12,
+      "sha256": "f9a320b05f81b7af671bb0000a66483272e96c09118583f7bdc0ea2952e70162"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-098.txt",
+      "bytes": 12,
+      "sha256": "2519de678dab8917c2790d3a285ca503a71cf7d9555625ef1136dd4a93f90488"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-099.txt",
+      "bytes": 12,
+      "sha256": "6057a0281d680a34a7743bc4ec22d88c200f806f436352197b6dae6f3355f767"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-100.txt",
+      "bytes": 13,
+      "sha256": "682b414ec19b5ef0795b04d5cad0ce27ff36742356eab230b6494748f3ebf88c"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-101.txt",
+      "bytes": 13,
+      "sha256": "631aa8940dbdfee9500e57dc4e354efd02538f350a47b844aa7d5f642556c2c8"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-102.txt",
+      "bytes": 13,
+      "sha256": "29949d810dd30d7354a8b6d3bf7a2a7785c5d0599011c5bbcb77f102db2dee3c"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-103.txt",
+      "bytes": 13,
+      "sha256": "017588b2e2b14b137d39e4a7d496340e11956b88764c0e54eab301036ac0635d"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-104.txt",
+      "bytes": 13,
+      "sha256": "3a14a9286f0e294a7ac6b36a44386a1638869ed4708e2c989f0c62a0aab281bd"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-105.txt",
+      "bytes": 13,
+      "sha256": "727f584a7f72c038727ffda359eabb01ca1e257fb6471580c11e6343e98dbbcb"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-106.txt",
+      "bytes": 13,
+      "sha256": "79d5bdea99a729fff931296b96cac3aef5ee94f372cdf23b4e69877cd21b0821"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-107.txt",
+      "bytes": 13,
+      "sha256": "6059560b4a537ca4fb601c2627ef5579ceed3b82606221a79a24b3fec9cd783e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-108.txt",
+      "bytes": 13,
+      "sha256": "a4a25f99bf4981189b6c18d1b6864f20943502d88223af769d435b5ffebbff42"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-109.txt",
+      "bytes": 13,
+      "sha256": "21760fca5f49684a2d1cb4fd58ac9f9df5800272bcc5e7cd880ad33a042dc0a1"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-110.txt",
+      "bytes": 13,
+      "sha256": "4e05aa689ce557e0964c4e7c76ddcc75a2717249d7bb14e73bb48caee6f1ad78"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-111.txt",
+      "bytes": 13,
+      "sha256": "c2481e3e437d45db630e7049abb9c3d85a6117d3023bbb95cca3db3f3fe75055"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-112.txt",
+      "bytes": 13,
+      "sha256": "c042877ace01bc3050bdfc5cf0910666ed6b47284d51707a1df0d4a48d4c9e3e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-113.txt",
+      "bytes": 13,
+      "sha256": "c21198b82b0163d05268530b09e87ea467143e7a3c6f5f28ea6dbb91cf6d06e2"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-114.txt",
+      "bytes": 13,
+      "sha256": "07926f801045e40e59fdab30c57371b586228a636dda420d3798677d162217bf"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-115.txt",
+      "bytes": 13,
+      "sha256": "26d9f79ec6d9c3f117e000d022be923348334402c1be6dad5eefb079a2ff8988"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-116.txt",
+      "bytes": 13,
+      "sha256": "dc7b89ef970f06c97b0662d5c109cec087b53c12cdbbe554a1ebda71dd3098a9"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-117.txt",
+      "bytes": 13,
+      "sha256": "b39d1abaed209800ebb66a6d7539aec59eecd6d3f937d62cb29bec969abacbdf"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-118.txt",
+      "bytes": 13,
+      "sha256": "f6682f2b7ca526414227fb1a32697901b9898253c2c9656c6dbb0ce0d21e573f"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-119.txt",
+      "bytes": 13,
+      "sha256": "d63f4b0766a5247ca11ff58e47065832c5da7ac9b48b37220d94dd964870568d"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-120.txt",
+      "bytes": 13,
+      "sha256": "7666000a842d4463dd51243a84f7a22b9c2929cac0742c3daa6479859b51b0f7"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-121.txt",
+      "bytes": 13,
+      "sha256": "fddcbba78e2ca7a15d6ebc6ecbeb8b98bac280c37d7de7fdec49c7a1cac46f6c"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-122.txt",
+      "bytes": 13,
+      "sha256": "1ee45d7edf775bada4038f1d0822a071b1daa17b371cdbcb21c8d20b0a772d33"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-123.txt",
+      "bytes": 13,
+      "sha256": "eefea0d878f455a2b2efc3c557b92c08048b993742edf80e08c1ad78791303da"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-124.txt",
+      "bytes": 13,
+      "sha256": "c1c7474b3c1c6b54326a3ea255e593d53a58b7c1f065556838cbac6638545f6d"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-125.txt",
+      "bytes": 13,
+      "sha256": "79629262bd78ba4b4f4ac11905741d373f21a156d8004ff3b4632c41270c3d7a"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-126.txt",
+      "bytes": 13,
+      "sha256": "ebeab51e91d85d504920e4ca07a972330c8ee48f6e8b5951867645147f32db90"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-127.txt",
+      "bytes": 13,
+      "sha256": "2c8d0daf4f1e88a0785e20906ddc92e3f8e2527066e4d714d1ea67b84af02a94"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-128.txt",
+      "bytes": 13,
+      "sha256": "9465494befc4a4fcf91c11615d090c0a4840298563a1f5928ecb9fe8a60c1389"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-129.txt",
+      "bytes": 13,
+      "sha256": "2beb66d2efd1b22a6af1ba502bd2f0e8600abc9613c4cee0c32ba9eff51d523f"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-130.txt",
+      "bytes": 13,
+      "sha256": "66c7520eea10b2493a5314b7ec94ee1dc1fec177715c09e3c285e949b89075ca"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-131.txt",
+      "bytes": 13,
+      "sha256": "efaced9ac0fcfa57561329ebfcabde890e509a879036046b013bc63ad2470698"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-132.txt",
+      "bytes": 13,
+      "sha256": "0fafc2f5da5985d7eaef8e636d2a00749eeecf6c5be8473e296025ac12096ab2"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-133.txt",
+      "bytes": 13,
+      "sha256": "b935193b3200d38b05444467cf1f42806938d284b94532c4715e210d50b53db0"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-134.txt",
+      "bytes": 13,
+      "sha256": "bd9a1d1f2d969de1e17475810e36edcd6104782a2ec30a91908ff52520270fa6"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-135.txt",
+      "bytes": 13,
+      "sha256": "a778c0a7a500aacd2f3776892615b80253a9e3d361a1ae71560106894564ceb0"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-136.txt",
+      "bytes": 13,
+      "sha256": "8689de3b3176af44a5105f78e709fb4ec774d48d4a058e5c5fd359e8ec09160e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-137.txt",
+      "bytes": 13,
+      "sha256": "c2e0935110fc20bc2e7ef81dc1e5af2d9ec548a1ddeb176caccb805890549cf5"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-138.txt",
+      "bytes": 13,
+      "sha256": "15bad8247ab7e43e9415250163096a0d38c52c8c3a74f6b721f3f7d7ae7d0017"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-139.txt",
+      "bytes": 13,
+      "sha256": "3aecf0ca49190a76a650cb314f82e825479e0852211d42db3ab7cac36434ebe0"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-140.txt",
+      "bytes": 13,
+      "sha256": "5ca9f002a88928877f0ab196e7f878f6244cd811936ee14f1089c9d30e6c6215"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-141.txt",
+      "bytes": 13,
+      "sha256": "913e35ed5725c3620d3fd21899693e842a25162daba3842b9cb91424d26cd879"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-142.txt",
+      "bytes": 13,
+      "sha256": "055ae07d96410ec32769024955b761ae8d44fe178f3426bc0eafb7ed565272f4"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-143.txt",
+      "bytes": 13,
+      "sha256": "0c8d32c22eb1a58ae7da2ef5521a0cdaafc2dd6ed0325980e5478179a5b7731c"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-144.txt",
+      "bytes": 13,
+      "sha256": "d68da655450dc07519b590650029827c762122ac4976f4c6eae3bee1c1c3689e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-145.txt",
+      "bytes": 13,
+      "sha256": "5339275cb3c68aed495f03647f392506e9e0334761e56726d1e2c319a87acacf"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-146.txt",
+      "bytes": 13,
+      "sha256": "c57f85a1badf38b92720bb73e627b46fd08451768c01d25bf762c18bf0168b9c"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-147.txt",
+      "bytes": 13,
+      "sha256": "9f96161a3172e73df9c3a6059d24a77d81174a5c6cde7f1b988c119cda9d1730"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-148.txt",
+      "bytes": 13,
+      "sha256": "17a7bbe73f27ddd91b42dacb23dfb5c427c196de3a42efbca627d433a23b3fd3"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/item-149.txt",
+      "bytes": 13,
+      "sha256": "879ac0fc28a7d36153dfb5ffafe88a009fdb28cad6bcbdbf3ada23954da78c28"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/plain.txt",
+      "bytes": 63,
+      "sha256": "5bff1198894ef5f19dde74282c2d0cc4c74518591f90b3af62510c8e0881daa7"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/documents/release-smoke.md",
+      "bytes": 3308,
+      "sha256": "1276a391f7552c14557e643473c2b3f7af4cda8f834065a5774680876f81612e"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/exit.json",
+      "bytes": 114,
+      "sha256": "49275bb2c24bc1db2c358cc775d1618b0c36dc2c42fd608eb5d2dab9bd287c1d"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/launch.json",
+      "bytes": 465,
+      "sha256": "62787eca2e77c0c1b7b3208fc6e9a141056441e6b983f8445f7faa09eeafea3b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/gui-acceptance/other-root/switch-root.txt",
+      "bytes": 55,
+      "sha256": "4258fc4fea0f744d4cb30961b203228dc44c9175ddbd1a70c14e8cde5139a03f"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/launch_acceptance.py",
+      "bytes": 3084,
+      "sha256": "a78e39b27fa213c5c66ce1e8ad280ee1c9bc80da65e43f43472e652de70acc40"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/package/EUI-Edits-0.1.1-windows-x64.exe",
+      "bytes": 3709952,
+      "sha256": "099d50f209efbd98a7284f1ba9b5bad7ab0a81a4d23e6f2065624a2ec0502b3b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/package/EUI-Edits-0.1.1-windows-x64.exe.sha256",
+      "bytes": 98,
+      "sha256": "7dd19f892f8e905025907458c0db63b7012d9d643ef3edcd7c95362f47688a6b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/package-verified/EUI-Edits-0.1.1-windows-x64.exe",
+      "bytes": 3709952,
+      "sha256": "099d50f209efbd98a7284f1ba9b5bad7ab0a81a4d23e6f2065624a2ec0502b3b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/package-verified/EUI-Edits-0.1.1-windows-x64.exe.sha256",
+      "bytes": 98,
+      "sha256": "7dd19f892f8e905025907458c0db63b7012d9d643ef3edcd7c95362f47688a6b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/package-verify.log",
+      "bytes": 453,
+      "sha256": "ac63c9a652faf0c3dc5a192494819f87aaab0c2c1ee93225daf3ae2da7687e20"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/package.log",
+      "bytes": 14519,
+      "sha256": "3c295ad03aa5689cd7bc0678e89cbe75178b4c55d3edfb568de091712b34c988"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/startup-acceptance/01-cold-cli-startup.png",
+      "bytes": 82628,
+      "sha256": "22259ac2476b28acaf5553fd5ac5661523f650834e297f7f1a2a808e6c923964"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/startup-acceptance/appdata/EUI-Edits/settings.ini",
+      "bytes": 351,
+      "sha256": "c9d0f17996563f97c2a0e9a9b42396f8208195fe3eec6fe84610eba447dac3e6"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/startup-acceptance/exit.json",
+      "bytes": 30,
+      "sha256": "84df98e4abb13a6624639e7fe5b30db48ddc7881539c26a8816f31ec0bbee44b"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/startup-acceptance/launch.json",
+      "bytes": 364,
+      "sha256": "5a6842daf83c3e24b8ff08499dc0f175354b0369a8957e1ea196c8ab2992e6c3"
+    },
+    {
+      "path": "out/release-0.1.1-20261008/startup_acceptance.py",
+      "bytes": 1766,
+      "sha256": "e8a412701f5d634ab088a2ee501edcf8b2f3af5424bf6c637cf531ebc91ff8de"
+    }
+  ],
+  "candidate": {
+    "exe": "out/release-0.1.1-20261008/package-verified/EUI-Edits-0.1.1-windows-x64.exe",
+    "sha256": "099d50f209efbd98a7284f1ba9b5bad7ab0a81a4d23e6f2065624a2ec0502b3b",
+    "product_name": "EUI-Edits",
+    "product_version": "0.1.1",
+    "file_version": "0.1.1",
+    "architecture": "x64",
+    "static_crt": true
+  },
+  "validation": {
+    "formal_fresh_gate": "PASS 51/51",
+    "test_wall_seconds": 88.18,
+    "full_unit_rerun_this_turn": false,
+    "package": "PASS",
+    "updated_path_audit_revalidation": "PASS",
+    "i18n": "PASS 576 messages; 636 literal calls; 21 dynamic IDs reviewed against prior evidence",
+    "powershell_parser": "PASS",
+    "whitespace": "PASS cr-at-eol",
+    "gui": "PASS basic Markdown/table/image file import/undo/save/library cold and warm root/wheel/plain UTF8/CLI cold start",
+    "normal_exit_pids": {
+      "9780": 0,
+      "20528": 0
+    },
+    "skipped": [
+      "real IME",
+      "low-end hardware",
+      "hardware GPU",
+      "multi-monitor DPI",
+      "Windows 10",
+      "prolonged drag",
+      "original high-frequency wheel trace",
+      "image clipboard GUI matrix",
+      "new optimization CPU A/B"
+    ]
+  },
+  "machine": {
+    "os": "Windows 11 10.0.26300",
+    "cpu": "Intel Core Ultra 9 275HX",
+    "ram_bytes": 33784107008,
+    "rendering": "Win32/Direct2D; NEO_D2D_SOFTWARE=1",
+    "theme": "light",
+    "profiles": "isolated APPDATA"
+  },
+  "prior_dirty_files_preserved": true
+}
