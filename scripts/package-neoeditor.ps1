@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$')]
-    [string]$Version = '0.1.1',
+    [string]$Version = '0.1.2',
     [string]$BuildDirectory,
     [string]$OutputDirectory,
     [string]$CMake,

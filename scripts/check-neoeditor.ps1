@@ -60,7 +60,7 @@ $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encod
     'input_horizontal_viewport', 'input_callback_layout', 'input_drag_feedback', 'input_pointer_feedback',
     'document_vault_loading', 'virtual_list_wheel', 'win32_event_pump', 'runtime_scroll_sync',
     'main_window_frame_reentry', 'dsl_window_resize_throttle',
-    'input_model', 'lp_decorations', 'undo_incremental', 'image_attach')
+    'input_model', 'input_value_reference', 'input_source_line_count', 'table_selection_background', 'lp_decorations', 'undo_incremental', 'image_attach')
 $tests = @($targets) + @('settings_language_zh', 'settings_language_en', 'settings_language_invalid', 'settings_language_legacy')
 $filter = '^(' + (($tests | ForEach-Object { [Regex]::Escape($_) }) -join '|') + ')$'
 # CTest can otherwise succeed with an accidentally empty or incomplete selection.

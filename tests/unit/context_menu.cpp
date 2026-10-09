@@ -48,7 +48,8 @@ struct MenuHarness {
 void composeMenu(core::dsl::Ui& ui, MenuHarness& state,
                  const std::vector<MenuItem>& items,
                  const components::theme::ThemeColorTokens& tokens,
-                 const core::Transition& transition = core::Transition::none()) {
+                 const core::Transition& transition = core::Transition::none(),
+                 bool skipClosedContent = false) {
     ui.begin("context-menu-test");
     components::contextMenu(ui, "sample")
         .open(state.open)
@@ -58,6 +59,7 @@ void composeMenu(core::dsl::Ui& ui, MenuHarness& state,
         .items(items)
         .theme(tokens)
         .transition(transition)
+        .skipClosedContent(skipClosedContent)
         .onSelectPath([&state](const std::vector<int>& path) {
             ++state.dispatchCount;
             state.selectedPath = path;
@@ -209,6 +211,52 @@ bool explicitMenuTransitionRemainsAvailable() {
         return false;
     }
     return true;
+}
+
+bool closedContentOptInPreservesReopenAndAnimation() {
+    core::dsl::Ui ui;
+    MenuHarness state;
+    std::vector<MenuItem> items{MenuItem("父项", {MenuItem("子项")})};
+    for (int i = 0; i < 20; ++i) items.emplace_back("Action " + std::to_string(i));
+    const auto tokens = components::theme::light();
+    const auto instant = core::Transition::none();
+    const auto animated = core::Transition::make(0.12f, core::Ease::OutCubic);
+    composeMenu(ui, state, items, tokens, instant, true);
+    auto* parent = findSuffix(ui, ".level.0.item.0");
+    if (!parent || !parent->onHoverChanged) return false;
+    parent->onHoverChanged(true);
+    composeMenu(ui, state, items, tokens, instant, true);
+    auto* child = findSuffix(ui, ".level.1.item.0");
+    if (!child || !child->onClick) return false;
+    child->onClick();
+    if (state.open || state.selectedPath != std::vector<int>{0, 0} || state.dispatchCount != 1) return false;
+    ui.state<float>("sample.level.0.offset") = 100.0f;
+    composeMenu(ui, state, items, tokens, instant, true);
+    if (!ui.roots().empty() || ui.state<float>("sample.level.0.offset") != 0.0f) return false;
+    state.open = true;
+    composeMenu(ui, state, items, tokens, animated, true);
+    auto* level = findSuffix(ui, ".level.0");
+    if (!level || !level->transition.enabled || findSuffix(ui, ".level.0.highlight") ||
+        findSuffix(ui, ".level.1.item.0")) return false;
+    auto* viewport = findSuffix(ui, ".level.0.viewport");
+    if (!viewport || viewport->scrollOffset != 0.0f) return false;
+    state.open = false;
+    composeMenu(ui, state, items, tokens, animated, true);
+    // Opt in must not omit the tree required for an explicit closing animation.
+    auto* closedItem = findSuffix(ui, ".level.0.item.0");
+    if (!closedItem || !closedItem->disabled) return false;
+    composeMenu(ui, state, items, tokens, instant, true);
+    if (!ui.roots().empty()) return false;
+    state.open = true;
+    composeMenu(ui, state, items, tokens, instant, true);
+    parent = findSuffix(ui, ".level.0.item.0");
+    if (!parent || !parent->onHoverChanged) return false;
+    parent->onHoverChanged(true);
+    composeMenu(ui, state, items, tokens, instant, true);
+    child = findSuffix(ui, ".level.1.item.0");
+    if (!child || !child->onClick) return false;
+    child->onClick();
+    return state.dispatchCount == 2 && state.selectedPath == std::vector<int>{0, 0};
 }
 
 bool shortcutGeometryFitsAtLargeFontAndNarrowWidths() {
@@ -501,6 +549,7 @@ int main() {
     if (!disabledActionDoesNotDispatchOrDismiss()) return 1;
     if (!submenuFeedbackAndCloseReopen()) return 1;
     if (!explicitMenuTransitionRemainsAvailable()) return 1;
+    if (!closedContentOptInPreservesReopenAndAnimation()) return 1;
     if (!shortcutGeometryFitsAtLargeFontAndNarrowWidths()) return 1;
     if (!checkedAndSubmenuSymbolsUseNativeGeometry()) return 1;
     if (!checkableRowsShareAStableLeadingColumn()) return 1;

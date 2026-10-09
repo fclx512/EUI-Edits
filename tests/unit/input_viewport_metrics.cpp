@@ -145,6 +145,7 @@ bool sameLineShape(const Line& a, const Line& b, int index) {
         !near(a.top, b.top) || !near(a.lineHeight, b.lineHeight) ||
         !near(a.fontSize, b.fontSize) || !near(a.metrics.width, b.metrics.width) ||
         !near(a.spaceBefore, b.spaceBefore) || !near(a.textShiftY, b.textShiftY) ||
+        !near(a.textBandHeight, b.textBandHeight) ||
         a.hidden != b.hidden || a.hiddenByFold != b.hiddenByFold ||
         a.lineNumber != b.lineNumber || a.lineStart != b.lineStart ||
         a.tableId != b.tableId || a.holes != b.holes || !sameRuns(a.runs, b.runs) ||

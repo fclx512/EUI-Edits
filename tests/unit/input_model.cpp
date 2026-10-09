@@ -1337,30 +1337,23 @@ int main() {
             shiftState, viewportWidth, viewportHeight, width, inset, inset, inset,
             fontSize, "monospace", fontSize, true, &shiftDecorations);
         const float tableRowHeight = tableTextHeight + tablePaddingY * 2.0f;
-        ok = ok && shiftLayout.selectionRects.size() == 2;
-        if (shiftLayout.selectionRects.size() == 2) {
-            const Model::InputLayout::Line& tableRow0 = shiftLayout.lineList()[0];
-            const Model::InputLayout::Line& tableRow1 = shiftLayout.lineList()[1];
-            const float rowContentX = tableRow0.runs.empty()
-                ? 0.0f : tableRow0.runs[0].x;  // 列 0 文字起点（= 单元格左内边距）
-            // 行 0：y = 行盒顶 + 内边距，高 = 纯文字行高（不是整个行盒）。
-            expectRect(shiftLayout.selectionRects[0],
-                                  inset + rowContentX, inset + tablePaddingY,
-                                  clipRight - (inset + rowContentX), tableTextHeight,
-                                  "table row 0 selection band");
-            // 行 1（末行）：y 顺推行盒高，右缘止于行内容宽。
-            const float row1Right = std::min(
-                inset + components::input_detail::caretXForDocOffset(
-                    tableRow1.metrics, tableRow1.holes, tableRow1.start, tableRow1.end),
-                clipRight);
-            const float row1ContentX = tableRow1.runs.empty()
-                ? 0.0f : tableRow1.runs[0].x;
-            expectRect(shiftLayout.selectionRects[1],
-                                  inset + row1ContentX, inset + tableRowHeight + tablePaddingY,
-                                  row1Right - (inset + row1ContentX), tableTextHeight,
-                                  "table row 1 selection band");
+        ok = ok && shiftLayout.selectionRects.size() == 4;
+        if (shiftLayout.selectionRects.size() == 4) {
+            // Each cell owns only its selected text; the inter-column gap is
+            // not selected merely because both cells belong to a source row.
+            for (int row = 0; row < 2; ++row) {
+                const auto& line = shiftLayout.lineList()[row];
+                for (int col = 0; col < 2; ++col) {
+                    const auto& cell = line.tableCellRanges[col];
+                    const float left = Model::caretXInLine(line, cell.beg);
+                    const float right = Model::caretXInLine(line, cell.end);
+                    expectRect(shiftLayout.selectionRects[row * 2 + col],
+                               inset + left, inset + row * tableRowHeight + tablePaddingY,
+                               right - left, tableTextHeight, "table cell selection band");
+                }
+            }
             // 两行背景之间必须留出完整的上下内边距（8px），不许粘成一条。
-            const float gap = shiftLayout.selectionRects[1].y -
+            const float gap = shiftLayout.selectionRects[2].y -
                               (shiftLayout.selectionRects[0].y + shiftLayout.selectionRects[0].height);
             if (!nearFloat(gap, tablePaddingY * 2.0f)) {
                 std::cerr << "table selection bands must keep the cell padding gap, got "

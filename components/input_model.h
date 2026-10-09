@@ -654,6 +654,9 @@ struct InputModel {
         // Exact source-byte caret positions for this visual table segment. Unlike
         // metrics.byteIndices, this preserves both sides of hidden cell borders.
         std::vector<TableDocCaretStop> tableDocCaretStops;
+        // Table segments share one text height, with padding only at the outer
+        // edges of the source row. Zero keeps the ordinary-line band fallback.
+        float textBandHeight = 0.0f;
     };
 
     struct TextSelectionRect {
@@ -945,7 +948,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                         ? cursorLineList[static_cast<std::size_t>(layout.cursorLine)].textShiftY
                         : 0.0f;
                 const auto cursorBand = lineTextBand(layout.geometryTable().top(layout.cursorLine),
-                                                      layout.geometryTable().height(layout.cursorLine), cursorTextShift);
+                                                      layout.geometryTable().height(layout.cursorLine), cursorTextShift,
+                                                      cursorLine.textBandHeight);
                 const float caretHeight = layout.cursorLineFontSize() * 1.18f;
                 layout.cursorY = textTop + cursorBand.top +
                                  std::max(0.0f, cursorBand.height - caretHeight) * 0.5f - state.verticalScroll;
@@ -1164,8 +1168,18 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             const bool hasGeometry = table.count() > 0;
             const float clipLeft = inset;
             const float clipRight = std::max(inset, controlWidth - rightInset);
-            const int firstSelectedLine = lineIndexFor(startIndex);
-            const int lastSelectedLine = lineIndexFor(std::max(startIndex, endIndex - 1));
+            // Source ranges stay ordered even when table columns wrap into
+            // several segments with the same start/end. Include every segment
+            // of an intersecting source row, rather than locating an interior
+            // UTF-8 byte as though it were a caret.
+            const auto firstSelected = std::lower_bound(lineListRef.begin(), lineListRef.end(), startIndex,
+                [](const Line& line, int index) {
+                    return line.end + (line.hardBreakAfter ? 1 : 0) <= index;
+                });
+            const auto afterSelected = std::lower_bound(lineListRef.begin(), lineListRef.end(), endIndex,
+                [](const Line& line, int index) { return line.start < index; });
+            const int firstSelectedLine = static_cast<int>(firstSelected - lineListRef.begin());
+            const int lastSelectedLine = static_cast<int>(afterSelected - lineListRef.begin()) - 1;
             const int firstVisibleLine = hasGeometry
                 ? table.firstVisibleLine(currentVerticalScroll)
                 : 0;
@@ -1182,6 +1196,11 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 if (line.hidden) {
                     continue;
                 }
+                if (line.tableId >= 0 && !line.tableCellRanges.empty()) {
+                    buildTableSelectionRects(line, lineIndex, startIndex, endIndex, hasGeometry);
+                    continue;
+                }
+                if (line.tableSeparator) continue;
                 const int selectableEnd = line.end + (line.hardBreakAfter ? 1 : 0);
 
                 const int lineStart = std::clamp(startIndex, line.start, line.end);
@@ -1210,7 +1229,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 const float rowHeight = hasGeometry ? table.height(lineIndex) : lineHeight;
                 // 文字带（与渲染层同一个纯几何 helper）：y/height 跟着文字走，
                 // 表格行的上下内边距不被吞进选区背景。
-                const LineTextBand band = lineTextBand(rowTop, rowHeight, line.textShiftY);
+                const LineTextBand band = lineTextBand(rowTop, rowHeight, line.textShiftY, line.textBandHeight);
                 const float y = textTop + band.top - currentVerticalScroll;
                 // 粘连补偿：只在与下一条**同样要画**的行首尾相接时补 1px（普通正文
                 // 相邻行的带严格相接，行为与旧版一致）；中间隔着块间距 / 单元格内边距
@@ -1224,7 +1243,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                     const Line& nextLine = lineListRef[next];
                     const float nextTop = lineTextBand(hasGeometry ? table.top(static_cast<int>(next)) : 0.0f,
                                                        hasGeometry ? table.height(static_cast<int>(next)) : lineHeight,
-                                                       nextLine.textShiftY).top;
+                                                       nextLine.textShiftY, nextLine.textBandHeight).top;
                     if (nextTop - (band.top + band.height) <= 0.5f) {
                         stitch = 1.0f;
                     }
@@ -1234,6 +1253,54 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                     continue;
                 }
                 selectionRects.push_back({clippedX, y, width, height, band.height});
+            }
+        }
+
+        void buildTableSelectionRects(const Line& line, int lineIndex,
+                                      int startIndex, int endIndex, bool hasGeometry) {
+            if (line.tableSeparator) return;
+            const auto& geometry = geometryTable();
+            const auto band = lineTextBand(hasGeometry ? geometry.top(lineIndex) : 0.0f,
+                hasGeometry ? geometry.height(lineIndex) : lineHeight,
+                line.textShiftY, line.textBandHeight);
+            const float y = textTop + band.top - currentVerticalScroll;
+            if (y + band.height < textTop || y > textTop + viewportHeight) return;
+            std::vector<std::pair<float, float>> spans;
+            const auto& stops = line.tableDocCaretStops;
+            const int selectedBeg = visibleLength(line.holes, line.start,
+                std::clamp(startIndex, line.start, line.end));
+            const int selectedEnd = visibleLength(line.holes, line.start,
+                std::clamp(endIndex, line.start, line.end));
+            for (std::size_t i = 1; i < stops.size(); ++i) {
+                const auto& before = stops[i - 1];
+                const auto& after = stops[i];
+                if (before.column != after.column) continue;
+                // Compare projected boundaries to avoid highlighting concealed
+                // markup alone. Only this segment's actual glyph intervals own
+                // a span; an already exhausted short column owns none.
+                const int glyphBeg = visibleLength(line.holes, line.start, before.byteIndex);
+                const int glyphEnd = visibleLength(line.holes, line.start, after.byteIndex);
+                if (selectedBeg >= glyphEnd || selectedEnd <= glyphBeg || glyphBeg == glyphEnd) continue;
+                const float left = std::min(before.x, after.x);
+                const float right = std::max(before.x, after.x);
+                if (right <= left) continue;
+                if (!spans.empty() && left <= spans.back().second + 0.01f && right >= spans.back().first - 0.01f) {
+                    spans.back().first = std::min(spans.back().first, left);
+                    spans.back().second = std::max(spans.back().second, right);
+                } else spans.emplace_back(left, right);
+            }
+            std::sort(spans.begin(), spans.end());
+            std::size_t merged = 0;
+            for (const auto& span : spans) {
+                if (merged && span.first <= spans[merged - 1].second + 0.01f) {
+                    spans[merged - 1].second = std::max(spans[merged - 1].second, span.second);
+                } else spans[merged++] = span;
+            }
+            const float clipRight = std::max(inset, controlWidth - rightInset);
+            for (std::size_t i = 0; i < merged; ++i) {
+                const float left = std::clamp(inset + spans[i].first - scroll, inset, clipRight);
+                const float right = std::clamp(inset + spans[i].second - scroll, inset, clipRight);
+                if (right > left) selectionRects.push_back({left, y, right - left, band.height, band.height});
             }
         }
     };
@@ -1285,6 +1352,27 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
 
     static int countNewlines(const std::string& text, int end) {
         return countNewlines(text, 0, end);
+    }
+
+    // Gutter width needs source rows, not the number of wrapped/hidden visual
+    // segments. Reuse the last source number only for a complete, committed,
+    // byte-identical multiline layout. Content validation also protects direct
+    // external rewrites that did not advance an InputState revision.
+    // Keep the optional gutter path out of InputBuilder's large build body.
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__)
+    __attribute__((noinline))
+#endif
+    static int sourceLineCount(const InputState& state, const std::string& text) {
+        if (state.layoutCacheValid && state.cachedMultiline &&
+            state.cachedTextRevision == state.textRevision &&
+            !state.preedit && state.compositionText.empty() &&
+            !state.cachedLines.empty() && state.cachedLines.back().lineNumber > 0 &&
+            state.cachedLayoutText == text) {
+            return state.cachedLines.back().lineNumber;
+        }
+        return countNewlines(text, static_cast<int>(text.size())) + 1;
     }
 
     // 提交一次真实文本改动后写入编辑区间。removed / inserted 必须是**实际被替换的
@@ -3770,12 +3858,16 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 }
             }
             metrics.width = rowWidth;
-            // 段高：末段带走整个行盒（含上下内边距），其余段用纯文字行盒紧贴排。
-            // 只有一段时与旧版逐字节一致（行盒总高、textShiftY 由盖章循环给）。
+            // Keep the source row's total height while distributing top padding
+            // to its first segment and bottom padding to its last segment.
+            const float paddingY = std::max(0.0f, decoration.textShiftY);
+            const float segmentHeight = textLineHeight + (v == 0 ? paddingY : 0.0f)
+                + (lastSegment ? paddingY : 0.0f);
             out.push_back({start, end, hardBreakAfter && lastSegment, std::move(metrics),
-                           lineFontSize, lastSegment ? lineHeight : textLineHeight, 0.0f,
+                           lineFontSize, segmentHeight, 0.0f,
                            holes, lineColor, std::move(outRuns)});
             out.back().tableDocCaretStops = std::move(docStops);
+            out.back().textBandHeight = textLineHeight;
             // 命中 clamp 用（2026-10-06）：每条可视行都带整行的格区间 —— 任一列在
             // 这条可视行上都至少有一个停靠点，点击列归属按 x 几何即可判定。
             out.back().tableCellRanges.assign(decoration.cells.begin(),

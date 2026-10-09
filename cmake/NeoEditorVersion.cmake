@@ -1,4 +1,4 @@
-set(NEO_EDITOR_VERSION "0.1.1" CACHE STRING "NeoEditor version (independent of EUI-NEO).")
+set(NEO_EDITOR_VERSION "0.1.2" CACHE STRING "NeoEditor version (independent of EUI-NEO).")
 if(NOT NEO_EDITOR_VERSION MATCHES "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$")
     message(FATAL_ERROR "NEO_EDITOR_VERSION must be major.minor.patch with an optional prerelease suffix.")
 endif()

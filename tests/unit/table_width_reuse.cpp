@@ -8,6 +8,7 @@ bool same(const M::TextLine& a, const M::TextLine& b) {
     if (a.start != b.start || a.end != b.end || a.holes != b.holes ||
         a.metrics.byteIndices != b.metrics.byteIndices || a.metrics.caretX != b.metrics.caretX ||
         a.metrics.width != b.metrics.width || a.lineHeight != b.lineHeight ||
+        a.textBandHeight != b.textBandHeight ||
         a.tableId != b.tableId || a.runs.size() != b.runs.size()) return false;
     for (size_t i = 0; i < a.runs.size(); ++i) {
         const auto& x = a.runs[i]; const auto& y = b.runs[i];

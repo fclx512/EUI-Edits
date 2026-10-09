@@ -3328,6 +3328,44 @@ int main() {
     testImmutableSnapshots();
     testCursorSemanticSnapshots();
     testCursorPartialBounds();
+    // Real Markdown -> decorations -> selection geometry, including concealed
+    // inline code/strong markup and the collapsed table separator.
+    {
+        using M = components::input_detail::InputModel;
+        const auto style = neo::markdownStyle(16.0f, "Microsoft YaHei", "monospace");
+        const std::string doc = "| 文件 | 说明 |\n| --- | --- |\n"
+            "| `ui/batch_ops.py` | **批量操作的写回范式五步顺序事务外壳细则见模块设计验收判断完成后为假**😀 |\n";
+        const auto plan = neo::buildLpPlan(doc);
+        std::vector<components::input_detail::LineDecoration> decorations;
+        neo::lp::buildDecorations(plan,style,0,decorations,style.fontFamily,{},nullptr,doc);
+        M::InputState selectionState;
+        selectionState.text=doc; selectionState.textRevision=1; selectionState.followCaret=false;
+        check(decorations.size()>=3 && decorations[2].cells.size()==2,
+              "selection fixture must parse two real Markdown table cells");
+        if(decorations.size()>=3 && decorations[2].cells.size()==2) {
+            const auto& cells=decorations[2].cells;
+            selectionState.selectionStart=cells[1].end;
+            selectionState.selectionEnd=cells[0].beg;
+            const auto layout=M::InputLayout::build(selectionState,300,600,324,12,12,12,20.8f,
+                style.fontFamily,16,true,&decorations);
+            int bodySegments=0;
+            for(size_t i=0;i<layout.lineList().size();++i) {
+                const auto& line=layout.lineList()[i];
+                if(line.lineNumber!=3) continue;
+                ++bodySegments;
+                const float expectedY=12+layout.geometryTable().top(static_cast<int>(i))+line.textShiftY;
+                bool covered=false;
+                for(const auto& r:layout.selectionRects) {
+                    if(std::fabs(r.y-expectedY)<0.02f) covered=true;
+                    check(std::fabs(r.height-20.8f)<0.02f,"real Markdown table selection must have equal text-band heights");
+                }
+                check(covered,"real Markdown reverse selection must cover every body segment");
+            }
+            check(bodySegments>=3,"real Markdown selection fixture must exercise wrapping");
+            check(selectionState.text.substr(cells[0].beg,cells[1].end-cells[0].beg).find("😀")!=std::string::npos,
+                  "selection byte range must preserve the final emoji and hidden Markdown source");
+        }
+    }
     // 大纲只投影已有解析计划：setext 配对只占一项，代码围栏内的 # 不算标题，
     // 源字节位置可直接交给编辑器跳转，编辑后的新计划也会给出新标题。
     {

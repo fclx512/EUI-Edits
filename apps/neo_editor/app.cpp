@@ -53,6 +53,16 @@
 namespace app {
 namespace {
 
+template <typename Build>
+void traceComposeStage(const char* stage, Build&& build) {
+    if (neo::tracelog::enabled()) {
+        neo::tracelog::Span span(stage);
+        build();
+    } else {
+        build();
+    }
+}
+
 neo::platform::SystemAppearanceObserver& systemAppearanceObserver() {
     static neo::platform::SystemAppearanceObserver observer;
     return observer;
@@ -746,7 +756,9 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                             .build();
 
                         if (state.showStatusBar) {
-                            neo::statusBarView(ui, state, screen.width);
+                            traceComposeStage("status-bar", [&] {
+                                neo::statusBarView(ui, state, screen.width);
+                            });
                         }
                     })
                     .build();
@@ -760,16 +772,22 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                 neo::toastOverlay(ui, state, screen);
                 // 编辑区右键菜单（2026-09-25）：只开一条（state.contextMenuOpen），
                 // 关闭遮罩全屏，点哪儿都收起。
-                neo::editorContextMenuOverlay(ui, state, screen);
+                traceComposeStage("editor-context-menu", [&] {
+                    neo::editorContextMenuOverlay(ui, state, screen);
+                });
                 // 文档库右键菜单（2026-09-26）与其"新建/重命名/删除"弹窗。
-                neo::vaultContextMenuOverlay(ui, state, screen);
+                traceComposeStage("vault-context-menu", [&] {
+                    neo::vaultContextMenuOverlay(ui, state, screen);
+                });
                 neo::vaultPromptOverlay(ui, state, screen);
                 neo::vaultDeleteOverlay(ui, state, screen);
                 // "编辑链接"弹窗（右键菜单 → 编辑链接，2026-09-26）。
                 neo::linkEditorOverlay(ui, state, screen);
                 // 菜单栏最后画、zIndex 也最高：菜单展开时的全屏关闭遮罩在它下面，
                 // "点另一个菜单直接切过去"才成立（详见 ui/menu_bar.h）。
-                neo::menuBarView(ui, state, screen);
+                traceComposeStage("menu-bar", [&] {
+                    neo::menuBarView(ui, state, screen);
+                });
 
                 // 全屏图片预览（S3f 批次 E）：一切之上的模态层 —— 打开时点哪儿都只
                 // 关预览，不会误碰编辑区或菜单。
@@ -780,7 +798,9 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
         .build();
     neo::riskOverlay(ui,state,screen);
     neo::confirmOverlay(ui, state, screen);
-    neo::applyInteractionDefaults(ui, neo::uiFontFamily(state), neo::animationsEnabled(state));
+    traceComposeStage("interaction-defaults", [&] {
+        neo::applyInteractionDefaults(ui, neo::uiFontFamily(state), neo::animationsEnabled(state));
+    });
 }
 
 } // namespace app

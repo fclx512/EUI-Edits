@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -371,6 +372,10 @@ void completeVaultListing(TempTree& tree) {
     check(filteredRows.size() == 1 &&
               filteredRows.front().relative == ".hidden/build/node_modules/pkg/deep.md",
           "path filtering emits only matching visible file rows");
+    neo::vault::flattenFiltered(all, ".HIDDEN/BUILD", filteredRows);
+    check(filteredRows.size() == 1 &&
+              filteredRows.front().relative == ".hidden/build/node_modules/pkg/deep.md",
+          "path filtering remains ASCII case-insensitive");
 
     const fs::path many = root / "many";
     fs::create_directories(many, error);
@@ -384,6 +389,68 @@ void completeVaultListing(TempTree& tree) {
     const auto large = neo::vault::scan(neo::textfile::pathToUtf8(many));
     check(large.ok && large.fileCount == 20005,
           "large vault listing retains every entry beyond the former cap");
+}
+
+void vaultListingOrderMatchesReference(TempTree& tree) {
+    const fs::path root = tree.vault / "sorting-fixture";
+    const std::vector<std::string> names{
+        "z-last-with-a-long-common-prefix.md", "Alpha-long-common-prefix-2.md",
+        "alpha-long-common-prefix-1.md", "BETA.md", "b-10.md", "b-2.md",
+        "README", ".hidden.md", "\xE4\xB8\xAD\xE6\x96\x87.md", "\xF0\x9F\x98\x80.md"};
+    const std::vector<std::string> directories{"z-folder", "Alpha-folder", "beta-folder"};
+    for (const auto& name : names)
+        check(writeSample(root / neo::textfile::pathFromUtf8(name)), "create sorting file fixture");
+    for (const auto& name : directories)
+        for (const auto& child : names)
+            check(writeSample(root / neo::textfile::pathFromUtf8(name) /
+                              neo::textfile::pathFromUtf8(child)), "create nested sorting fixture");
+
+    const auto byName = [](const std::string& left, const std::string& right) {
+        auto lower = [](std::string text) {
+            std::transform(text.begin(), text.end(), text.begin(), [](unsigned char byte) {
+                return static_cast<char>(std::tolower(byte));
+            });
+            return text;
+        };
+        const auto leftLower = lower(left), rightLower = lower(right);
+        return leftLower == rightLower ? left < right : leftLower < rightLower;
+    };
+    auto expectedFiles = names;
+    auto expectedDirectories = directories;
+    std::sort(expectedFiles.begin(), expectedFiles.end(), byName);
+    std::sort(expectedDirectories.begin(), expectedDirectories.end(), byName);
+    const auto result = neo::vault::scan(utf8(root));
+    check(result.ok && result.warning.empty() && result.directoryCount == 3 && result.fileCount == 40,
+          "sorting fixture retains every file and directory without warnings");
+    check(result.roots.size() == expectedDirectories.size() + expectedFiles.size(),
+          "sorting fixture root count is unchanged");
+    if (result.roots.size() != expectedDirectories.size() + expectedFiles.size()) return;
+    for (std::size_t i = 0; i < expectedDirectories.size(); ++i) {
+        const auto& folder = result.roots[i];
+        check(folder.isDir && folder.name == expectedDirectories[i] && folder.relative == folder.name,
+              "directories precede files and retain reference order and relative paths");
+        check(folder.children.size() == expectedFiles.size(), "nested sort retains all children");
+        if (folder.children.size() != expectedFiles.size()) continue;
+        for (std::size_t j = 0; j < expectedFiles.size(); ++j) {
+            const auto& child = folder.children[j];
+            check(!child.isDir && child.name == expectedFiles[j] && child.children.empty() &&
+                      child.relative == folder.name + "/" + expectedFiles[j],
+                  "nested files retain UTF-8 names, reference order and relative paths");
+        }
+    }
+    for (std::size_t i = 0; i < expectedFiles.size(); ++i) {
+        const auto& file = result.roots[expectedDirectories.size() + i];
+        check(!file.isDir && file.name == expectedFiles[i] && file.relative == file.name && file.children.empty(),
+              "root files retain reference order and original names");
+    }
+    const fs::path empty = root / "empty";
+    fs::create_directories(empty);
+    const auto emptyResult = neo::vault::scan(utf8(empty));
+    check(emptyResult.ok && emptyResult.roots.empty(), "empty sorting group remains valid");
+    check(writeSample(empty / "one.md"), "create singleton sorting fixture");
+    const auto singleton = neo::vault::scan(utf8(empty));
+    check(singleton.ok && singleton.roots.size() == 1 && singleton.roots[0].name == "one.md",
+          "singleton sorting group remains valid");
 }
 
 void directoryReparsePointIsLeaf(TempTree& tree) {
@@ -601,6 +668,7 @@ int main() {
     resetStubs(tree.base);
     currentPathCaseVariantAndRelocation(tree);
     completeVaultListing(tree);
+    vaultListingOrderMatchesReference(tree);
     directoryReparsePointIsLeaf(tree);
 
     std::cout << (failures == 0 ? "PASS" : "FAIL") << ": vault_delete_state ("

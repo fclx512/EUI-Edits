@@ -6,7 +6,7 @@ on:
       version:
         description: 'EUI-Edits product version (major.minor.patch[-prerelease])'
         required: true
-        default: '0.1.1'
+        default: '0.1.2'
         type: string
   push:
     tags:

@@ -799,6 +799,17 @@ if(EUI_BUILD_TEST_FIXTURES)
         endif()
         add_executable(${probe_name} "${probe_source}")
         target_link_libraries(${probe_name} PRIVATE eui::neo)
+        if(probe_name STREQUAL "vault_filter_benchmark")
+            # B7 instrumentation: exercise the real application vault scan and
+            # full-tree filter over small-document fixtures without registering
+            # an interactive performance harness as an automatic CTest probe.
+            target_sources(${probe_name} PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/vault.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/text_file.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/atomic_write.cpp")
+            target_include_directories(${probe_name} PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+        endif()
         eui_apply_compile_options(${probe_name})
         eui_neo_copy_assets(${probe_name})
         eui_neo_copy_runtime_dependencies(${probe_name})
@@ -808,8 +819,16 @@ if(EUI_BUILD_TEST_FIXTURES)
             target_link_options(${probe_name} PRIVATE -mconsole)
         endif()
         target_compile_definitions(${probe_name} PRIVATE EUI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-        add_test(NAME ${probe_name} COMMAND ${probe_name} --frames 3)
-        set_tests_properties(${probe_name} PROPERTIES LABELS "probe")
+        if(NOT probe_name STREQUAL "vault_filter_benchmark")
+            add_test(NAME ${probe_name} COMMAND ${probe_name} --frames 3)
+            set_tests_properties(${probe_name} PROPERTIES LABELS "probe")
+        endif()
+        if(probe_name STREQUAL "input_compose_benchmark")
+            set_tests_properties(${probe_name} PROPERTIES LABELS "probe;performance")
+        endif()
+        if(probe_name STREQUAL "vault_filter_benchmark")
+            set_target_properties(${probe_name} PROPERTIES FOLDER "performance")
+        endif()
         if(probe_name STREQUAL "gpu_image_probe")
             set_tests_properties(${probe_name} PROPERTIES FAIL_REGULAR_EXPRESSION "Validation Error;VUID-")
         endif()
@@ -970,7 +989,7 @@ if(EUI_BUILD_TEST_FIXTURES)
             target_include_directories(${unit_name} PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
         endif()
-        if(unit_name STREQUAL "lp_edit_benchmark")
+        if(unit_name STREQUAL "lp_edit_benchmark" OR unit_name STREQUAL "editor_pipeline_benchmark")
             # B3 前置：真实 LP 编辑链基准（cachedPlan → cachedDecorations → 排版）。
             # 与 lp_decorations 同一套接线：要编进 app 侧解析器 lp_plan.cpp，
             # text_file.cpp / atomic_write.cpp 是 lp_decorations 依赖链的既有接线。
@@ -1135,7 +1154,7 @@ if(EUI_BUILD_TEST_FIXTURES)
                 set_tests_properties(settings_language_${language_mode} PROPERTIES LABELS "unit")
             endforeach()
         endif()
-        if(unit_name STREQUAL "perf_benchmark" OR unit_name STREQUAL "lp_edit_benchmark"
+        if(unit_name STREQUAL "perf_benchmark" OR unit_name STREQUAL "lp_edit_benchmark" OR unit_name STREQUAL "editor_pipeline_benchmark"
            OR unit_name STREQUAL "table_layout_benchmark")
             # T12 / B3 无头性能基准：只打印 ms/次，不因绝对耗时失败；仅 NEO_PERF_GUARD=1
             # 才启用相对护栏。挂 performance 标签 → 默认 `ctest -L unit`（CI/release

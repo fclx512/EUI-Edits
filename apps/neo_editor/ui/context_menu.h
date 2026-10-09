@@ -197,7 +197,8 @@ inline void editorContextMenuOverlay(eui::Ui& ui, AppState& state, const eui::Sc
             onLink, context_menu_detail::editorHasSelection(ui),
             context_menu_detail::currentHeadingLevel(state, ui)))
         .theme(menuTokens)
-        .transition(quickTransition())
+        .transition(animationsEnabled(state) ? quickTransition() : core::Transition::none())
+        .skipClosedContent()
         .zIndex(1100)
         .onSelectPath([&state, onLink, &ui](const std::vector<int>& path) {
             context_menu_detail::dispatchEditorContextItem(state, path, onLink, ui);

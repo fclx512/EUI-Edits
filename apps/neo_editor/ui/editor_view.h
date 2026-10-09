@@ -193,7 +193,8 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
         .fontFamily(state.sourceView() ? codeFontFamily(state) : editorFontFamily(state))
         .style(style)
         .transition(quickTransition())
-        .value(state.doc.text)
+        // AppState owns the document throughout this synchronous build.
+        .valueRef(state.doc.text)
         .placeholder(i18n::tr("editor.placeholder"))
         // Live Preview：逐行的字号/行高、要隐藏的标记、活动块，全部由 lp 适配层算。
         .lineDecorationSnapshot([&state, cursor](const std::string& text,

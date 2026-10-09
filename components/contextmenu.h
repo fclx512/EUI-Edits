@@ -189,6 +189,9 @@ public:
         : ui_(ui), id_(std::move(id)) {}
 
     ContextMenuBuilder& open(bool value = true) { open_ = value; return *this; }
+    // Opt in to omitting closed content only when no closing transition is used.
+    // The default retains the existing hidden-tree/animation behavior.
+    ContextMenuBuilder& skipClosedContent(bool value = true) { skipClosedContent_ = value; return *this; }
     ContextMenuBuilder& bindOpen(eui::Signal<bool>& signal) {
         open(signal.get());
         onOpenChange([&signal](bool value) { signal.set(value); });
@@ -252,6 +255,11 @@ public:
             cascade->renderedPath.clear();
             cascade->hoveredPath.clear();
             cascade->pressedPath.clear();
+            if (skipClosedContent_ && !transition_.enabled) {
+                // renderLevel normally resets the root offset while closed.
+                ui_.state<float>(id_ + ".level.0.offset") = 0.0f;
+                return;
+            }
         }
 
         ui_.stack(id_)
@@ -632,6 +640,7 @@ private:
     std::function<void(bool)> onOpenChange_;
     std::function<void(float, float)> onOutsideContextMenu_;
     bool open_ = false;
+    bool skipClosedContent_ = false;
     float screenWidth_ = 800.0f;
     float screenHeight_ = 600.0f;
     float x_ = 0.0f;

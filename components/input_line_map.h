@@ -326,11 +326,15 @@ struct LineTextBand {
     float height = 0.0f;  // 文字带高（行高减去上下各一份内边距）
 };
 
-inline LineTextBand lineTextBand(float rowTop, float rowHeight, float textShiftY) {
+inline LineTextBand lineTextBand(float rowTop, float rowHeight, float textShiftY,
+                                 float measuredTextHeight = 0.0f) {
     // 负的 textShiftY 没有语义（装饰层只给 ≥ 0 的内边距），按 0 处理。
     const float shift = std::max(0.0f, textShiftY);
     // 下限 1px：极矮行（表格分隔条 3px）也要画得出背景。
-    return LineTextBand{rowTop + shift, std::max(1.0f, rowHeight - 2.0f * shift)};
+    // Wrapped table segments have separate top/bottom padding. Their measured
+    // text height is authoritative; other lines retain the symmetric fallback.
+    return LineTextBand{rowTop + shift, measuredTextHeight > 0.0f
+        ? measuredTextHeight : std::max(1.0f, rowHeight - 2.0f * shift)};
 }
 
 // Keep one nominal em box centered in the text band. All styled runs share

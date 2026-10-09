@@ -51,7 +51,21 @@ public:
     InputBuilder& y(float value) { y_ = value; hasY_ = true; return *this; }
     InputBuilder& position(float xValue, float yValue) { return x(xValue).y(yValue); }
     InputBuilder& size(float width, float height) { width_ = width; height_ = height; return *this; }
-    InputBuilder& value(std::string value) { text_ = std::move(value); return *this; }
+    InputBuilder& value(std::string value) {
+        borrowedText_ = nullptr;
+        text_ = std::move(value);
+        return *this;
+    }
+    /**
+     * Borrow a stable lvalue until synchronous build() returns. The source must
+     * remain alive and unmodified during build (including decorator callbacks).
+     * No source reference is retained by the input state or event callbacks.
+     * Content comparison and external-change invalidation remain unchanged.
+     * Use value() for temporaries or builders retained beyond the source lifetime.
+     */
+    InputBuilder& valueRef(const std::string& value) { borrowedText_ = &value; return *this; }
+    InputBuilder& valueRef(std::string&&) = delete;
+    InputBuilder& valueRef(const std::string&&) = delete;
     InputBuilder& bind(eui::Signal<std::string>& signal) {
         value(signal.get());
         onChange([&signal](const std::string& value) { signal.set(value); });
@@ -188,6 +202,7 @@ public:
     }
 
     void build() {
+        const std::string& text = borrowedText_ ? *borrowedText_ : text_;
         const std::string hitId = id_ + ".hit";
         const bool focused = ui_.isFocused(hitId);
         const float baseInset = inset_ >= 0.0f ? inset_ : metrics_.spacing.content;
@@ -196,10 +211,7 @@ public:
         // measureTextWidth 走核心层的 shaping 缓存，同字号第一帧之后就是查表。
         float gutterWidth = 0.0f;
         if (lineNumbers_ && multiline_) {
-            int totalLines = 1;
-            for (const char c : text_) {
-                totalLines += c == '\n' ? 1 : 0;
-            }
+            const int totalLines = InputModel::sourceLineCount(ui_.state<InputState>(id_), text);
             const int digits = std::max(2, static_cast<int>(std::to_string(totalLines).size()));
             const float digitsWidth = core::TextPrimitive::measureTextWidth(
                 std::string(static_cast<std::size_t>(digits), '8'), fontFamily_, fontSize);
@@ -270,9 +282,9 @@ public:
         InputState& state = ui_.state<InputState>(id_);
         state.wordWrap = wordWrap_;
         state.viewportMetrics = viewportMetrics_;
-        if (state.text != text_) {
+        if (state.text != text) {
             const bool wasFocused = focused;
-            state.text = text_;
+            state.text = text;
             ++state.textRevision;
             // 组件外的直接赋值（换文档 / 应用层回写）没有可信的前后对照：
             // 编辑区间作废，装饰与布局一律全量重建（T4 A1）。
@@ -1011,7 +1023,7 @@ public:
                         // 约半个 cap 高 —— 合计 ≈ 0.55em，随行字号走。
                         // 锚点（带顶）与选区背景走同一个纯几何 helper：行号槽、文字、
                         // 选区三者因此不会各猜一个 textShiftY 偏移。
-                        const auto numberBand = input_detail::lineTextBand(y, linePixelHeight, line.textShiftY);
+                        const auto numberBand = input_detail::lineTextBand(y, linePixelHeight, line.textShiftY, line.textBandHeight);
                         const float textCenterY = textY + numberBand.top + numberBand.height * 0.5f;
                         const float slotHeight = alignFontSize * 1.2f;
                         const float slotY = textCenterY - slotHeight * 0.5f;
@@ -1127,7 +1139,7 @@ public:
                                 // Styled runs share an origin and baseline; checkboxes and the
                                 // caret center independently within that same band.
                                 const input_detail::LineTextBand textBand =
-                                    input_detail::lineTextBand(y, linePixelHeight, line.textShiftY);
+                                    input_detail::lineTextBand(y, linePixelHeight, line.textShiftY, line.textBandHeight);
                                 const float textOrigin = input_detail::lineTextOrigin(textBand, lineFontSize);
                                 if (line.box.horizontalRuleThickness > 0 && line.box.gridColor.a > 0.0f) {
                                     const float thickness =
@@ -1510,6 +1522,7 @@ private:
     input_detail::LineDecorationSnapshotProvider snapshotDecorator_;
     bool viewportMetrics_ = false;
     std::string text_;
+    const std::string* borrowedText_ = nullptr;
     std::string placeholder_ = "Hello EUI-NEO 😉";
     bool multiline_ = false;
     bool wordWrap_ = true;

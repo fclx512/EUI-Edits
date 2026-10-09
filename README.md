@@ -41,9 +41,9 @@ Markdown 覆盖常见写作语法与部分扩展，不保证完整 Obsidian 兼�
 
 ## 开始使用
 
-从 [0.1.1 发布页](https://github.com/fclx512/EUI-Edits/releases/tag/neoeditor-v0.1.1)下载 `EUI-Edits-0.1.1-windows-x64.exe`，放在准备长期使用的位置直接运行，无需解压资源目录。旁置 `.exe.sha256` 文件可用于校验。程序面向 Windows 10/11 x64，目前未签名；Windows 11 已进行实机验证，Windows 10 尚未完成同等范围的测试。
+从 [0.1.2 发布页](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.2)下载 `EUI-Edits-0.1.2-windows-x64.exe`，放在准备长期使用的位置直接运行，无需解压资源目录。旁置 `.exe.sha256` 文件可用于校验。程序面向 Windows 10/11 x64，目前未签名；Windows 11 已进行实机验证，Windows 10 尚未完成同等范围的测试。
 
-**0.1.1 更新：** 修正表格光标与图片插入，减少长行布局复制和静止拖选重复构建，启动时后台加载目录。变化与测试边界见[发布说明](apps/neo_editor/RELEASE-NOTES.md)。
+**0.1.2 更新：** 修正表格中中文、emoji 和软换行文本的选择背景；减少输入组件中的正文副本、行号统计和目录过滤临时字符串；关闭动画时省去闭合菜单的隐藏内容构造。变化与测试边界见[发布说明](apps/neo_editor/RELEASE-NOTES.md)。
 
 ### 常用操作
 
@@ -107,7 +107,7 @@ Markdown 覆盖常见写作语法与部分扩展，不保证完整 Obsidian 兼�
 | 9 MiB 纯文本，73,728 个文件行 | 184.5 | 152.6 | 194.4 |
 | 9 MiB Markdown，同等行数，每行含列表、强调和行内代码 | 306.6 | 274.5 | 322.1 |
 
-整体工作集是当前驻留 RAM 的进程页面，专用工作集是其中不可共享的部分；专用提交量不要求全部驻留 RAM。三列不能相加或互相替代，1 MiB = 1,048,576 字节。测试条件、EXE 校验值、原始数据与复测方法见[测量记录](docs/内存实测-2026-10-05.md)。
+整体工作集是当前驻留 RAM 的进程页面，专用工作集是其中不可共享的部分；专用提交量不要求全部驻留 RAM。三列不能相加或互相替代，1 MiB = 1,048,576 字节。上述条件、EXE 校验值与原始数据保存在维护者本地记录中，不随仓库分发。
 
 占用还受行数、Markdown 结构、撤销历史、标签缓存和图片解码影响。这些结果不含编辑与保存过程，不是交互峰值或固定上限；大文件不一定保持小文档的占用水平。
 
@@ -133,14 +133,16 @@ EUI-Edits 聚焦本地文本编辑，不提供知识库管理、代码补全、�
 .\scripts\check-neoeditor.ps1
 
 # 编译 Release x64，并生成单 EXE 与 SHA256 校验文件
-.\scripts\package-neoeditor.ps1 -Version 0.1.1
+.\scripts\package-neoeditor.ps1 -Version 0.1.2
 ```
 
-产物位于 `out/euiedits-0.1.1-single-exe/`，文件名为 `EUI-Edits-0.1.1-windows-x64.exe`。打包采用 Win32 / Direct2D、静态框架与 MSVC 运行库，嵌入图标和许可证，并检查版本、DLL 依赖与许可证导出；真实窗口的交互验收需另行进行。
+产物位于 `out/euiedits-0.1.2-single-exe/`，文件名为 `EUI-Edits-0.1.2-windows-x64.exe`。打包采用 Win32 / Direct2D、静态框架与 MSVC 运行库，嵌入图标和许可证，并检查版本、DLL 依赖与许可证导出；真实窗口的交互验收需另行进行。
 
-脚本自动寻找工具；查找失败可用 `-CMake`、`-Generator`，检查脚本另有 `-Python`，打包脚本另有 `-Dumpbin`。重新构建时可用 `-OutputDirectory` 指定新的打包输出目录，已有发行文件不会被覆盖。源码迁移后使用新构建目录，勿复用仍记录旧路径的 CMake 缓存。
+脚本自动寻找工具；查找失败可用 `-CMake`、`-Generator`，检查脚本另有 `-Python`，打包脚本另有 `-Dumpbin`。重新构建时可用 `-OutputDirectory` 指定新的打包输出目录，已有发行文件不会被覆盖。源码迁移后使用新构建目录，勿复用仍记录旧路径的 CMake 缓存。打包脚本含中文注释，请用 PowerShell 7（`pwsh`）运行；Windows PowerShell 5.1 会按 ANSI 代码页读取无 BOM 的脚本并报语法错误。
 
 源码目录 `apps/neo_editor`、CMake 目标 `neo_editor` 及上述脚本名仍沿用内部标识，产品与发行文件名称为 **EUI-Edits**。更多打包参数与历史验收记录见[发布构建说明](docs/NeoEditor-发布构建说明-2026-10-02.md)，其中旧名称与绝对路径仅作历史参考，当前打包配置以脚本为准。
+
+维护与后续开发见[文档导航](docs/目录说明.md)。
 
 ## 许可与致谢
 

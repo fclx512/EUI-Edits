@@ -41,9 +41,9 @@ Markdown covers common writing syntax and some extensions; full Obsidian compati
 
 ## Getting started
 
-Download `EUI-Edits-0.1.1-windows-x64.exe` from the [0.1.1 release page](https://github.com/fclx512/EUI-Edits/releases/tag/neoeditor-v0.1.1), put it where you plan to keep it, and run it directly. No resource folder needs unpacking; the adjacent `.exe.sha256` file is available for verification. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing.
+Download `EUI-Edits-0.1.2-windows-x64.exe` from the [0.1.2 release page](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.2), put it where you plan to keep it, and run it directly. No resource folder needs unpacking; the adjacent `.exe.sha256` file is available for verification. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing.
 
-**Changes in 0.1.1:** Corrected table cursor mapping and image insertion, reduced long-line layout copying and repeated stationary-drag builds, and moved startup directory loading to the background. See the [release notes](apps/neo_editor/RELEASE-NOTES.md) for changes and validation limits.
+**Changes in 0.1.2:** Fixed selection backgrounds for Chinese text, emoji, and wrapped text in tables; reduced repeated document copies, line-number counting, and directory-filter temporary strings in the input component; and skipped hidden menu content construction when animations are disabled. See the [release notes](apps/neo_editor/RELEASE-NOTES.md) for changes and validation limits.
 
 ### Common actions
 
@@ -107,7 +107,7 @@ These are **idle memory measurements of the released 0.1.0 EXE on 2026-10-05**, 
 | 9 MiB plain text, 73,728 file lines | 184.5 | 152.6 | 194.4 |
 | 9 MiB Markdown, same line count, with a list item, emphasis, and inline code on every line | 306.6 | 274.5 | 322.1 |
 
-Total working set counts process pages currently in RAM; private working set is its non-shareable part. Private commit need not all be resident in RAM. These columns cannot be added together or used interchangeably; 1 MiB = 1,048,576 bytes. See the [measurement record](docs/内存实测-2026-10-05.md) for full conditions, the EXE hash, raw data, and reproduction steps.
+Total working set counts process pages currently in RAM; private working set is its non-shareable part. Private commit need not all be resident in RAM. These columns cannot be added together or used interchangeably; 1 MiB = 1,048,576 bytes. The conditions above, the EXE hash, and the raw data are kept in the maintainer's local records and are not distributed with the repository.
 
 Line count, Markdown structure, undo history, tab caches, and decoded images also affect memory. These results exclude editing and saving and are neither interaction peaks nor fixed ceilings. Large files need not have the footprint of small documents.
 
@@ -133,14 +133,16 @@ Run from PowerShell at the repository root:
 .\scripts\check-neoeditor.ps1
 
 # Build Release x64 and produce a single EXE with its SHA256 file
-.\scripts\package-neoeditor.ps1 -Version 0.1.1
+.\scripts\package-neoeditor.ps1 -Version 0.1.2
 ```
 
-The output is `out/euiedits-0.1.1-single-exe/EUI-Edits-0.1.1-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
+The output is `out/euiedits-0.1.2-single-exe/EUI-Edits-0.1.2-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
 
-Scripts locate tools automatically; override with `-CMake` or `-Generator`, plus `-Python` for checks or `-Dumpbin` for packaging. For another build, select a fresh package output with `-OutputDirectory`; existing release files are never overwritten. After moving the source tree, use a fresh build directory rather than a CMake cache containing old paths.
+Scripts locate tools automatically; override with `-CMake` or `-Generator`, plus `-Python` for checks or `-Dumpbin` for packaging. For another build, select a fresh package output with `-OutputDirectory`; existing release files are never overwritten. After moving the source tree, use a fresh build directory rather than a CMake cache containing old paths. The packaging script contains Chinese comments; run it with PowerShell 7 (`pwsh`) — Windows PowerShell 5.1 reads the BOM-less script as ANSI and reports a parse error.
 
 The source folder `apps/neo_editor`, CMake target `neo_editor`, and script names above retain internal identifiers; the product and release files are named **EUI-Edits**. Additional packaging options and historical acceptance records are in the [release build guide](docs/NeoEditor-发布构建说明-2026-10-02.md). Its old names and absolute paths are historical references; the scripts define the current package configuration.
+
+For maintenance and further development, see the [documentation index](docs/目录说明.md) (Chinese).
 
 ## License and credits
 

@@ -27,6 +27,23 @@ std::string toLowerAscii(std::string value) {
     return value;
 }
 
+bool containsAsciiCaseInsensitive(const std::string& value, const std::string& loweredNeedle) {
+    if (loweredNeedle.empty()) return true;
+    if (loweredNeedle.size() > value.size()) return false;
+
+    const std::size_t lastStart = value.size() - loweredNeedle.size();
+    for (std::size_t start = 0; start <= lastStart; ++start) {
+        std::size_t offset = 0;
+        while (offset < loweredNeedle.size() &&
+               static_cast<char>(std::tolower(static_cast<unsigned char>(value[start + offset]))) ==
+                   loweredNeedle[offset]) {
+            ++offset;
+        }
+        if (offset == loweredNeedle.size()) return true;
+    }
+    return false;
+}
+
 std::string joinRelative(const std::string& parent, const std::string& name) {
     return parent.empty() ? name : parent + "/" + name;
 }
@@ -159,7 +176,7 @@ void appendFilteredFiles(const std::vector<Entry>& entries,
             appendFilteredFiles(entry.children, needle, rows);
             continue;
         }
-        if (toLowerAscii(entry.relative).find(needle) == std::string::npos) continue;
+        if (!containsAsciiCaseInsensitive(entry.relative, needle)) continue;
         Row row;
         row.name = entry.relative;
         row.relative = entry.relative;
