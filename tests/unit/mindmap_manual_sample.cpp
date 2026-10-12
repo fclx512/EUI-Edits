@@ -1,16 +1,19 @@
 #include "model/lp_plan.h"
 #include "model/mindmap_plan.h"
-#include <fstream>
-#include <filesystem>
+#include "model/text_file.h"
 #include <iostream>
-#include <iterator>
 #include <string>
 
 int main() {
     const std::string path = std::string(EUI_TEST_SOURCE_DIR) + "/tests/assets/mindmap/manual-preview.md";
-    std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
-    if (!file) { std::cerr << "Cannot read manual sample: " << path << '\n'; return 1; }
-    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    // 走应用自己的加载路径：内存文档统一成 UTF-8 + LF（见 textfile::load）。按字节直读会把
+    // 平台检出时的 CRLF 带进解析器，围栏一律被判成未闭合，与编辑器实际行为不符。
+    const auto loaded = neo::textfile::load(path);
+    if (!loaded.ok) {
+        std::cerr << "Cannot read manual sample: " << path << " (" << loaded.error << ")\n";
+        return 1;
+    }
+    const std::string& text = loaded.document.text;
     const auto lp = neo::buildLpPlan(text);
     int failures = 0;
     const auto check = [&](bool ok, const char* label) {
