@@ -6,10 +6,11 @@ on:
       version:
         description: 'EUI-Edits product version (major.minor.patch[-prerelease])'
         required: true
-        default: '0.1.2'
+        default: '0.1.3'
         type: string
   push:
     tags:
+      - 'v[0-9]*'
       - 'neoeditor-v*'
 
 permissions:
@@ -31,8 +32,8 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          $version = if ($env:GITHUB_REF -like 'refs/tags/neoeditor-v*') {
-            $env:GITHUB_REF_NAME.Substring('neoeditor-v'.Length)
+          $version = if ($env:GITHUB_REF -like 'refs/tags/*') {
+            ($env:GITHUB_REF_NAME -replace '^neoeditor-', '') -replace '^v', ''
           } else { $env:INPUT_VERSION }
           if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') {
             throw 'Invalid EUI-Edits product version.'
@@ -50,7 +51,7 @@ jobs:
           path: dist/neoeditor/*
           if-no-files-found: error
       - name: Create draft release for an EUI-Edits tag
-        if: startsWith(github.ref, 'refs/tags/neoeditor-v')
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

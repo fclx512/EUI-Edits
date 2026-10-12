@@ -185,6 +185,12 @@ public:
      * 折叠段、撤销恢复到折叠区）。把它抛给应用层去展开对应章节；组件每帧检查一次，
      * 直到该行不再 hidden（展开是应用层的事，组件不改任何文档状态）。
      */
+    // Local overlays use the same visible source-row geometry as text/selection.
+    // Callers must change key when external overlay state changes.
+    using LineOverlay = std::function<void(core::dsl::Ui&, const input_detail::InputModel::TextLine&, const core::Rect&)>;
+    InputBuilder& lineOverlay(LineOverlay callback, std::string key = {}) {
+        lineOverlay_ = std::move(callback); lineOverlayKey_ = std::move(key); return *this;
+    }
     InputBuilder& onRevealHiddenLine(std::function<void(int)> callback) {
         onRevealHiddenLine_ = std::move(callback);
         return *this;
@@ -354,8 +360,7 @@ public:
             const int revealLine = layout.lineIndexFor(state.cursor);
             if (revealLine >= 0 &&
                 revealLine < static_cast<int>(layout.lineList().size()) &&
-                (layout.lineList()[static_cast<std::size_t>(revealLine)].hidden ||
-                 layout.lineList()[static_cast<std::size_t>(revealLine)].hiddenByFold)) {
+                layout.lineList()[static_cast<std::size_t>(revealLine)].hiddenByFold) {
                 onRevealHiddenLine_(state.cursor);
             }
         }
@@ -398,7 +403,8 @@ public:
             .dirtyKey(InputModel::makeDirtyKey(state, focused, layout) +
                       "|d" + std::to_string(display.decorationRevision) +
                       (wordWrap_ ? "|wrap" : "|nowrap") +
-                      (scrollbar_ ? "|bar" : "|no-bar") + placeholderKey);
+                      (scrollbar_ ? "|bar" : "|no-bar") + placeholderKey +
+                      (lineOverlay_ ? "|overlay:" + lineOverlayKey_ : std::string{}));
         if (hasX_) {
             root.x(x_);
         }
@@ -1495,6 +1501,23 @@ public:
                             }
                         }).build();
                 }
+                if (lineOverlay_ && multiline_ && !layout.lineList().empty()) {
+                    const auto& rows = layout.lineList();
+                    const auto& geometry = layout.geometryTable();
+                    const int count = static_cast<int>(rows.size());
+                    const int first = geometry.count() > 0
+                        ? std::clamp(geometry.firstVisibleLine(state.verticalScroll), 0, count - 1) : 0;
+                    const int last = geometry.count() > 0
+                        ? std::clamp(geometry.lastVisibleLine(state.verticalScroll, textHeight), first, count - 1) : count - 1;
+                    for (int index = first; index <= last; ++index) {
+                        const auto& row = rows[static_cast<std::size_t>(index)];
+                        if (!row.lineStart || row.hidden) continue;
+                        const float top = textY + (geometry.count() > 0 ? geometry.top(index) : index * textLineHeight) - state.verticalScroll;
+                        const float rowHeight = geometry.count() > 0 ? geometry.height(index) : textLineHeight;
+                        if (rowHeight <= 0 || top + rowHeight <= 0 || top >= height_) continue;
+                        lineOverlay_(ui_, row, core::Rect{inset, top, textWidth, rowHeight});
+                    }
+                }
             })
             .build();
     }
@@ -1518,6 +1541,8 @@ private:
     std::function<void(const InputModel::PointerHit&)> onPointerHit_;
     std::function<void(int)> onRevealHiddenLine_;
     std::function<void(float, float)> onContextMenu_;
+    LineOverlay lineOverlay_;
+    std::string lineOverlayKey_;
     input_detail::LineDecorationProviderEx decorator_;
     input_detail::LineDecorationSnapshotProvider snapshotDecorator_;
     bool viewportMetrics_ = false;

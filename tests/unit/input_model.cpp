@@ -15,6 +15,34 @@ int main() {
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
 #endif
     using Model = components::input_detail::InputModel;
+    // Dense-marker projection must retain before-hole anchors and exact UTF-8
+    // metrics at all slice boundaries; caller state never owns the scratch map.
+    {
+        using namespace components::input_detail;
+        const std::string projectedText = std::string("**中文🙂**`code`[link](target) ") + std::string(120, 'x');
+        const std::vector<LineHole> holes{{0, 2}, {12, 14}, {14, 15}, {19, 20}, {20, 21}, {25, 34}};
+        Model::StyledProjection projection(projectedText, 0, static_cast<int>(projectedText.size()), holes);
+        for (int p = 0; p <= static_cast<int>(projection.text.size()); ++p) {
+            if (projection.documentOffset(p) != unprojectVisible(holes, 0, p)) {
+                std::cerr << "Dense projection changed a hidden-marker anchor\n";
+                return 1;
+            }
+        }
+        const std::vector<Model::VisiblePiece> pieces{{0, static_cast<int>(projection.text.size()), nullptr}};
+        for (int beg = 0; beg < static_cast<int>(projection.text.size()); ++beg) {
+            const int end = std::min(static_cast<int>(projection.text.size()), beg + 17);
+            const auto reference = Model::layoutStyledRange(projectedText, 0, static_cast<int>(projectedText.size()),
+                holes, pieces, beg, end, 16, "monospace");
+            const auto indexed = Model::layoutStyledRangeImpl<true>(projectedText, 0, static_cast<int>(projectedText.size()),
+                holes, pieces, beg, end, 16, "monospace", &projection);
+            if (reference.metrics.width != indexed.metrics.width || reference.metrics.byteIndices != indexed.metrics.byteIndices ||
+                reference.metrics.caretX != indexed.metrics.caretX || reference.runs[0].beg != indexed.runs[0].beg ||
+                reference.runs[0].end != indexed.runs[0].end) {
+                std::cerr << "Dense projection changed UTF-8 slice metrics\n";
+                return 1;
+            }
+        }
+    }
 
     const core::KeyEvent left{
         core::InputKey::Left, core::KeyAction::Repeat, {false, true}

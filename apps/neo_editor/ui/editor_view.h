@@ -11,6 +11,7 @@
 #include "state/tabs_trace.h"
 #include "ui/metrics.h"
 #include "ui/widgets.h"
+#include "ui/mindmap_inline.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -172,6 +173,10 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
         }
     }
 
+    if (state.mindmapPreview.open && state.mindmapPreview.inlineMode) {
+        lp::cachedPlan(state.doc.text);
+        mindmap_inline::prepareInlineMindmap(ui, state, width);
+    }
     const auto statsBefore = InputModel::debugLayoutStats();
     components::input(ui, editorInputId(state))
         .size(width, height)
@@ -199,8 +204,16 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
         // Live Preview：逐行的字号/行高、要隐藏的标记、活动块，全部由 lp 适配层算。
         .lineDecorationSnapshot([&state, cursor](const std::string& text,
                                         const components::input_detail::DecoratorEditInfo& info) {
-            return decorationsForEditor(state, text, cursor, info);
+            const auto base = decorationsForEditor(state, text, cursor, info);
+            if (!info.committed) return base;
+            return mindmap_inline::inlineMindmapDecorations(state, base, mindmap_inline::kInlinePanelHeight);
         })
+        .lineOverlay([&state](eui::Ui& overlayUi, const InputModel::TextLine& row, const core::Rect& rect) {
+            mindmap_inline::drawInlineMindmapLine(overlayUi, state, row, rect);
+        }, std::to_string(state.mindmapPreview.open) + "|" +
+            std::to_string(state.mindmapPreview.viewport.zoom) + "|" +
+            std::to_string(state.mindmapPreview.viewport.panX) + "|" +
+            std::to_string(state.mindmapPreview.viewport.panY) + "|" + std::to_string(themeRevision()))
         .onChange([&state](const std::string& value) {
             if (state.sessionClosePending || state.closeApproved) return;
             if (value == state.doc.text) {

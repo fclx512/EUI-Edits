@@ -13,6 +13,7 @@
 #include "state/vault_cache.h"
 #include "ui/tab_bar.h"
 #include "ui/vault_view.h"
+#include "ui/overlays.h"
 #include "core/platform/async.h"
 
 #include <algorithm>
@@ -157,6 +158,113 @@ struct AsyncShutdownGuard {
     ~AsyncShutdownGuard() { core::async::shutdown(); }
 };
 
+
+// Differential oracle frozen from the pre-r13 title rules.
+std::string legacyTabLabel(const neo::TabInfo& tab, const std::vector<neo::TabInfo>& tabs) {
+    using namespace neo::tab_bar_detail;
+    const auto base=tab.name.empty()?std::string(neo::i18n::tr("tabs.untitled")):tab.name;
+    if(tab.path.empty()) return base;
+    const auto key=lowerAscii(basename(tab.path)); int names=0;
+    for(const auto& other:tabs) if(!other.path.empty() && lowerAscii(basename(other.path))==key) ++names;
+    if(names<2) return base;
+    auto parent=parentName(tab.path); if(parent.empty()) parent=rootName(tab.vaultRoot);
+    auto label=parent.empty()?base:parent+" / "+base; int labels=0;
+    for(const auto& other:tabs) {
+        const auto otherBase=other.name.empty()?std::string(neo::i18n::tr("tabs.untitled")):other.name;
+        if(!other.path.empty() && lowerAscii(parentName(other.path)+" / "+otherBase)==lowerAscii(label)) ++labels;
+    }
+    if(labels>1) { const auto root=rootName(tab.vaultRoot); if(!root.empty()) label=root+" / "+label; }
+    return label;
+}
+void checkPrepareProjection(const fs::path& directory) {
+    const auto path=[](const fs::path& value){return neo::textfile::pathToUtf8(value);};
+    neo::AppState state; state.tabOrder.clear();
+    const std::vector<fs::path> documents={directory/"project/README.md",directory/"project/docs/README.md",
+        directory/"project/docs/../docs/README.md",directory/"project-extra/x.txt",
+        directory/"project/缺失🙂/note.md",directory/"project/README.md/invalid-child.md",
+        directory/"other/README.md",directory/"project",fs::path{}};
+    for(std::size_t i=0;i<documents.size();++i) {
+        neo::DocumentSession doc;doc.tabId=i+1; doc.path=documents[i].empty()?std::string{}:path(documents[i]);
+        if(i==0) static_cast<neo::DocumentSession&>(state)=std::move(doc);
+        else state.inactiveTabs.emplace(doc.tabId,std::move(doc));
+        state.tabOrder.push_back(i+1);
+    }
+    state.tabOrder.push_back(999); // stale order ID must be ignored.
+    const auto compare=[&] {
+        neo::VaultDocumentPaths legacy;
+        legacy.activeRelative=state.path.empty()?std::string{}:neo::vaultRelativePath(state,state.path);
+        for(const auto& tab:neo::documentTabs(state)) if(!tab.path.empty() && neo::documentWithinRoot(tab.path,state.vaultRoot))
+            legacy.openedRelative.push_back(neo::vaultRelativePath(state,tab.path));
+        const auto actual=neo::documentVaultPaths(state);
+        check(actual.activeRelative==legacy.activeRelative && actual.openedRelative==legacy.openedRelative,
+              "frame path projection preserves canonical containment, relative/error results and order");
+    };
+    for(const auto& root:{fs::path{},directory/"project",directory/"missing-root",directory/"project/docs/..",
+                         directory/"project/README.md",directory/"project/README.md/not-a-directory"}) {
+        state.vaultRoot=root.empty()?std::string{}:path(root);compare();
+    }
+#if defined(_WIN32)
+    state.vaultRoot=path(directory/"PROJECT");compare();
+#endif
+    state.vaultRoot=path(directory/"project");
+    state.tabOrder.erase(state.tabOrder.begin());compare();
+    state.path=path(directory/"other/README.md");compare();
+    // A new frame must observe root/path edits and an external link retarget.
+    std::error_code error;
+    fs::create_directory_symlink(directory/"project",directory/"projection-link",error);
+    if(!error) {
+        state.path=path(directory/"projection-link/README.md");compare();
+        fs::remove(directory/"projection-link",error);
+        fs::create_directory_symlink(directory/"other",directory/"projection-link",error);
+        if(!error) compare();
+    } else std::cout<<"SKIP: projection directory symlink unavailable: "<<error.message()<<'\n';
+}
+void checkPrepareTitlesAndLanguage() {
+    const std::vector<std::string> paths={"C:/one/docs/README.md","D:/two/docs/readme.MD","C:/one/other/README.md",
+        "C:\\one\\docs\\README.md","note.md","C:/README.md","C:/文档🙂/Note.md","C:/unique.txt",""};
+    for(const char* language:{"en","zh"}) {
+        neo::i18n::initialize(language);
+        for(int seed=0;seed<32;++seed) {
+            std::vector<neo::TabInfo> tabs;
+            for(int i=0;i<1+seed*3;++i) tabs.push_back({static_cast<std::uint64_t>(i+1),
+                i%4==0?"":i%3==0?"别名🙂":"README.md", paths[(i+seed)%paths.size()],
+                i%2==0?"C:/one":"D:/two/", "markdown",i%2==0});
+            const neo::tab_bar_detail::TabLabelIndex index(tabs);
+            for(const auto& tab:tabs) check(neo::tab_bar_detail::tabLabel(tab,tabs,&index)==legacyTabLabel(tab,tabs),
+                "per-frame title index preserves legacy disambiguation including unsaved and Unicode names");
+        }
+    }
+    neo::i18n::initialize("en");
+    neo::AppState state; eui::Ui ui; const eui::Screen screen{800,600};
+    const auto compose=[&] {ui.begin("language-overlay-test");neo::languageOverlay(ui,state,screen);ui.end();ui.layout(screen);};
+    for(bool animations:{false,true}) {
+        state.animations=animations;state.languageMenuOpen=true;compose();
+        auto* item=ui.find("editor.languageMenu.level.0.item.1");
+        check(item && item->onClick,"language menu opens with plain-text action");
+        if(item && item->onClick) item->onClick();
+        check(state.languageOverride=="text" && !state.languageMenuOpen,"language dispatch still changes override and closes");
+        state.languageMenuOpen=true;compose();
+        item=ui.find("editor.languageMenu.level.0.item.4");
+        if(item && item->onHoverChanged) item->onHoverChanged(true);
+        compose();
+        state.languageMenuOpen=false;
+        ui.state<float>("editor.languageMenu.level.0.offset")=100;
+        compose();
+        check(!ui.find("editor.languageMenu.level.0.item.1") && ui.state<float>("editor.languageMenu.level.0.offset")==0,
+              "closed language menu omits tree and resets root scroll in both animation settings");
+        state.languageMenuOpen=true;state.languageOverride="python";compose();
+        check(!ui.find("editor.languageMenu.level.1.item.0"),"reopening closed language menu clears previous cascade");
+        item=ui.find("editor.languageMenu.level.0.item.4");
+        check(item && item->onHoverChanged,"language menu reopens with scripts group");
+        if(item && item->onHoverChanged) item->onHoverChanged(true);
+        compose();
+        item=ui.find("editor.languageMenu.level.1.item.0");
+        check(item && item->onClick,"reopened scripts cascade is usable");
+        if(item && item->onClick) item->onClick();
+        check(state.languageOverride=="python" && !state.languageMenuOpen,"scripts dispatch retains selected language");
+    }
+}
+
 int main() {
     AsyncShutdownGuard asyncShutdownGuard;
     neo::sessionwriter::resetForTest();
@@ -283,8 +391,10 @@ int main() {
     }
     const auto dir = fs::temp_directory_path() / ("neo-tabs-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(dir / "project/docs/nested"); fs::create_directories(dir / "project-extra"); fs::create_directories(dir / "other");
+    checkPrepareTitlesAndLanguage();
     const auto child = dir / "project/docs/README.md", parent = dir / "project/README.md", unrelated = dir / "other/README.md";
     put(child, "# Child\nchild body\n"); put(parent, "# Parent\nparent body\n"); put(unrelated, "other body\n");
+    checkPrepareProjection(dir);
     const auto path = [](const fs::path& p) { return neo::textfile::pathToUtf8(p); };
     neo::AppState state;
     check(neo::loadDocument(state, path(child)) && state.tabOrder.size() == 1, "first open reuses pristine initial tab");
@@ -733,6 +843,104 @@ int main() {
               presentationState.tabPresentationSignature.size() == 1,
               "closing transient root and draft prunes every cache to the live base page");
         previousTransientOrdinal = transientOrdinal;
+    }
+
+    // ── 只读思维导图预览缓存（阶段 D 回归）：页自有、计入派生预算、LRU 可淘汰、
+    //    正文/撤销绝不因淘汰丢失。合成 20001 节点的缓存把每个页顶到约 5 MiB，
+    //    用 NEO_TAB_CACHE_BUDGET_MIB=1 触发淘汰。
+    {
+        _putenv_s("NEO_TAB_CACHE_BUDGET_MIB", "1");
+        const std::string docA = "# A\n\n```mermaid\nmindmap\n  root((A))\n    a1\n```\n";
+        const std::string docB = "# B\n\n```mermaid\nmindmap\n  root((B))\n    b1\n```\n";
+        neo::AppState mapState;
+        mapState.tabOrder.clear();
+        neo::DocumentSession pageA;
+        pageA.tabId = 901; pageA.newDocumentLanguage = "markdown"; pageA.doc.text = docA;
+        pageA.editorMemory = std::make_unique<components::input_detail::InputModel::InputState>();
+        pageA.editorMemory->text = docA;
+        pageA.editorMemory->cursor = static_cast<int>(docA.size());
+        components::input_detail::InputModel::insertAtCursor(*pageA.editorMemory, "draft\n");
+        pageA.doc.text = pageA.editorMemory->text;
+        pageA.revision = 1;
+        const std::string draftA = pageA.doc.text;
+        const auto undoCountA = pageA.editorMemory->undoStack.size();
+        neo::DocumentSession pageB;
+        pageB.tabId = 902; pageB.newDocumentLanguage = "markdown"; pageB.doc.text = docB;
+        static_cast<neo::DocumentSession&>(mapState) = std::move(pageA);
+        mapState.inactiveTabs.emplace(902, std::move(pageB));
+        mapState.tabOrder = {901, 902};
+        mapState.nextTabId = 903;
+
+        const auto inflate = [](neo::DocumentSession& page, std::uint64_t use) {
+            page.derivedMindmap = std::make_unique<neo::mindmap::Cache>();
+            neo::mindmap::Cache& cache = *page.derivedMindmap;
+            cache.plan.nodes.assign(20001, neo::mindmap::Node{});
+            cache.plan.nodes[0].children.resize(20000);
+            for (std::size_t index = 1; index <= 20000; ++index) {
+                cache.plan.nodes[0].children[index - 1] = static_cast<int>(index);
+                cache.plan.nodes[index].parent = 0;
+            }
+            cache.layout.nodes.resize(20001);
+            cache.source = "synthetic";
+            cache.key.tabId = page.tabId;
+            cache.valid = true;
+            cache.bytes = neo::mindmap::estimateCacheBytes(cache);
+            check(cache.bytes > 1024ull * 1024ull, "fixture: 合成缓存应超过 1 MiB");
+            page.derivedCacheBytes = cache.bytes;
+            page.derivedCacheUse = use;
+        };
+        inflate(static_cast<neo::DocumentSession&>(mapState), 2);
+        inflate(mapState.inactiveTabs.at(902), 1);
+
+        // 切到 B：A 离场入后台后按预算被淘汰；B 的缓存随页成为活动槽位而保留。
+        check(neo::activateDocumentTab(mapState, 902), "导图缓存回归：切换到 B 应成功");
+        const neo::DocumentSession* activeB = neo::documentTab(mapState, 902);
+        const neo::DocumentSession* backgroundA = neo::documentTab(mapState, 901);
+        check(activeB && activeB->derivedMindmap && activeB->derivedMindmap->valid &&
+                  activeB->derivedMindmap->plan.nodes.size() == 20001,
+              "活动页自有导图缓存随页保留");
+        check(backgroundA && backgroundA->derivedMindmap == nullptr &&
+                  backgroundA->derivedCacheBytes == 0,
+              "超预算的最近最少使用页导图缓存被淘汰");
+        check(backgroundA && backgroundA->doc.text == draftA && backgroundA->dirty() &&
+                  backgroundA->editorMemory && backgroundA->editorMemory->undoStack.size() == undoCountA,
+              "淘汰只清派生缓存，后台页正文、dirty 与撤销记录不丢");
+        check(activeB->doc.text == docB, "活动页正文完整");
+
+        // 切回 A：B 离场后被淘汰（其缓存计入预算），A 无缓存但正文完整。
+        check(neo::activateDocumentTab(mapState, 901), "导图缓存回归：切回 A 应成功");
+        check(neo::documentTab(mapState, 902)->derivedMindmap == nullptr &&
+                  neo::documentTab(mapState, 902)->doc.text == docB,
+              "离场页导图缓存被淘汰而正文保留");
+        check(static_cast<const neo::DocumentSession&>(mapState).dirty() &&
+                  static_cast<const neo::DocumentSession&>(mapState).doc.text == draftA &&
+                  mapState.editorMemory && mapState.editorMemory->undoStack.size() == undoCountA,
+              "活动页正文与 dirty 状态不受淘汰影响");
+
+        // 预算内的小缓存页在后台保留（不被误杀）。
+        {
+            neo::DocumentSession& background = mapState.inactiveTabs.at(902);
+            background.derivedMindmap = std::make_unique<neo::mindmap::Cache>();
+            background.derivedMindmap->plan.nodes.resize(4);
+            background.derivedMindmap->valid = true;
+            background.derivedMindmap->bytes = neo::mindmap::estimateCacheBytes(*background.derivedMindmap);
+            background.derivedCacheBytes = background.derivedMindmap->bytes;
+            background.derivedCacheUse = 1;
+        }
+        check(neo::activateDocumentTab(mapState, 902), "导图缓存回归：小缓存页切换应成功");
+        check(neo::documentTab(mapState, 901)->derivedMindmap == nullptr &&
+                  neo::documentTab(mapState, 901)->doc.text == draftA,
+              "预算内的小缓存页不触发误杀，后台页正文保留");
+        check(neo::documentTab(mapState, 902)->derivedMindmap &&
+                  neo::documentTab(mapState, 902)->derivedMindmap->valid,
+              "预算内的小缓存随页成为活动槽位而保留");
+
+        // 预览浮层是文档模态：open 时禁用切页。
+        mapState.mindmapPreview.open = true;
+        check(!neo::activateDocumentTab(mapState, 901), "思维导图预览打开时不得切换标签页");
+        mapState.mindmapPreview.open = false;
+
+        _putenv_s("NEO_TAB_CACHE_BUDGET_MIB", "");
     }
 
     core::async::shutdown();

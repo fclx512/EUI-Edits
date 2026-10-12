@@ -218,12 +218,9 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
     const bool canGoParent = !currentVaultPath.empty() && !vaultParent.empty() && vaultParent != currentVaultPath;
 
     // 每帧只算一次相对路径；放进行回调会变成“每行一次文件系统调用”。
-    const std::string activeRelative = state.path.empty() ? std::string{} : vaultRelativePath(state, state.path);
-    std::vector<std::string> openedRelative;
-    for (const auto& tab : documentTabs(state)) {
-        if (!tab.path.empty() && documentWithinRoot(tab.path, state.vaultRoot))
-            openedRelative.push_back(vaultRelativePath(state, tab.path));
-    }
+    auto documentPaths = documentVaultPaths(state);
+    const std::string activeRelative = std::move(documentPaths.activeRelative);
+    const std::vector<std::string> openedRelative = std::move(documentPaths.openedRelative);
     const std::string selectedRelative = state.vaultSelectedPath;
     const std::string contextRelative = state.vaultContextMenuOpen ? state.vaultContextPath : std::string{};
     const bool empty = state.rows.empty();

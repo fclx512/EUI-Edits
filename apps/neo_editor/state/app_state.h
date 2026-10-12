@@ -17,6 +17,8 @@
 #include "model/vault.h"
 #include "model/file_types.h"
 #include "model/image_viewport.h"
+#include "model/mindmap_cache.h"
+#include "model/mindmap_preview_state.h"
 #include "model/source_decorations.h"
 #include "model/tab_presentation.h"
 
@@ -133,6 +135,12 @@ struct DocumentSession : VaultContext {
     std::unique_ptr<lp::PlanCache> derivedPlan;
     std::unique_ptr<lp::DecorationCache> derivedDecoration;
     std::unique_ptr<source::Cache> derivedSource;
+    // 只读思维导图预览的页自有缓存（阶段 D，model/mindmap_cache.h）：解析树/标签
+    // 尺寸/布局几何的唯一一份派生数据。与上面三张"全局单例↔页槽"搬迁的缓存不同，
+    // 它没有全局消费者——活动页直接用本槽位，切页随 DocumentSession 整体搬迁，
+    // 关页/预算淘汰（releaseDerivedCaches）即释放。受 derivedBudgetBytes() 预算与
+    // mindmapActiveBudgetBytes()（活动 16 MiB）双重约束。
+    std::unique_ptr<mindmap::Cache> derivedMindmap;
     std::uint64_t derivedCacheBytes = 0;  // 估算驻留字节，用于 LRU 预算计账
     std::uint64_t derivedCacheUse = 0;    // LRU 使用时钟
     // 文档
@@ -362,6 +370,13 @@ struct AppState : DocumentSession {
     float imagePreviewWidth = 0.0f;
     float imagePreviewHeight = 0.0f;
     ImageViewport imageViewport;
+
+    // 只读思维导图预览（模态浮层，2026-10-11 计划阶段 C）：open 时解析树/布局几何
+    // 在**当前页**的 derivedMindmap 里（见 DocumentSession），这里只留身份锚与视口。
+    // mindmapPreviewPending 是 View 菜单的排队位：菜单回调在事件阶段拿不到输入
+    // 组件的光标，由 compose 在编辑区计划就绪后消费（同 pendingEditorCommand 做法）。
+    mindmap::PreviewState mindmapPreview;
+    bool mindmapPreviewPending = false;
 
     // 文档库右键菜单（2026-09-26）：open 时在 (vaultContextMenuX/Y) 显示，
     // 操作目标（库内相对路径，'/' 分隔）与类型随 vaultContextPath/IsDir 给。

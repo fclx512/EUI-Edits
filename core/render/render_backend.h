@@ -35,6 +35,8 @@ struct TextAtlasPageData {
     int channels = 0;
     std::uint64_t generation = 0;
     const unsigned char* pixels = nullptr;
+    // UVs remain normalized to width/height; zero means the occupied extent is unknown.
+    int usedHeight = 0;
 };
 
 struct TextDrawCommand {

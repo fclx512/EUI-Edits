@@ -112,14 +112,14 @@ public:
 
                     ui_.text(id_ + ".label." + std::to_string(index))
                         .x(x)
-                        .y(labelY)
-                        .size(segmentWidth, labelLineHeight)
+                        .y(0.0f)
+                        .size(segmentWidth, height_)
                         .text(items_[index])
                         .fontSize(fontSize)
                         .lineHeight(labelLineHeight)
                         .color(active ? style_.selectedText : style_.text)
                         .horizontalAlign(core::HorizontalAlign::Center)
-                        .verticalAlign(core::VerticalAlign::Top)
+                        .verticalAlign(core::VerticalAlign::Center)
                         .transition(transition_)
                         .animate(core::AnimProperty::TextColor)
                         .build();

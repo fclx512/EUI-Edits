@@ -41,7 +41,7 @@ inline std::vector<float> fontSizeOptions(const AppState& state) {
 
 enum class Command {
     None = 0, NewText, NewMarkdown, Open, CloseTab, Exit, Save, SaveAs, OpenVault,
-    Undo, Redo, Cut, Copy, SelectAll, Find, Syntax,
+    Undo, Redo, Cut, Copy, SelectAll, Find, Syntax, Mindmap,
     Simple, Vault, Dark, Light, FollowSystem, Lines, Status, Wrap, Readable,
     LanguageSystem, LanguageChinese, LanguageEnglish, Settings,
     FontSizeBase = 100, EncodingBase = 200
@@ -95,6 +95,11 @@ inline std::vector<MenuItem> viewMenuItems(const AppState& state) {
         toggle(Command::Status, "menu.status", state.showStatusBar),
         toggle(Command::Wrap, "menu.wrap", state.wordWrap()).withSeparatorBefore(),
         toggle(Command::Readable, "menu.readable", state.readableWidth),
+        // 只读思维导图预览（2026-10-11 计划阶段 C）：v1 只有模态菜单入口，无快捷键。
+        // 光标是否落在闭合 mermaid mindmap 围栏要查输入组件（本层不可见），所以
+        // 菜单项常可用，无效目标由 compose 侧 openMindmapPreview 以 toast 提示（§4.0
+        // 的"置灰**或**提示"取后者）。图片预览开着时不叠加第二层模态。
+        action(Command::Mindmap, "menu.mindmap").withSeparatorBefore(),
         MenuItem(i18n::tr("menu.appearance"), {
             toggle(Command::FollowSystem, "menu.theme_system", state.themeFollowSystem),
             toggle(Command::Dark, "menu.dark", !state.themeFollowSystem && state.theme==ThemeMode::Dark),
@@ -154,6 +159,10 @@ inline void dispatchCommand(AppState& state, int id) {
         case Command::SelectAll: state.pendingEditorCommand=EditorCommand::SelectAll; break;
         case Command::Find: openFindBar(state); break;
         case Command::Syntax: state.languageMenuOpen=true; break;
+        case Command::Mindmap:
+            // 事件阶段拿不到输入组件光标：排队，compose 在编辑区计划就绪后消费。
+            if (state.imagePreviewPath.empty()) state.mindmapPreviewPending = true;
+            break;
         case Command::Simple: case Command::Vault:
             state.mode=id==static_cast<int>(Command::Vault)?EditorMode::Vault:EditorMode::Simple;
             persistSettings(state); break;

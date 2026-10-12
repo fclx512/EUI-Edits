@@ -27,6 +27,13 @@ struct TabInfo {
     std::uint64_t groupOrdinal = 0;
 };
 std::vector<TabInfo> documentTabs(const AppState& state);
+// A fresh per-compose projection: resolve the root once and each document once.
+// No path result is retained across frames or filesystem changes.
+struct VaultDocumentPaths {
+    std::string activeRelative;
+    std::vector<std::string> openedRelative;
+};
+VaultDocumentPaths documentVaultPaths(const AppState& state);
 // 根文本变化后的动作阶段调用：重新解算展示分组/色槽/组序号（轻量签名短路，不变则 O(n) 比较）。
 void refreshTabPresentation(AppState& state);
 void clearTabCloseAnchor(AppState& state);
@@ -61,7 +68,7 @@ inline bool documentModalOpen(const AppState& state) {
     return state.closeApproved || state.sessionClosePending || state.savePickerOpen || state.pending != PendingAction::None || state.saveConflictOpen ||
         state.riskAction != AppState::RiskAction::None ||
         state.vaultPromptKind != VaultPromptKind::None || state.vaultDeletePending || state.linkEditorOpen ||
-        !state.imagePreviewPath.empty() || state.exitClosing;
+        !state.imagePreviewPath.empty() || (state.mindmapPreview.open && !state.mindmapPreview.inlineMode) || state.exitClosing;
 }
 void requestOpenPath(AppState& state, const std::string& path);
 

@@ -2,6 +2,8 @@
 #include "core/window/window_backend.h"
 #include "core/platform/platform.h"
 #include "core/render/d2d/cache_capacity.h"
+#include "core/render/d2d/atlas_capacity.h"
+#include "core/render/d2d/render_policy.h"
 #include "core/render/resize_trace.h"
 #include "core/render/gpu_resize_stats.h"
 #if defined(EUI_WINDOW_BACKEND_WIN32)
@@ -56,7 +58,7 @@ void report(const char* where, HRESULT hr) {
 }
 
 struct D2DRenderBackend::Impl {
-    struct Atlas { ComPtr<ID2D1Bitmap> bitmap; std::uint64_t generation = 0; int width = 0, height = 0; };
+    struct Atlas { ComPtr<ID2D1Bitmap> bitmap; std::uint64_t generation = 0; int width = 0, height = 0, sourceHeight = 0; };
     struct Texture {
         ComPtr<ID2D1Bitmap> bitmap;
         std::vector<unsigned char> bgra; // Recovery source, never a second RGBA copy.
@@ -90,6 +92,7 @@ struct D2DRenderBackend::Impl {
     double cacheSizeChangedAt = 0;
     bool failed = false, presented = false, cacheInvalid = true;
     bool software = false, frame = false, cacheFrame = false, clipped = false, recreated = false;
+    bool compactAtlases = true;
     bool warnedBackdrop = false, warnedImageEffects = false;
 
     ~Impl() { releaseDevice(); for (auto* texture : textures) delete texture; }
@@ -126,9 +129,30 @@ struct D2DRenderBackend::Impl {
                 hwndTarget.GetAddressOf());
             if (SUCCEEDED(hr)) hr = hwndTarget.As(&window);
         }
-        if (FAILED(hr)) { report("Create window render target", hr); releaseDevice(); return false; }
+        if (FAILED(hr)) {
+            report("Create window render target", hr);
+            releaseDevice();
+            RenderPolicy fallback{software, gdiPresentation};
+#if defined(EUI_WINDOW_BACKEND_WIN32)
+            constexpr bool nativeWin32 = true;
+#else
+            constexpr bool nativeWin32 = false;
+#endif
+            if (fallback.useSoftwareFallback(nativeWin32)) {
+                software = fallback.software;
+                gdiPresentation = fallback.gdiPresentation;
+                std::fprintf(stderr, "[D2D] hardware-preferred target unavailable; retrying software\n");
+                return createWindowTarget();
+            }
+            return false;
+        }
         hr = window->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1), brush.GetAddressOf());
         if (FAILED(hr)) { report("CreateSolidColorBrush", hr); releaseDevice(); return false; }
+        char trace[8]{};
+        if (GetEnvironmentVariableA("NEO_D2D_TRACE", trace, sizeof(trace)) == 1 && trace[0] == '1') {
+            std::fprintf(stderr, "[D2D] target=%s requested-raster=%s actual-adapter=unconfirmed\n",
+                gdiPresentation ? "DC/GDI" : "Hwnd", software ? "SOFTWARE" : "DEFAULT");
+        }
         return true;
     }
     bool check(HRESULT hr, const char* where) {
@@ -151,13 +175,16 @@ struct D2DRenderBackend::Impl {
     }
     bool atlas(Atlas& a, const TextAtlasPageData& page) {
         if (!page.pixels || page.width <= 0 || page.height <= 0) return false;
-        if (a.bitmap && a.generation == page.generation && a.width == page.width && a.height == page.height) return true;
+        const int previousHeight = a.width == page.width && a.sourceHeight == page.height ? a.height : 0;
+        const int uploadHeight = atlasUploadHeight(page.height, page.usedHeight, previousHeight, compactAtlases);
+        if (a.bitmap && a.generation == page.generation && a.width == page.width && a.height == uploadHeight &&
+            a.sourceHeight == page.height) return true;
         // text.cpp swaps the channels of FreeType's premultiplied BGRA;
         // swapping back must not multiply the alpha a second time.
         std::vector<unsigned char> converted;
         const unsigned char* pixels = page.pixels;
         if (page.channels == 4) {
-            converted.resize(static_cast<std::size_t>(page.width) * page.height * 4);
+            converted.resize(static_cast<std::size_t>(page.width) * uploadHeight * 4);
             for (std::size_t i = 0; i < converted.size(); i += 4) {
                 converted[i] = pixels[i + 2];
                 converted[i + 1] = pixels[i + 1];
@@ -168,14 +195,14 @@ struct D2DRenderBackend::Impl {
         } else if (page.channels != 1) return false;
         const UINT pitch = page.width * page.channels;
         HRESULT hr;
-        if (!a.bitmap || a.width != page.width || a.height != page.height) {
+        if (!a.bitmap || a.width != page.width || a.height != uploadHeight) {
             a.bitmap.Reset();
-            hr = window->CreateBitmap(D2D1::SizeU(page.width, page.height), pixels, pitch,
+            hr = window->CreateBitmap(D2D1::SizeU(page.width, uploadHeight), pixels, pitch,
                 D2D1::BitmapProperties(D2D1::PixelFormat(page.channels == 1 ? DXGI_FORMAT_A8_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM,
                                                        D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96), a.bitmap.GetAddressOf());
         } else hr = a.bitmap->CopyFromMemory(nullptr, pixels, pitch);
         if (!check(hr, "atlas upload")) return false;
-        a.generation = page.generation; a.width = page.width; a.height = page.height;
+        a.generation = page.generation; a.width = page.width; a.height = uploadHeight; a.sourceHeight = page.height;
         return true;
     }
     void mask(ID2D1Bitmap* bitmap, const D2D1_RECT_F& dest, const D2D1_RECT_F& source, const Color& c) {
@@ -233,15 +260,21 @@ D2DRenderBackend::D2DRenderBackend(core::window::Handle window) : impl_(std::mak
     impl_->hwnd = static_cast<HWND>(core::window::nativeWindowInfo(window).platformWindow);
     char software[8]{};
     const DWORD optionLength = GetEnvironmentVariableA("NEO_D2D_SOFTWARE", software, sizeof(software));
-#if defined(EUI_WINDOW_BACKEND_WIN32)
-    // Native low-memory experiment defaults to software even when started directly.
-    impl_->software = !(optionLength == 1 && software[0] == '0');
     char dcOption[8]{};
-    impl_->gdiPresentation = impl_->software &&
-        !(GetEnvironmentVariableA("NEO_WIN32_DC", dcOption, sizeof(dcOption)) == 1 && dcOption[0] == '0');
+    const DWORD dcLength = GetEnvironmentVariableA("NEO_WIN32_DC", dcOption, sizeof(dcOption));
+#if defined(EUI_WINDOW_BACKEND_WIN32)
+    constexpr bool nativeWin32 = true;
 #else
-    impl_->software = optionLength == 1 && software[0] == '1';
+    constexpr bool nativeWin32 = false;
 #endif
+    const auto policy = RenderPolicy::fromOptions(nativeWin32,
+        optionLength < sizeof(software) ? std::string_view(software, optionLength) : std::string_view{},
+        dcLength < sizeof(dcOption) ? std::string_view(dcOption, dcLength) : std::string_view{});
+    impl_->software = policy.software;
+    impl_->gdiPresentation = policy.gdiPresentation;
+    char compact[8]{};
+    const DWORD compactLength = GetEnvironmentVariableA("NEO_D2D_COMPACT_ATLAS", compact, sizeof(compact));
+    impl_->compactAtlases = !(compactLength == 1 && compact[0] == '0');
 }
 D2DRenderBackend::~D2DRenderBackend() = default;
 bool D2DRenderBackend::initialize() {
@@ -411,12 +444,12 @@ void D2DRenderBackend::drawText(const TextDrawCommand& c, int, int) {
         const float* v = c.vertices + i;
         const bool colored = v[4] > .5f; const auto& a = colored ? p.colored : p.gray;
         if (colored && !hasColor) continue;
-        const float w = (v[7] - v[2]) * a.width, h = (v[28] - v[3]) * a.height;
+        const float w = (v[7] - v[2]) * a.width, h = (v[28] - v[3]) * a.sourceHeight;
         if (w <= 0 || h <= 0) continue;
         const D2D1_MATRIX_3X2_F m{(v[5] - v[0]) / w, (v[6] - v[1]) / w,
             (v[25] - v[0]) / h, (v[26] - v[1]) / h, v[0], v[1]};
         p.target->SetTransform(m);
-        const auto source = D2D1::RectF(v[2] * a.width, v[3] * a.height, v[7] * a.width, v[28] * a.height);
+        const auto source = D2D1::RectF(v[2] * a.width, v[3] * a.sourceHeight, v[7] * a.width, v[28] * a.sourceHeight);
         const auto dest = D2D1::RectF(0, 0, w, h);
         if (colored) p.target->DrawBitmap(a.bitmap.Get(), dest, c.color.a, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, source);
         else p.mask(a.bitmap.Get(), dest, source, c.color);

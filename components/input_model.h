@@ -15,6 +15,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <unordered_map>
@@ -217,6 +218,8 @@ struct LineDecoration {
     // 本该折叠"的事实要保留给组件的 onRevealHiddenLine 自愈检查用（↓ 落进折叠段、
     // 撤销恢复到折叠区），否则自愈永远看不到落点，折叠就卡死在半开状态。
     bool hiddenByFold = false;
+    // View-only replacement occupies geometry without being a collapsed heading.
+    bool hiddenByView = false;
 
     // ── 表格列吸附（S3f 批次 D）────────────────────────────────────────────
     // 本行各单元格的**内容区间**（文档字节，左→右，beg == end 表示空格子）。
@@ -269,6 +272,7 @@ struct LineDecoration {
                languageLabel == other.languageLabel &&
                hidden == other.hidden &&
                hiddenByFold == other.hiddenByFold &&
+               hiddenByView == other.hiddenByView &&
                cells == other.cells &&
                tableId == other.tableId &&
                std::fabs(effectiveCellPadding() - other.effectiveCellPadding()) < 0.001f &&
@@ -2020,7 +2024,42 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
     // 把 [visBeg, visEnd) 这段投影文本按片段逐段测量，再拼成一张 caret 表。
     // 拼接成立的前提：字形推进量逐字累加（没有字距调整），于是"整行的 caret x"
     // 就是各段 x 加上它前面所有段的宽度之和。
-    static StyledLineLayout layoutStyledRange(const std::string& value,
+    // Scratch data for one physical styled row, never retained across layouts.
+    // Dense marker rows otherwise scan preceding holes for every piece and
+    // wrapped segment. Equal projected gaps keep the before-hole anchor.
+    struct StyledProjection {
+        std::string text;
+        std::vector<int> gaps;
+        std::vector<int> shifts;
+        int tailShift = 0;
+
+        StyledProjection(const std::string& value, int beg, int end,
+                         const std::vector<LineHole>& holes)
+            : text(projectText(value, beg, end, holes)) {
+            gaps.reserve(holes.size());
+            shifts.reserve(holes.size());
+            int projectedBase = 0;
+            int documentBase = beg;
+            for (const auto& hole : holes) {
+                if (hole.end <= documentBase) continue;
+                const int segment = hole.beg - documentBase;
+                gaps.push_back(projectedBase + segment);
+                shifts.push_back(documentBase - projectedBase);
+                projectedBase += segment;
+                documentBase = hole.end;
+            }
+            tailShift = documentBase - projectedBase;
+        }
+
+        int documentOffset(int projected) const {
+            const auto it = std::lower_bound(gaps.begin(), gaps.end(), projected);
+            const int shift = it == gaps.end() ? tailShift : shifts[static_cast<std::size_t>(it - gaps.begin())];
+            return projected + shift;
+        }
+    };
+
+    template<bool Indexed>
+    static StyledLineLayout layoutStyledRangeImpl(const std::string& value,
                                               int lineBeg,
                                               int lineEnd,
                                               const std::vector<LineHole>& holes,
@@ -2028,7 +2067,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                               int visBeg,
                                               int visEnd,
                                               float fontSize,
-                                              const std::string& defaultFontFamily) {
+                                              const std::string& defaultFontFamily,
+                                              const StyledProjection* projection) {
         StyledLineLayout layout;
         float x = 0.0f;
         for (const VisiblePiece& piece : pieces) {
@@ -2037,9 +2077,9 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             if (to <= from) {
                 continue;
             }
-            const int docBeg = std::max(lineBeg, unprojectVisible(holes, lineBeg, from));
-            const int docEnd = std::max(docBeg, unprojectVisible(holes, lineBeg, to));
-            const std::string text = holes.empty()
+            const int docBeg = std::max(lineBeg, Indexed ? projection->documentOffset(from) : unprojectVisible(holes, lineBeg, from));
+            const int docEnd = std::max(docBeg, Indexed ? projection->documentOffset(to) : unprojectVisible(holes, lineBeg, to));
+            const std::string text = Indexed ? projection->text.substr(static_cast<std::size_t>(from), static_cast<std::size_t>(to - from)) : holes.empty()
                 ? value.substr(static_cast<std::size_t>(docBeg), static_cast<std::size_t>(docEnd - docBeg))
                 : projectText(value, docBeg, docEnd, holes);
             const LineRunStyle style = piece.style != nullptr ? *piece.style : LineRunStyle{};
@@ -2062,6 +2102,16 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         layout.metrics.width = x;
         (void) lineEnd;
         return layout;
+    }
+
+    static StyledLineLayout layoutStyledRange(const std::string& value,
+                                              int lineBeg, int lineEnd,
+                                              const std::vector<LineHole>& holes,
+                                              const std::vector<VisiblePiece>& pieces,
+                                              int visBeg, int visEnd, float fontSize,
+                                              const std::string& defaultFontFamily) {
+        return layoutStyledRangeImpl<false>(value, lineBeg, lineEnd, holes, pieces,
+                                            visBeg, visEnd, fontSize, defaultFontFamily, nullptr);
     }
 
     // 记下"这一次排版用的装饰"。内容变了就推进版本号——渲染侧的 dirtyKey 靠它决定要不要
@@ -2443,6 +2493,10 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                   bool multiline,
                                   LineDecorationView nextDecorations,
                                   const LineDecorationSnapshot& snapshot = {}) {
+        // Only styled full reflows benefit from repeated font-file resolution.
+        // Keep unchanged layouts and plain-text measurements on their old path.
+        std::optional<core::TextPrimitive::FontResolutionScope> fontResolutionScope;
+        if (!nextDecorations.empty()) fontResolutionScope.emplace();
         ++debugLayoutStats().full;
         if (multiline) {
             const bool reuseIntrinsic = state.layoutCacheValid && state.cachedMultiline &&
@@ -3352,7 +3406,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             }
             if (hasHidden) {
                 line.hidden = decoration->hidden;
-                line.hiddenByFold = decoration->hiddenByFold || decoration->hidden;
+                line.hiddenByFold = decoration->hiddenByFold ||
+                    (decoration->hidden && !decoration->hiddenByView);
             }
         }
     }
@@ -3554,8 +3609,17 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             return;
         }
 
-        StyledLineLayout whole = layoutStyledRange(value, start, end, holes, pieces, 0, visibleLen,
-                                                   lineFontSize, fontFamily);
+        std::optional<StyledProjection> projection;
+        if (holes.size() >= 32 && pieces.size() >= 32 && viewportWidth > 1.0f) {
+            projection.emplace(value, start, end, holes);
+        }
+        const auto* projected = projection ? &*projection : nullptr;
+        const auto layoutRange = [&](int beg, int rangeEnd) {
+            return projected
+                ? layoutStyledRangeImpl<true>(value, start, end, holes, pieces, beg, rangeEnd, lineFontSize, fontFamily, projected)
+                : layoutStyledRange(value, start, end, holes, pieces, beg, rangeEnd, lineFontSize, fontFamily);
+        };
+        StyledLineLayout whole = layoutRange(0, visibleLen);
         const bool softWraps = viewportWidth > 1.0f;
         if (!softWraps || whole.metrics.byteIndices.size() <= 2 || whole.metrics.width <= viewportWidth) {
             out.push_back({start, end, hardBreakAfter, std::move(whole.metrics), lineFontSize, lineHeight, 0.0f,
@@ -3577,9 +3641,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                     unprojectVisible(holes, start, segmentProjected));
                 const int segmentDocumentEnd = std::max(segmentDocumentBeg,
                     unprojectVisible(holes, start, segmentEndProjected));
-                StyledLineLayout segment = layoutStyledRange(value, start, end, holes, pieces,
-                                                             segmentProjected, segmentEndProjected,
-                                                             lineFontSize, fontFamily);
+                StyledLineLayout segment = layoutRange(segmentProjected, segmentEndProjected);
                 out.push_back({segmentDocumentBeg, segmentDocumentEnd, false, std::move(segment.metrics),
                                lineFontSize, lineHeight, 0.0f,
                                clipHoles(holes, segmentDocumentBeg, segmentDocumentEnd),
@@ -3593,9 +3655,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         if (segmentProjected < visibleLen) {
             const int segmentDocumentBeg = std::max(previousDocumentEnd,
                 unprojectVisible(holes, start, segmentProjected));
-            StyledLineLayout segment = layoutStyledRange(value, start, end, holes, pieces,
-                                                         segmentProjected, visibleLen,
-                                                         lineFontSize, fontFamily);
+            StyledLineLayout segment = layoutRange(segmentProjected, visibleLen);
             out.push_back({segmentDocumentBeg, end, hardBreakAfter, std::move(segment.metrics),
                            lineFontSize, lineHeight, 0.0f,
                            clipHoles(holes, segmentDocumentBeg, end),

@@ -52,6 +52,8 @@ inline void Runtime::compose(const std::string& pageId, float logicalWidth, floa
         fullPaintRequested_ = true;
     }
     fullTreeUpdateRequested_ = true;
+    focusedElementRenderTransformValid_ = false;
+    imeCursorRectValid_ = false;
     logicalWidth_ = logicalWidth;
     logicalHeight_ = logicalHeight;
 }
@@ -103,8 +105,21 @@ inline bool Runtime::update(core::window::Handle window, float deltaSeconds, flo
     }
 
     syncScrollStateBindings(false);
+    std::string deferredScrollTarget;
     if (scrollEvent.active()) {
-        updateScroll(scrollEvent, hitTestScrollable(pointerEvents.back(), dpiScale));
+        const std::string target = hitTestScrollable(pointerEvents.back(), dpiScale);
+        const Element* element = ui_.find(target);
+        // Custom viewers consume pointer-local anchors; motion in this batch
+        // must reach onMove before their wheel callback. Runtime scrollers
+        // still update before the tree so content transforms stay synchronized.
+        if (element != nullptr && element->scrollStateId.empty() && element->onScroll) {
+            deferredScrollTarget = target;
+            for (auto& entry : instances_.scrollStates) {
+                entry.second.velocity = 0.0f;
+            }
+        } else {
+            updateScroll(scrollEvent, target);
+        }
         hoverTargetCacheValid_ = false;
     }
     updateScrollMotion(deltaSeconds);
@@ -127,6 +142,10 @@ inline bool Runtime::update(core::window::Handle window, float deltaSeconds, flo
         const std::string hoverTargetId = resolveHoverTarget(event, dpiScale, inputEnabled);
         const float eventDeltaSeconds = index + 1 == pointerEvents.size() ? deltaSeconds : 0.0f;
         updateElementTree(event, eventDeltaSeconds, dpiScale, hoverTargetId);
+    }
+    if (!deferredScrollTarget.empty()) {
+        updateScroll(scrollEvent, deferredScrollTarget);
+        hoverTargetCacheValid_ = false;
     }
     flushPendingScrollDirtyRects();
     updateDependentVisualDirtyRegions(dpiScale);
@@ -181,6 +200,10 @@ inline void Runtime::render(int windowWidth, int windowHeight, float dpiScale, c
         return;
     }
 
+    // Compose/layout can replace row geometry after update() processed input.
+    // Publish the new caret anchor before drawing that geometry, including IME
+    // preedit that reveals source hidden by an inline view.
+    updateImeCursorRect(inputWindow_, dpiScale);
     core::render::beginRenderFrameStats(windowWidth, windowHeight);
     ImagePrimitive::beginRenderFrame();
     core::render::RenderFrameStats& stats = core::render::currentRenderFrameStats();
@@ -284,6 +307,7 @@ inline void Runtime::render(int windowWidth, int windowHeight, float dpiScale) {
         return;
     }
 
+    updateImeCursorRect(inputWindow_, dpiScale);
     ImagePrimitive::beginRenderFrame();
 
     RuntimeRenderer(ui_, instances_).renderDirect(

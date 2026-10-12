@@ -105,6 +105,23 @@ public:
     static Vec2 measureTextSize(const TextStyle& style);
     static TextAtlasDebugStats debugAtlasStats();
 
+    // Reuse font-file resolution only during one synchronous layout operation.
+    // The filesystem is treated as stable within the scope; subsequent scopes
+    // resolve afresh. Font configuration changes invalidate even an active scope.
+    // Scopes are thread-local, nest independently, and must end in stack order.
+    class FontResolutionScope {
+    public:
+        FontResolutionScope();
+        ~FontResolutionScope();
+        FontResolutionScope(const FontResolutionScope&) = delete;
+        FontResolutionScope& operator=(const FontResolutionScope&) = delete;
+        FontResolutionScope(FontResolutionScope&&) = delete;
+        FontResolutionScope& operator=(FontResolutionScope&&) = delete;
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl_;
+    };
+
     // ── 排版层（逻辑像素）的设备缩放 ────────────────────────────────────────
     // 两套坐标空间在同一个管线里并存：
     //   · **渲染**：runtime_render.h 交给 TextPrimitive 的字号是**设备像素**

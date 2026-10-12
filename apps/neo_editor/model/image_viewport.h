@@ -28,9 +28,11 @@ struct ImageViewport {
         panY = std::clamp(panY, -limitY, limitY);
     }
 
-    void wheel(float steps, float imageW, float imageH, float windowW, float windowH) {
+    void wheel(float steps, float imageW, float imageH, float windowW, float windowH,
+               float maximumZoom = 16.0f) {
         if (!std::isfinite(steps) || steps == 0.0f) return;
-        const float next = std::clamp(zoom * std::pow(1.2f, std::clamp(steps, -32.0f, 32.0f)), 0.1f, 16.0f);
+        if (!std::isfinite(maximumZoom) || maximumZoom < 0.1f) return;
+        const float next = std::clamp(zoom * std::pow(1.2f, std::clamp(steps, -32.0f, 32.0f)), 0.1f, maximumZoom);
         const float ratio = next / zoom;
         const float anchorX = pointerKnown ? pointerX - windowW * 0.5f : 0.0f;
         const float anchorY = pointerKnown ? pointerY - windowH * 0.5f : 0.0f;

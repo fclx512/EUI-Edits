@@ -11,7 +11,9 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace neo {
@@ -57,23 +59,46 @@ inline std::string rootName(const std::string& path) {
     return basename(normalized);
 }
 
-inline std::string tabLabel(const TabInfo& tab, const std::vector<TabInfo>& tabs) {
+// Built from the current TabInfo snapshot only; names, roots and translations
+// cannot survive a frame here. The two keys match the legacy conflict scans.
+struct TabLabelIndex {
+    std::unordered_map<std::string, int> names;
+    std::unordered_map<std::string, int> parentLabels;
+    explicit TabLabelIndex(const std::vector<TabInfo>& tabs) {
+        names.reserve(tabs.size());
+        parentLabels.reserve(tabs.size());
+        for (const auto& tab : tabs) {
+            if (tab.path.empty()) continue;
+            ++names[lowerAscii(basename(tab.path))];
+            const auto base = tab.name.empty() ? std::string(i18n::tr("tabs.untitled")) : tab.name;
+            ++parentLabels[lowerAscii(parentName(tab.path) + " / " + base)];
+        }
+    }
+    static int count(const std::unordered_map<std::string, int>& values, const std::string& key) {
+        const auto found = values.find(key);
+        return found == values.end() ? 0 : found->second;
+    }
+};
+
+inline std::string tabLabel(const TabInfo& tab, const std::vector<TabInfo>& tabs,
+                            const TabLabelIndex* index = nullptr) {
     const std::string base = tab.name.empty() ? std::string(i18n::tr("tabs.untitled")) : tab.name;
     if (tab.path.empty()) return base;
     const std::string key = lowerAscii(basename(tab.path));
-    int sameName = 0;
-    for (const TabInfo& other : tabs) {
-        if (!other.path.empty() && lowerAscii(basename(other.path)) == key) ++sameName;
+    int sameName = index ? TabLabelIndex::count(index->names, key) : 0;
+    if (!index) for (const TabInfo& other : tabs) {
+        if (!other.path.empty() && lowerAscii(basename(other.path)) == key && ++sameName == 2) break;
     }
     if (sameName < 2) return base;
 
     std::string parent = parentName(tab.path);
     if (parent.empty()) parent = rootName(tab.vaultRoot);
     std::string label = parent.empty() ? base : parent + " / " + base;
-    int sameLabel = 0;
-    for (const TabInfo& other : tabs) {
+    const auto labelKey = lowerAscii(label);
+    int sameLabel = index ? TabLabelIndex::count(index->parentLabels, labelKey) : 0;
+    if (!index) for (const TabInfo& other : tabs) {
         const std::string otherBase = other.name.empty() ? std::string(i18n::tr("tabs.untitled")) : other.name;
-        if (!other.path.empty() && lowerAscii(parentName(other.path) + " / " + otherBase) == lowerAscii(label)) ++sameLabel;
+        if (!other.path.empty() && lowerAscii(parentName(other.path) + " / " + otherBase) == labelKey && ++sameLabel == 2) break;
     }
     if (sameLabel > 1) {
         const std::string root = rootName(tab.vaultRoot);
@@ -245,7 +270,8 @@ inline void closeTabFromBar(AppState& state, std::uint64_t id, bool allowAnchor,
 inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
                     const UiMetrics& metrics, const TabInfo& tab,
                     const std::vector<TabInfo>& tabs, float x, float width,
-                    bool active, bool interactive, bool allowAnchor) {
+                    bool active, bool interactive, bool allowAnchor,
+                    const TabLabelIndex* labels = nullptr) {
     const std::string id = "menubar.tabs." + std::to_string(tab.id);
     const float height = metrics.menuBarHeight - 4.0f;
     const float y = 4.0f;
@@ -265,7 +291,7 @@ inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
     const bool showTitle = width >= 56.0f && titleWidth >= 16.0f;
     const std::string family = uiFontFamily(state);
     const std::string label = showTitle
-        ? elideMeasured(tabLabel(tab, tabs), family, metrics.menuFontSize, titleWidth)
+        ? elideMeasured(tabLabel(tab, tabs, labels), family, metrics.menuFontSize, titleWidth)
         : std::string{};
 
     const eui::Color fill = active ? colors.editor : colors.toolbar;
@@ -745,6 +771,9 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
     }
     // 完整卡放不下时只绘活动页，宽度取 regionWidth（不缩小字体挤出多个不可用标签）。
     const bool activeOnly = !tabs.empty() && regionWidth < tab_bar_detail::kTabWidth;
+    std::optional<tab_bar_detail::TabLabelIndex> labels;
+    if (!activeOnly && regionWidth > 0.0f && tabs.size() > 1) labels.emplace(tabs);
+    const auto* labelIndex = labels ? &*labels : nullptr;
     const float maxScroll = std::max(0.0f, contentWidth - regionWidth);
     float scroll = std::clamp(state.tabScroll, 0.0f, maxScroll);
 
@@ -841,7 +870,7 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
             .content([&] {
                 if (activeOnly) {
                     tab_bar_detail::tabCard(ui, state, colors, metrics, tabs[activeIndex], tabs,
-                                            0.0f, regionWidth, true, interactive, false);
+                                            0.0f, regionWidth, true, interactive, false, labelIndex);
                     return;
                 }
                 for (std::size_t index = 0; index < tabs.size(); ++index) {
@@ -850,7 +879,7 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
                                     closeDrawOffset;
                     tab_bar_detail::tabCard(ui, state, colors, metrics, tab, tabs, x,
                                             tab_bar_detail::kTabWidth, tab.id == state.tabId, interactive,
-                                            true);
+                                            true, labelIndex);
                 }
             }).build();
     }

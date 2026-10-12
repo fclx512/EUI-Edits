@@ -163,6 +163,11 @@ std::uint64_t estimateDerivedBytes(const DocumentSession& page) {
     if (page.derivedSource) {
         bytes += sourceCacheBytes(*page.derivedSource);
     }
+    // 只读思维导图预览的页自有缓存（阶段 D）：键含文档身份/正文代次/块区间/字体/
+    // 字号/DPI/面板宽度/主题（model/mindmap_cache.h），与计划/装饰/源码一同吃本预算。
+    if (page.derivedMindmap) {
+        bytes += mindmap::estimateCacheBytes(*page.derivedMindmap);
+    }
     return bytes;
 }
 
@@ -254,6 +259,7 @@ void releaseDerivedCaches(DocumentSession& page) {
     page.derivedPlan.reset();
     page.derivedDecoration.reset();
     page.derivedSource.reset();
+    page.derivedMindmap.reset();  // 预览缓存可重建：淘汰/正文替换只清它，不动 doc/撤销
     page.derivedCacheBytes = 0;
     page.derivedCacheUse = 0;
     tracelog::event("cache-evict", 0, "");
@@ -519,7 +525,56 @@ bool cursorClientPosition(float& x, float& y) {
     return true;
 }
 
-std::vector<TabInfo> documentTabs(const AppState& state) {    std::vector<TabInfo> result;
+VaultDocumentPaths documentVaultPaths(const AppState& state) {
+    VaultDocumentPaths result;
+    if (state.vaultRoot.empty()) return result;
+    struct ResolvedPath {
+        std::filesystem::path path;
+        bool relativeValid;
+    };
+    const auto resolve = [](const std::string& value) {
+        std::error_code error;
+        auto path = std::filesystem::weakly_canonical(textfile::pathFromUtf8(value), error);
+        const bool relativeValid = !error;
+        if (error) path = std::filesystem::absolute(textfile::pathFromUtf8(value), error).lexically_normal();
+        return ResolvedPath{std::move(path), relativeValid};
+    };
+    const auto root = resolve(state.vaultRoot);
+    const auto relative = [&](const ResolvedPath& document) {
+        if (!root.relativeValid || !document.relativeValid) return std::string{};
+        auto value = textfile::pathToUtf8(document.path.lexically_relative(root.path));
+        std::replace(value.begin(), value.end(), '\\', '/');
+        return value;
+    };
+    result.openedRelative.reserve(state.tabOrder.size());
+    bool activeVisited = false;
+    for (const auto id : state.tabOrder) {
+        const auto* document = documentTab(state, id);
+        if (!document || document->path.empty()) continue;
+        const auto resolved = resolve(document->path);
+        if (id == state.tabId) {
+            result.activeRelative = relative(resolved);
+            activeVisited = true;
+        }
+        auto part = resolved.path.begin();
+        bool within = true;
+        for (const auto& rootPart : root.path) {
+            if (part == resolved.path.end() || !equalComponent(*part, rootPart)) {
+                within = false;
+                break;
+            }
+            ++part;
+        }
+        if (within) result.openedRelative.push_back(relative(resolved));
+    }
+    // Preserve the independent active projection even during tab-order repair.
+    if (!activeVisited && !state.path.empty()) result.activeRelative = relative(resolve(state.path));
+    return result;
+}
+
+std::vector<TabInfo> documentTabs(const AppState& state) {
+    std::vector<TabInfo> result;
+    result.reserve(state.tabOrder.size());
     for (const auto id : state.tabOrder) {
         const auto* document = documentTab(state, id);
         if (!document) continue;

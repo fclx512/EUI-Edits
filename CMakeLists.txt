@@ -904,6 +904,26 @@ if(EUI_BUILD_TEST_FIXTURES)
         target_link_libraries(${unit_name} PRIVATE eui::neo)
         target_include_directories(${unit_name} PRIVATE "${NEO_EDITOR_GENERATED_INCLUDE_DIR}")
         eui_apply_compile_options(${unit_name})
+        if(unit_name STREQUAL "mindmap_plan" OR unit_name STREQUAL "mindmap_preview_state" OR unit_name STREQUAL "mindmap_manual_sample" OR unit_name STREQUAL "mindmap_preview_ui" OR unit_name STREQUAL "mindmap_inline_ui")
+            target_sources(${unit_name} PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/mindmap_plan.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/lp_plan.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/text_file.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/atomic_write.cpp")
+            target_include_directories(${unit_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+        endif()
+        if(unit_name STREQUAL "mindmap_preview_state" OR unit_name STREQUAL "mindmap_preview_ui" OR unit_name STREQUAL "mindmap_inline_ui")
+            target_sources(${unit_name} PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/mindmap_layout.cpp")
+        endif()
+        if(unit_name STREQUAL "mindmap_manual_sample")
+            target_compile_definitions(${unit_name} PRIVATE EUI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+        endif()
+        if(unit_name STREQUAL "mindmap_layout")
+            target_sources(${unit_name} PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/mindmap_layout.cpp")
+            target_include_directories(${unit_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+        endif()
         if(unit_name STREQUAL "lp_decorations")
             # Live Preview 适配层的测试要同时编进 app 侧的解析器（lp_plan.cpp）。
             # 测的是编辑器真正跑的那条路：lp_plan → lp_decorations → 组件装饰。
@@ -1090,7 +1110,7 @@ if(EUI_BUILD_TEST_FIXTURES)
         endif()
         if(unit_name STREQUAL "vault_delete_state" OR unit_name STREQUAL "file_safety" OR unit_name STREQUAL "document_tabs"
            OR unit_name STREQUAL "document_tab_cache" OR unit_name STREQUAL "document_activation_check"
-           OR unit_name STREQUAL "document_vault_loading")
+           OR unit_name STREQUAL "document_vault_loading" OR unit_name STREQUAL "editor_prepare_benchmark")
             # Exercise real action dispatch with test doubles for Shell/dialogs/settings.
             # app_actions 引用 png_encode/attachment/clipboard_image（图片粘贴路径），一并编入。
             # 切页/缓存/后台任务相关的应用侧模块（阶段 B～E）也必须编入：document_tabs 与
@@ -1155,7 +1175,7 @@ if(EUI_BUILD_TEST_FIXTURES)
             endforeach()
         endif()
         if(unit_name STREQUAL "perf_benchmark" OR unit_name STREQUAL "lp_edit_benchmark" OR unit_name STREQUAL "editor_pipeline_benchmark"
-           OR unit_name STREQUAL "table_layout_benchmark")
+           OR unit_name STREQUAL "table_layout_benchmark" OR unit_name STREQUAL "editor_prepare_benchmark")
             # T12 / B3 无头性能基准：只打印 ms/次，不因绝对耗时失败；仅 NEO_PERF_GUARD=1
             # 才启用相对护栏。挂 performance 标签 → 默认 `ctest -L unit`（CI/release
             # 两处都按 -L unit 跑）不会带上它，需要时单独 `ctest -L performance`。

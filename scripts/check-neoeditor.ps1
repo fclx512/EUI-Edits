@@ -53,13 +53,13 @@ if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits check configuration failed.' }
 $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encoding', 'settings_atomic', 'settings_confirmation',
     'i18n', 'menu_commands', 'file_assoc_registration', 'context_menu', 'toast_layout',
     'input_scrollbar', 'pointer_input', 'vault_delete_state', 'file_operations', 'vault_rename',
-    'portable_resource_paths', 'theme_loader', 'image_viewport', 'dsl_main_handle', 'win32_input',
-    'text_metrics_cache', 'text_atlas_growth', 'text_atlas_overflow', 'session_write_scheduler',
+    'portable_resource_paths', 'theme_loader', 'image_viewport', 'mindmap_plan', 'mindmap_layout', 'mindmap_preview_state', 'mindmap_preview_ui', 'mindmap_inline_ui', 'mindmap_manual_sample', 'input_line_overlay', 'ime_rect', 'ime_frame_refresh', 'dsl_main_handle', 'win32_input',
+    'text_metrics_cache', 'text_font_resolution_scope', 'text_atlas_growth', 'text_atlas_overflow', 'session_write_scheduler',
     'document_tab_cache', 'input_viewport_metrics', 'file_check_scheduler', 'vault_scan_scheduler',
     'tab_presentation', 'system_appearance', 'input_placeholder_refresh', 'input_vertical_alignment',
     'input_horizontal_viewport', 'input_callback_layout', 'input_drag_feedback', 'input_pointer_feedback',
     'document_vault_loading', 'virtual_list_wheel', 'win32_event_pump', 'runtime_scroll_sync',
-    'main_window_frame_reentry', 'dsl_window_resize_throttle',
+    'main_window_frame_reentry', 'dsl_window_resize_throttle', 'd2d_render_policy', 'd2d_atlas_capacity',
     'input_model', 'input_value_reference', 'input_source_line_count', 'table_selection_background', 'lp_decorations', 'undo_incremental', 'image_attach')
 $tests = @($targets) + @('settings_language_zh', 'settings_language_en', 'settings_language_invalid', 'settings_language_legacy')
 $filter = '^(' + (($tests | ForEach-Object { [Regex]::Escape($_) }) -join '|') + ')$'

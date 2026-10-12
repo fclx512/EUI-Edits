@@ -143,6 +143,21 @@ std::recursive_mutex& textCacheMutex() {
     return mutex;
 }
 
+constexpr std::size_t kFontResolutionScopeEntries = 32;
+constexpr std::size_t kFontResolutionScopeBytes = 16 * 1024;
+struct FontResolutionMemo {
+    struct Entry { std::string family; int weight; std::string path; };
+    std::vector<Entry> entries;
+    std::size_t bytes = 0;
+    std::uint64_t generation = 0;
+    FontResolutionMemo* previous = nullptr;
+};
+thread_local FontResolutionMemo* activeFontResolutionMemo = nullptr;
+std::atomic<std::uint64_t>& fontResolutionGeneration() {
+    static std::atomic<std::uint64_t> generation{0};
+    return generation;
+}
+
 // NEO_TEXT_CACHE_OFF 读取：首次用到时读一次并缓存（逐行测量是热路径，每次
 // 都去查环境变量不划算）；进程内切换走 reloadTextCacheEnv()（见文末测试钩子）。
 bool readTextCacheOffEnv() {
@@ -585,6 +600,7 @@ TextMetricsCache& sharedTextMetricsCache() {
 // 字体栈 / TextSizeCache / T1 两层都可能指向旧身份，必须一起清（T1 验收 C）。
 void clearSharedFontStackCache() {
     std::scoped_lock lock(textCacheMutex());
+    fontResolutionGeneration().fetch_add(1, std::memory_order_relaxed);
 
     FontStackCache& cache = sharedFontStackCache();
     cache.entries.clear();
@@ -2458,7 +2474,8 @@ void TextPrimitive::Impl::render(int windowWidth, int windowHeight) {
         atlas.gray.height,
         atlas.gray.channels,
         atlas.gray.generation,
-        atlas.gray.pixels.empty() ? nullptr : atlas.gray.pixels.data()
+        atlas.gray.pixels.empty() ? nullptr : atlas.gray.pixels.data(),
+        std::min(atlas.gray.height, atlas.gray.y + atlas.gray.rowHeight + 1)
     };
     command.colorAtlas = {
         core::render::TextAtlasPageKind::Color,
@@ -2466,7 +2483,8 @@ void TextPrimitive::Impl::render(int windowWidth, int windowHeight) {
         atlas.color.height,
         atlas.color.channels,
         atlas.color.generation,
-        atlas.color.pixels.empty() ? nullptr : atlas.color.pixels.data()
+        atlas.color.pixels.empty() ? nullptr : atlas.color.pixels.data(),
+        std::min(atlas.color.height, atlas.color.y + atlas.color.rowHeight + 1)
     };
     backend->drawText(command, windowWidth, windowHeight);
 }
@@ -3113,12 +3131,48 @@ std::string TextPrimitive::Impl::resolveRegularFontPath(const std::string& fontF
 // 常规字面 + "字重 >= 600 时换粗体字样" 这一层非常薄，但把字重这条信息真正落到了字体文件上：
 // 改造前 fontWeight 只参与缓存键，两支都返回同一个文件，等于字重不起作用。
 std::string TextPrimitive::Impl::resolveFontPath(const std::string& fontFamily, int fontWeight) {
-    const std::string regular = resolveRegularFontPath(fontFamily);
-    if (fontWeight < 600) {
-        return regular;
+    FontResolutionMemo* memo = activeFontResolutionMemo;
+    if (!memo || textCacheDisabled()) {
+        // Preserve the original named-return flow on the unscoped path.
+        // A conditional expression can force an extra regular-path string copy.
+        const std::string regular = resolveRegularFontPath(fontFamily);
+        if (fontWeight < 600) return regular;
+        return resolveBoldFontPath(fontFamily, regular, fontWeight);
     }
-    return resolveBoldFontPath(fontFamily, regular, fontWeight);
+    // Do not hold the shared lock for an entire layout. Individual lookups use
+    // the existing recursive lock so a font switch and its generation agree.
+    std::scoped_lock lock(textCacheMutex());
+    const auto generation = fontResolutionGeneration().load(std::memory_order_relaxed);
+    if (memo->generation != generation) {
+        memo->entries.clear();
+        memo->bytes = 0;
+        memo->generation = generation;
+    }
+    for (const auto& entry : memo->entries) {
+        if (entry.weight == fontWeight && entry.family == fontFamily) return entry.path;
+    }
+    const std::string regular = resolveRegularFontPath(fontFamily);
+    std::string path = fontWeight < 600 ? regular : resolveBoldFontPath(fontFamily, regular, fontWeight);
+    const std::size_t bytes = sizeof(FontResolutionMemo::Entry) + fontFamily.size() + path.size();
+    if (memo->entries.size() < kFontResolutionScopeEntries &&
+        bytes <= kFontResolutionScopeBytes - memo->bytes) {
+        memo->entries.push_back({fontFamily, fontWeight, path});
+        memo->bytes += bytes;
+    }
+    return path;
 }
+
+struct TextPrimitive::FontResolutionScope::Impl {
+    FontResolutionMemo memo;
+    Impl() {
+        memo.previous = activeFontResolutionMemo;
+        memo.generation = fontResolutionGeneration().load(std::memory_order_relaxed);
+        activeFontResolutionMemo = &memo;
+    }
+    ~Impl() { activeFontResolutionMemo = memo.previous; }
+};
+TextPrimitive::FontResolutionScope::FontResolutionScope() : impl_(std::make_unique<Impl>()) {}
+TextPrimitive::FontResolutionScope::~FontResolutionScope() = default;
 
 TextPrimitive::TextPrimitive()
     : impl_(std::make_unique<Impl>()) {}
@@ -3303,6 +3357,14 @@ void neoTextCacheResetStats() {
 
 // 清空全部共享文本缓存（字体栈 / TextSizeCache / T1 两层）。
 void neoTextCacheClear() { clearSharedFontStackCache(); }
+
+// Current-thread scope diagnostics; no public API or shared-cache ownership.
+std::size_t neoFontResolutionScopeEntries() {
+    return activeFontResolutionMemo ? activeFontResolutionMemo->entries.size() : 0;
+}
+std::size_t neoFontResolutionScopeBytes() {
+    return activeFontResolutionMemo ? activeFontResolutionMemo->bytes : 0;
+}
 
 // 强制下一次测量重新读取 NEO_TEXT_CACHE_OFF（正常路径只在首次读一次）。
 void neoTextCacheReloadEnv() { reloadTextCacheEnv(); }

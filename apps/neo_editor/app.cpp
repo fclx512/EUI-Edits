@@ -18,6 +18,7 @@
 #include "ui/image_preview.h"
 #include "ui/menu_bar.h"
 #include "ui/metrics.h"
+#include "ui/mindmap_preview.h"
 #include "ui/overlays.h"
 #include "ui/outline_view.h"
 #include "ui/settings_panel.h"
@@ -242,10 +243,12 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
     if (!event.modifiers.shortcut() && !event.modifiers.alt && !event.modifiers.shift) {
         switch (event.key) {
             case eui::InputKey::Escape:
-                // 全屏图片预览最优先（编辑区聚焦时组件已把 Esc 放行到应用级），
-                // 然后是设置面板、菜单；都没有打开时什么都不做，
-                // 免得把 Esc 从输入法取消预编辑的手里抢走。
-                if (!state.imagePreviewPath.empty()) {
+                // 全屏模态浮层最优先（编辑区聚焦时组件已把 Esc 放行到应用级）：
+                // 思维导图预览 → 图片预览，然后是设置面板、菜单；都没有打开时
+                // 什么都不做，免得把 Esc 从输入法取消预编辑的手里抢走。
+                if (state.mindmapPreview.open) {
+                    neo::closeMindmapPreview(state);
+                } else if (!state.imagePreviewPath.empty()) {
                     state.imagePreviewPath.clear();
                     state.imagePreviewWidth = 0.0f;
                     state.imagePreviewHeight = 0.0f;
@@ -667,6 +670,11 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
         state.imagePreviewWidth = 0.0f;
         state.imagePreviewHeight = 0.0f;
         state.imageViewport = neo::ImageViewport{};
+        // 思维导图预览同理：正文被替换即关闭，页面自有的导图缓存一并释放
+        // （键虽然按 revision 失效，但旧文档的缓存驻留没有保留价值）。
+        state.mindmapPreviewPending = false;
+        state.mindmapPreview.close();
+        state.derivedMindmap.reset();
     }
     // 菜单里的撤销/重做/剪切/复制/全选在这里落到输入组件的内部状态上。
     neo::applyEditorCommand(ui, state);
@@ -752,6 +760,16 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                                     neo::tracelog::Span outlineSpan("outline");
                                     refreshOutlineFromEditor(state);
                                 }
+                                // View 菜单排队的思维导图预览（阶段 C）：必须在
+                                // editorView 之后消费——那时 lp 计划已按当前正文
+                                // 重建，openMindmapModel 的"计划就绪"守卫才真实。
+                                if (state.mindmapPreviewPending) {
+                                    state.mindmapPreviewPending = false;
+                                    const auto& input = ui.state<components::input_detail::InputModel::InputState>(neo::editorInputId(state));
+                                    const auto target = neo::mindmap::selectTarget(state.doc.text, neo::lp::planCache().plan, input.cursor);
+                                    const auto reason = target ? neo::mindmap_inline::openInlineMindmap(ui, state, target.blockBeg) : target.rejectReason;
+                                    if (reason != neo::mindmap::RejectReason::None) neo::showToast(state, neo::i18n::tr("mindmap.title"), neo::i18n::tr(neo::mindmapRejectMessage(reason)));
+                                }
                             })
                             .build();
 
@@ -792,6 +810,8 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                 // 全屏图片预览（S3f 批次 E）：一切之上的模态层 —— 打开时点哪儿都只
                 // 关预览，不会误碰编辑区或菜单。
                 neo::imagePreviewOverlay(ui, state, screen);
+                // 只读思维导图预览（2026-10-11 计划阶段 C/D）：同范式模态层。
+                if (!state.mindmapPreview.inlineMode) neo::mindmapPreviewOverlay(ui, state, screen);
                 neo::languageOverlay(ui,state,screen);
             }
         })

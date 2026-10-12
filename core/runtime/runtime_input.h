@@ -354,6 +354,27 @@ inline void Runtime::updateImeCursorRect(core::window::Handle window, float dpiS
     }
 
     if (!focusedElementRenderTransformValid_) {
+        // A compose can replace ancestors without an intervening update pass.
+        // Resolve the current path instead of reusing its previous-frame matrix.
+        const auto findTransform = [&](const auto& self, const Element& current,
+                                       const RenderTransform& inherited) -> bool {
+            const RenderTransform transform = instances_.renderTransform(current, dpiScale, inherited);
+            if (current.id == focusedId_) {
+                focusedElementRenderTransform_ = transform;
+                focusedElementRenderTransformValid_ = true;
+                return true;
+            }
+            for (const Element* child : current.orderedChildren) {
+                if (self(self, *child, transform)) return true;
+            }
+            return false;
+        };
+        focusedElementRenderTransformValid_ = false;
+        for (const Element* root : ui_.orderedRoots()) {
+            if (findTransform(findTransform, *root, RenderTransform{})) break;
+        }
+    }
+    if (!focusedElementRenderTransformValid_) {
         imeCursorRectValid_ = false;
         return;
     }

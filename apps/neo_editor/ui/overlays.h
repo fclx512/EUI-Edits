@@ -170,6 +170,7 @@ inline void languageOverlay(eui::Ui& ui,AppState& state,const eui::Screen& scree
         items.emplace_back(labels[i],std::move(children));
     }
     components::contextMenu(ui,"editor.languageMenu").open(state.languageMenuOpen).screen(screen.width,screen.height)
+        .skipClosedContent()
         .position(std::max(0.0f,screen.width-270),std::max(0.0f,screen.height-275)).size(220,32)
         .theme(editorColors().tokens).zIndex(2500).items(std::move(items))
         .onSelectPath([&state](const std::vector<int>& path) {

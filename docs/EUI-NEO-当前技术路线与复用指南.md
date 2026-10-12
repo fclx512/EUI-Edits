@@ -29,7 +29,7 @@
 
 - 本文：当前路线、接口契约、接入方式和复用验收要求；作为框架复用的唯一规范入口。
 - 旧个人开发笔记与 v0.6.0 差异快查已移到维护者本地 `local-docs/framework/`，不作为当前接口清单。
-- [Win32与D2D后端技术要点](EUI-NEO-Win32与D2D后端技术要点-2026-10-08.md)：绑定10-07源码的深入实现分析；旧行号与建议需再查当前源码。
+- [渲染后端与CPU处理契约](渲染后端与CPU处理契约.md)：当前 D2D 路径、图集生命周期与验收边界。10-07源码分析快照归档在本地 `local-docs/repo-docs/consolidation-2026-10-11/`。
 - 应用侧性能批次、候选哈希与实际覆盖记录在维护者本地文档区（`local-docs/repo-docs/`），不替代新项目验收，也不随仓库分发。
 
 本次为源码与文档核对，Luna 完整阅读两份调查并做独立审计，主代理复查关键调用链。**没有构建新消费项目、运行测试、GUI或性能验证，也没有追踪最新上游。** 下文示例是按当前接口整理的接入模板，不能标为已编译通过的跨项目样例。核对快照/哈希及审计笔记分别在 `out/framework-guide-20261009/`、`out/framework-guide-20261009-luna/`。
@@ -230,6 +230,7 @@ Win32包含PMv2初始化与WM_DPICHANGED建议矩形处理，不等于任意布�
 - `InputBuilder::valueRef` 仅借用稳定lvalue到同步build结束；拒绝临时串，异步/存留builder必须另保证生命周期。拥有值接口与内容比较仍保留。行号复用检查正文、revision、完整布局和无组合输入，不能换成短revision键。
 - `onDragUpdate` 返回是否确实改变状态；需要更新时返回true。兼容onDrag仍请求更新，不能用false掩盖滚动/选区变化。相关实现与语义见维护者本地过程记录（`local-docs/repo-docs/`）。
 - IME原生Win32实现与GLFW平台桥不同；失焦、指针按下、禁用输入会取消组合。源码有候选位置和UTF-16/UTF-8转换，迟到result及实际输入法行为仍需目标环境验证。
+- `InputBuilder::lineOverlay(callback, key)` 在同步 build 内给出可见源行首及输入框局部矩形；回调复用正文几何、滚动和根裁剪。外部视图状态变化必须改变 key，事件闭包不能保留临时行引用。`LineDecoration::hiddenByView` 区分只读视图替换与章节折叠，fold reveal 只处理折叠原因。具体使用见[思维导图只读预览](思维导图只读预览.md)。
 - virtualList要求固定rowHeight；受控offset、可见范围、内容高度与Runtime滚动状态保持同一真值。可变高度列表需要新的测量/索引契约。
 
 ## 5. D2D能力与应用定制边界

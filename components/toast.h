@@ -143,14 +143,25 @@ public:
                 if (iconRenderer_) iconRenderer_(ui_, id_+".icon", pad, pad+2, iconSize, style_.accent);
                 else ui_.text(id_+".icon").position(pad, pad).size(iconSize, iconSize)
                     .icon(icon_).fontSize(iconSize).color(style_.accent).build();
+                // 标题：行盒高 == 图元盒高。库默认 VerticalAlign::Top 把行盒顶对到
+                // 盒顶，而中文/回退字形的墨迹会越过行盒顶，于是墨迹顶出声明盒。
+                // 这里用 Center（渲染层按实际 ink bounds 居中，见 text.cpp 的
+                // blockYOffset），单行时墨迹落在行盒内，多行时盒高==内容高、等价不变。
                 ui_.text(id_+".title").position(textX, pad).size(textWidth, titleHeight)
                     .text(text_wrap::join(titleLines)).fontFamily(fontFamily_).fontSize(titleFont).fontWeight(600)
-                    .lineHeight(titleLineHeight).color(style_.text).build();
+                    .lineHeight(titleLineHeight).color(style_.text)
+                    .verticalAlign(core::VerticalAlign::Center).build();
+                // 正文视口：.clip() 的上边界原本正好压在正文图元的盒顶上，首行墨迹
+                // 越出行盒顶的部分就被切掉（实测 125% 下切掉 2 物理px，表现为字顶平口）。
+                // 视口往上让出行盒自身的余量，图元在视口内用同样偏移补回去——正文位置
+                // 不变，只是给墨迹留出了裁剪空间。余量随字号走，不写死像素。
+                const float inkSlack = std::max(0.0f, (lineHeight - font) * 0.5f);
                 const std::string scrollId = id_+".body.scroll";
-                ui_.stack(scrollId).position(textX, messageTop).size(textWidth, bodyViewport).clip()
+                ui_.stack(scrollId).position(textX, messageTop - inkSlack)
+                    .size(textWidth, bodyViewport + inkSlack).clip()
                     .scrollState(scrollId, 0, std::max(0.0f, messageHeight-bodyViewport), lineHeight*2)
                     .content([&] {
-                        ui_.text(id_+".message").size(textWidth, messageHeight).scrollContentFrom(scrollId)
+                        ui_.text(id_+".message").y(inkSlack).size(textWidth, messageHeight).scrollContentFrom(scrollId)
                             .text(text_wrap::join(bodyLines)).fontFamily(fontFamily_).fontSize(font)
                             .lineHeight(lineHeight).color(style_.mutedText).build();
                     }).build();
