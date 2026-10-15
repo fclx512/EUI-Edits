@@ -92,3 +92,4 @@ if (Test-Path -LiteralPath $emptyOutput) { throw 'Preflight created a candidate 
 if ((Get-FileHash -LiteralPath $sentinel).Hash -ne $sentinelHash) { throw 'Existing candidate was changed.' }
 $results | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'results.json') -Encoding utf8
 Write-Output "Release script checks passed: $($results.Count). Evidence: $EvidenceDirectory"
+exit 0
