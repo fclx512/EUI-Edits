@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include "components/input_model.h"
 #include "model/lp_syntax.h"
 #include "model/style_schema.h"
@@ -9,7 +10,9 @@ inline bool sameState(const lp::SyntaxState& a,const lp::SyntaxState& b) {
     return a.blockComment==b.blockComment && a.tripleString==b.tripleString && a.tripleChar==b.tripleChar;
 }
 struct Row {
-    std::string text;
+    // Non-owning byte range in the current input supplied to build(). No string
+    // view survives a call, and tokens remain relative to this physical row.
+    int length=0;
     lp::SyntaxState in, out;
     std::vector<lp::SyntaxToken> tokens;
     bool ready=false;
@@ -60,7 +63,7 @@ inline LineDecorationSnapshot build(Cache& c,const std::string& text,const std::
         for(int i=0;i<count && at<=static_cast<int>(text.size());++i) {
             const auto end=text.find('\n',static_cast<std::size_t>(at));
             const int stop=end==std::string::npos?static_cast<int>(text.size()):static_cast<int>(end);
-            Row row;row.text=text.substr(at,stop-at);replacement.push_back(std::move(row));at=stop+1;
+            Row row;row.length=stop-at;replacement.push_back(std::move(row));at=stop+1;
         }
         const int expected=e->oldTailLine<static_cast<int>(c.starts.size())
             ?c.starts[static_cast<std::size_t>(e->oldTailLine)]+delta:static_cast<int>(text.size())+1;
@@ -73,18 +76,28 @@ inline LineDecorationSnapshot build(Cache& c,const std::string& text,const std::
     if(!incremental) {
         c.rows.clear();first=0;
         std::size_t at=0;
-        do {const auto end=text.find('\n',at);Row row;row.text=text.substr(at,end==std::string::npos?text.size()-at:end-at);
+        do {const auto end=text.find('\n',at);Row row;row.length=static_cast<int>(end==std::string::npos?text.size()-at:end-at);
             c.rows.push_back(std::move(row));if(end==std::string::npos) break;at=end+1;} while(at<=text.size());
     }
+    c.starts.resize(c.rows.size());int at=0;
+    for(std::size_t i=0;i<c.rows.size();++i) {c.starts[i]=at;at+=c.rows[i].length+1;}
     auto state=first?c.rows[first-1].out:lp::SyntaxState{};
     for(std::size_t i=first;i<c.rows.size();++i) {
         auto& row=c.rows[i];
         // Once the outgoing edit state converges, the untouched suffix stays valid.
         if(row.ready && sameState(row.in,state)) break;
-        row.in=state;row.tokens.clear();lp::tokenizeCodeLine(row.text,0,static_cast<int>(row.text.size()),language,state,row.tokens);
+        row.in=state;row.tokens.clear();
+        const int begin=c.starts[i];
+        lp::tokenizeCodeLine(text,begin,begin+row.length,language,state,row.tokens);
+        for(auto& token:row.tokens) {token.beg-=begin;token.end-=begin;}
         row.out=state;row.ready=true;++c.tokenizedRows;
     }
-    c.starts.resize(c.rows.size());int at=0;
+    at=0;
+    std::array<LineStyleHandle,8> tokenStyles;
+    for(std::size_t kind=1;kind<tokenStyles.size();++kind) {
+        LineRunStyle style;style.color=tokenColor(static_cast<lp::TokenKind>(kind),colors);
+        tokenStyles[kind]=LineStyleHandle(style);
+    }
     std::vector<LineDecoration> full;
     std::vector<int> changed;
     std::vector<LineDecoration> patches;
@@ -94,11 +107,12 @@ inline LineDecorationSnapshot build(Cache& c,const std::string& text,const std::
         c.starts[i]=at;LineDecoration d;
         for(const auto& token:c.rows[i].tokens) {
             if(token.kind==lp::TokenKind::Plain) continue;
-            LineRun run;run.beg=at+token.beg;run.end=at+token.end;run.style.color=tokenColor(token.kind,colors);d.runs.push_back(std::move(run));
+            LineRun run;run.beg=at+token.beg;run.end=at+token.end;
+            run.style=tokenStyles[static_cast<std::size_t>(token.kind)];d.runs.push_back(std::move(run));
         }
         if(paged) {if(d!=(*c.snapshot)[i]) {changed.push_back(static_cast<int>(i));patches.push_back(std::move(d));}}
         else full.push_back(std::move(d));
-        at+=static_cast<int>(c.rows[i].text.size())+1;
+        at+=c.rows[i].length+1;
     }
     if(paged) {if(!changed.empty()) c.snapshot=c.snapshot->replacing(changed,std::move(patches));}
     else c.snapshot=std::make_shared<const LineDecorationTable>(std::move(full));

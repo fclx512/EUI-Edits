@@ -253,7 +253,7 @@ std::string decorationFieldDiff(const IncDeco& a, const IncDeco& b) {
     if (!nearFloat(a.fontSize, b.fontSize)) return "fontSize";
     if (!nearFloat(a.lineHeight, b.lineHeight)) return "lineHeight";
     if (!components::input_detail::colorEquals(a.textColor, b.textColor)) return "textColor";
-    if (a.fontFamily != b.fontFamily) return "fontFamily";
+    if (a.rare().fontFamily != b.rare().fontFamily) return "fontFamily";
     if (a.holes.size() != b.holes.size()) return "holes.size";
     for (std::size_t i = 0; i < a.holes.size(); ++i) {
         if (a.holes[i].beg != b.holes[i].beg || a.holes[i].end != b.holes[i].end) {
@@ -267,18 +267,18 @@ std::string decorationFieldDiff(const IncDeco& a, const IncDeco& b) {
         }
         if (a.runs[i].style != b.runs[i].style) return "runs[" + std::to_string(i) + "].style";
     }
-    if (!(a.box == b.box)) return "box";
+    if (!(a.rare().box == b.rare().box)) return "box";
     if (!(a.glyph == b.glyph)) return "glyph";
-    if (!(a.gutterGlyph == b.gutterGlyph)) return "gutterGlyph";
+    if (!(a.rare().gutterGlyph == b.rare().gutterGlyph)) return "gutterGlyph";
     if (!nearFloat(a.contentIndent, b.contentIndent)) return "contentIndent";
     if (!nearFloat(a.textShiftY, b.textShiftY)) return "textShiftY";
     if (!nearFloat(a.spaceBefore, b.spaceBefore)) return "spaceBefore";
-    if (a.imagePath != b.imagePath) return "imagePath";
-    if (!nearFloat(a.imageWidth, b.imageWidth)) return "imageWidth";
-    if (!nearFloat(a.imageHeight, b.imageHeight)) return "imageHeight";
-    if (a.imageFailed != b.imageFailed) return "imageFailed";
-    if (a.imageFailText != b.imageFailText) return "imageFailText";
-    if (a.languageLabel != b.languageLabel) return "languageLabel";
+    if (a.rare().imagePath != b.rare().imagePath) return "imagePath";
+    if (!nearFloat(a.rare().imageWidth, b.rare().imageWidth)) return "imageWidth";
+    if (!nearFloat(a.rare().imageHeight, b.rare().imageHeight)) return "imageHeight";
+    if (a.rare().imageFailed != b.rare().imageFailed) return "imageFailed";
+    if (a.rare().imageFailText != b.rare().imageFailText) return "imageFailText";
+    if (a.rare().languageLabel != b.rare().languageLabel) return "languageLabel";
     if (a.hidden != b.hidden) return "hidden";
     if (a.hiddenByFold != b.hiddenByFold) return "hiddenByFold";
     if (a.cells.size() != b.cells.size()) return "cells.size";
@@ -307,36 +307,36 @@ std::string lineFieldDiff(const IncLine& a, const IncLine& b) {
     if (!nearFloat(a.contentIndent, b.contentIndent)) return "contentIndent";
     if (!nearFloat(a.textShiftY, b.textShiftY)) return "textShiftY";
     if (!nearFloat(a.spaceBefore, b.spaceBefore)) return "spaceBefore";
-    if (a.holes != b.holes) return "holes";
-    if (a.runs.size() != b.runs.size()) return "runs.size";
-    for (std::size_t i = 0; i < a.runs.size(); ++i) {
-        if (a.runs[i].beg != b.runs[i].beg || a.runs[i].end != b.runs[i].end) {
+    if (a.presentation().holes != b.presentation().holes) return "holes";
+    if (a.presentation().runs.size() != b.presentation().runs.size()) return "runs.size";
+    for (std::size_t i = 0; i < a.presentation().runs.size(); ++i) {
+        if (a.presentation().runs[i].beg != b.presentation().runs[i].beg || a.presentation().runs[i].end != b.presentation().runs[i].end) {
             return "runs[" + std::to_string(i) + "].offset";
         }
-        if (a.runs[i].style != b.runs[i].style) return "runs[" + std::to_string(i) + "].style";
-        if (!nearFloat(a.runs[i].x, b.runs[i].x)) return "runs[" + std::to_string(i) + "].x";
-        if (!nearFloat(a.runs[i].width, b.runs[i].width)) {
+        if (a.presentation().runs[i].style != b.presentation().runs[i].style) return "runs[" + std::to_string(i) + "].style";
+        if (!nearFloat(a.presentation().runs[i].x, b.presentation().runs[i].x)) return "runs[" + std::to_string(i) + "].x";
+        if (!nearFloat(a.presentation().runs[i].width, b.presentation().runs[i].width)) {
             return "runs[" + std::to_string(i) + "].width";
         }
     }
-    if (a.metrics.byteIndices != b.metrics.byteIndices) return "metrics.byteIndices";
-    if (a.metrics.caretX != b.metrics.caretX) return "metrics.caretX";
+    if (a.metrics.byteIndices() != b.metrics.byteIndices()) return "metrics.byteIndices";
+    if (a.metrics.caretX() != b.metrics.caretX()) return "metrics.caretX";
     if (!nearFloat(a.metrics.width, b.metrics.width)) return "metrics.width";
-    if (!components::input_detail::colorEquals(a.color, b.color)) return "color";
-    if (!(a.box == b.box)) return "box";
-    if (!(a.glyph == b.glyph)) return "glyph";
-    if (!(a.gutterGlyph == b.gutterGlyph)) return "gutterGlyph";
-    if (a.imagePath != b.imagePath) return "imagePath";
-    if (!nearFloat(a.imageWidth, b.imageWidth)) return "imageWidth";
-    if (!nearFloat(a.imageHeight, b.imageHeight)) return "imageHeight";
-    if (a.imageFailed != b.imageFailed) return "imageFailed";
-    if (a.imageFailText != b.imageFailText) return "imageFailText";
-    if (a.languageLabel != b.languageLabel) return "languageLabel";
+    if (!components::input_detail::colorEquals(a.presentation().color, b.presentation().color)) return "color";
+    if (!(a.rare().box == b.rare().box)) return "box";
+    if (!(a.presentation().glyph == b.presentation().glyph)) return "glyph";
+    if (!(a.rare().gutterGlyph == b.rare().gutterGlyph)) return "gutterGlyph";
+    if (a.rare().imagePath != b.rare().imagePath) return "imagePath";
+    if (!nearFloat(a.rare().imageWidth, b.rare().imageWidth)) return "imageWidth";
+    if (!nearFloat(a.rare().imageHeight, b.rare().imageHeight)) return "imageHeight";
+    if (a.rare().imageFailed != b.rare().imageFailed) return "imageFailed";
+    if (a.rare().imageFailText != b.rare().imageFailText) return "imageFailText";
+    if (a.rare().languageLabel != b.rare().languageLabel) return "languageLabel";
     if (a.hidden != b.hidden) return "hidden";
     if (a.hiddenByFold != b.hiddenByFold) return "hiddenByFold";
     if (a.tableId != b.tableId) return "tableId";
     if (a.tableSeparator != b.tableSeparator) return "tableSeparator";
-    if (a.fontFamily != b.fontFamily) return "fontFamily";
+    if (a.rare().fontFamily != b.rare().fontFamily) return "fontFamily";
     return {};
 }
 
@@ -1629,7 +1629,7 @@ void testThemeRevisionDecorationKey() {
               std::string(label) + "：标题行文字色应立即等于当期 heading");
         check(sameColor(table[static_cast<std::size_t>(codeLine)].textColor, colors.codeText),
               std::string(label) + "：代码行文字色应立即等于当期 codeText");
-        check(sameColor(table[static_cast<std::size_t>(quoteLine)].box.barColor,
+        check(sameColor(table[static_cast<std::size_t>(quoteLine)].rare().box.barColor,
                         colors.markdownAccent),
               std::string(label) + "：引用竖条应立即等于当期 markdownAccent");
     };
@@ -1963,9 +1963,9 @@ void testListSemantics() {
         const neo::LpPlan plan = neo::buildLpPlan(doc);
         std::vector<LineDecoration> table;
         neo::lp::buildDecorations(plan, style, plan.lines[2].srcBeg, table);
-        check(table[0].box.barCount == 1, "单层引用 barCount=1（barCount=0 在渲染层同样按单条处理，兼容历史语义）");
-        check(table[1].box.barCount == 2, "两层引用应给 barCount=2");
-        check(table[1].box.barWidth > 0.0f && table[1].box.barColor.a > 0.0f,
+        check(table[0].rare().box.barCount == 1, "单层引用 barCount=1（barCount=0 在渲染层同样按单条处理，兼容历史语义）");
+        check(table[1].rare().box.barCount == 2, "两层引用应给 barCount=2");
+        check(table[1].rare().box.barWidth > 0.0f && table[1].rare().box.barColor.a > 0.0f,
               "多条竖条沿用单条的宽度与颜色");
     }
     {
@@ -2092,16 +2092,16 @@ void testThematicBreakDecoration() {
             continue;
         }
         check(holesText(doc, table, 0) == marker, marker + " should conceal its source");
-        check(sameColor(table[0].box.gridColor, style.divider),
+        check(sameColor(table[0].rare().box.gridColor, style.divider),
               marker + " should use the theme divider color");
-        check(table[0].box.horizontalRuleThickness == 2,
+        check(table[0].rare().box.horizontalRuleThickness == 2,
               marker + " should draw a 2px rule");
         check(std::fabs(table[0].lineHeight - style.bodyLineHeight) < 0.001f,
               marker + " should keep its normal line height");
 
         neo::lp::buildDecorations(plan, style, 0, table);
         check(holesText(doc, table, 0).empty(), marker + " should reveal source while active");
-        check(table[0].box.horizontalRuleThickness == 0,
+        check(table[0].rare().box.horizontalRuleThickness == 0,
               marker + " should hide the rule while active");
     }
     for (const std::string doc : {"Title\n---\n", "---\ntitle: demo\n---\n"}) {
@@ -2109,7 +2109,7 @@ void testThematicBreakDecoration() {
         std::vector<components::input_detail::LineDecoration> table;
         neo::lp::buildDecorations(plan, style, 0, table);
         for (const auto& decoration : table) {
-            check(decoration.box.horizontalRuleThickness == 0,
+            check(decoration.rare().box.horizontalRuleThickness == 0,
                   "setext and frontmatter markers must not become rules");
         }
     }
@@ -2131,18 +2131,18 @@ void testVerbatimBlankAndWrappedBlockBackgrounds() {
     std::vector<components::input_detail::LineDecoration> decorations;
     neo::lp::buildDecorations(plan, style, static_cast<int>(doc.find("plain")), decorations,
                               {}, {}, nullptr, doc);
-    check(plan.lines[2].kind == neo::LpKind::Frontmatter && decorations[2].box.background.a > 0,
+    check(plan.lines[2].kind == neo::LpKind::Frontmatter && decorations[2].rare().box.background.a > 0,
           "frontmatter blank line retains its continuous container background");
     for (int i = 5; i <= 10; ++i) {
         check(plan.lines[i].kind == neo::LpKind::Code &&
                   plan.lines[i].codeBlockBeg == plan.lines[5].srcBeg &&
                   plan.lines[i].codeBlockEnd == plan.lines[10].srcEnd &&
-                  decorations[i].box.background.a > 0 &&
-                  decorations[i].box.backgroundBlockFirst == (i == 5) &&
-                  decorations[i].box.backgroundBlockLast == (i == 10),
+                  decorations[i].rare().box.background.a > 0 &&
+                  decorations[i].rare().box.backgroundBlockFirst == (i == 5) &&
+                  decorations[i].rare().box.backgroundBlockLast == (i == 10),
               "code container owns blank/whitespace/fence row " + std::to_string(i));
     }
-    check(decorations[11].box.background.a == 0, "ordinary blank after closed code stays outside container");
+    check(decorations[11].rare().box.background.a == 0, "ordinary blank after closed code stays outside container");
 
     // The closing fence is visible while editing the block; at a narrow width
     // it can wrap. Only its final visual segment may end the background.
@@ -2157,7 +2157,7 @@ void testVerbatimBlankAndWrappedBlockBackgrounds() {
     for (const auto& line : layout.lineList()) {
         if (line.lineNumber == 3) {
             ++closingSegments;
-            if (line.box.backgroundBlockLast) ++lastFlags;
+            if (line.rare().box.backgroundBlockLast) ++lastFlags;
         }
     }
     check(closingSegments > 1 && lastFlags == 1, "wrapped closing fence has only one block end");
@@ -2188,8 +2188,8 @@ void testQuoteIndentAndTaskGlyphHitGeometry() {
                       std::fabs(decorations[1].contentIndent - quoteIndent(2)) < 0.001f &&
                       std::fabs(decorations[2].contentIndent - quoteIndent(3)) < 0.001f,
                   "quote contentIndent should use a 0.75em first slot plus 1.2em per nested level");
-            check(decorations[0].box.barCount == 1 && decorations[1].box.barCount == 2 &&
-                      decorations[2].box.barCount == 3,
+            check(decorations[0].rare().box.barCount == 1 && decorations[1].rare().box.barCount == 2 &&
+                      decorations[2].rare().box.barCount == 3,
                   "quote bar count should match the corresponding content indent depth");
         }
 
@@ -2277,7 +2277,7 @@ void testQuoteIndentAndTaskGlyphHitGeometry() {
         check(visualRows.size() > 1, "long task should wrap to multiple visual rows in the fixed viewport");
         if (visualRows.size() > 1) {
             const auto& first = layout.lineList()[static_cast<std::size_t>(visualRows.front())];
-            const double glyphX = inset + first.contentIndent + first.glyph.advance * 0.5f;
+            const double glyphX = inset + first.contentIndent + first.presentation().glyph.advance * 0.5f;
             const auto rowY = [&](int visualIndex) {
                 return layout.geometryTable().top(visualIndex) +
                        layout.geometryTable().height(visualIndex) * 0.5f;
@@ -2349,24 +2349,24 @@ void testCompletedTaskInlineRunBoundaries() {
     for (const auto [name, run] : std::vector<std::pair<const char*, const components::input_detail::LineRun*>>{
              {"lead", lead}, {"bold", bold}, {"middle", middle}, {"code", code},
              {"link", link}, {"wiki", wiki}, {"tail", tail}}) {
-        check(run->style.strike,
+        check(run->style.get().strike,
               std::string("completed task strike-through should cover ") + name);
     }
-    check(bold->style.weight == 700,
+    check(bold->style.get().weight == 700,
           "completed task merge should preserve the strong style on bold text");
-    check(code->style.fontFamily == style.codeFontFamily &&
-              sameColor(code->style.background, style.codeBackground),
+    check(code->style.get().fontFamily == style.codeFontFamily &&
+              sameColor(code->style.get().background, style.codeBackground),
           "completed task inline code should retain its local code font and background");
-    check(lead->style.background.a == 0.0f && middle->style.background.a == 0.0f &&
-              link->style.background.a == 0.0f && wiki->style.background.a == 0.0f &&
-              tail->style.background.a == 0.0f,
+    check(lead->style.get().background.a == 0.0f && middle->style.get().background.a == 0.0f &&
+              link->style.get().background.a == 0.0f && wiki->style.get().background.a == 0.0f &&
+              tail->style.get().background.a == 0.0f,
           "completed task code background must not spread beyond the inline-code range");
-    check(link->style.link && link->style.underline,
+    check(link->style.get().link && link->style.get().underline,
           "completed task Markdown links should retain link styling and underline");
-    check(wiki->style.link && wiki->style.underline,
+    check(wiki->style.get().link && wiki->style.get().underline,
           "completed task WikiLinks should retain link styling and underline");
-    check(!lead->style.underline && !bold->style.underline && !middle->style.underline &&
-              !tail->style.underline,
+    check(!lead->style.get().underline && !bold->style.get().underline && !middle->style.get().underline &&
+              !tail->style.get().underline,
           "link underline should not spread to neighboring completed-task text");
 }
 
@@ -2480,23 +2480,23 @@ void testHeadingHierarchyAndInlineSpanBoundaries() {
     const auto* tailRun = runAt(tailAt);
     const auto* outerRun = runAt(outerAt);
     const auto* suffixRun = runAt(suffixAt);
-    check(prefixRun != nullptr && prefixRun->style.weight == 700 && !prefixRun->style.underline &&
-              prefixRun->style.background.a == 0.0f,
+    check(prefixRun != nullptr && prefixRun->style.get().weight == 700 && !prefixRun->style.get().underline &&
+              prefixRun->style.get().background.a == 0.0f,
           "heading bold should cover its prefix without leaking underline or code background");
-    check(underlineRun != nullptr && underlineRun->style.weight == 700 &&
-              underlineRun->style.underline && underlineRun->style.background.a == 0.0f,
+    check(underlineRun != nullptr && underlineRun->style.get().weight == 700 &&
+              underlineRun->style.get().underline && underlineRun->style.get().background.a == 0.0f,
           "underline should apply only to its own text while inheriting heading bold");
-    check(innerRun != nullptr && innerRun->style.weight == 700 && innerRun->style.underline &&
-              innerRun->style.fontFamily == style.codeFontFamily &&
-              sameColor(innerRun->style.background, style.codeBackground),
+    check(innerRun != nullptr && innerRun->style.get().weight == 700 && innerRun->style.get().underline &&
+              innerRun->style.get().fontFamily == style.codeFontFamily &&
+              sameColor(innerRun->style.get().background, style.codeBackground),
           "nested inline code should inherit underline and heading bold while keeping local code styling");
-    check(tailRun != nullptr && tailRun->style.underline && tailRun->style.background.a == 0.0f,
+    check(tailRun != nullptr && tailRun->style.get().underline && tailRun->style.get().background.a == 0.0f,
           "underline should continue after nested code without inheriting its background");
-    check(outerRun != nullptr && outerRun->style.weight == 700 && !outerRun->style.underline &&
-              outerRun->style.fontFamily == style.codeFontFamily &&
-              sameColor(outerRun->style.background, style.codeBackground),
+    check(outerRun != nullptr && outerRun->style.get().weight == 700 && !outerRun->style.get().underline &&
+              outerRun->style.get().fontFamily == style.codeFontFamily &&
+              sameColor(outerRun->style.get().background, style.codeBackground),
           "adjacent code should keep code styling without inheriting the preceding underline");
-    check(suffixRun != nullptr && !suffixRun->style.underline && suffixRun->style.background.a == 0.0f,
+    check(suffixRun != nullptr && !suffixRun->style.get().underline && suffixRun->style.get().background.a == 0.0f,
           "styles should stop at the end of the adjacent code span");
     const std::string projected = components::input_detail::projectText(
         doc, heading.srcBeg, heading.srcEnd, decoration.holes);
@@ -2535,19 +2535,19 @@ void testHeadingHierarchyAndInlineSpanBoundaries() {
     for (const IncLine& visual : state.cachedLines) {
         bool lineHasUnderline = false;
         bool lineHasNestedCode = false;
-        for (const auto& run : visual.runs) {
+        for (const auto& run : visual.presentation().runs) {
             const bool overlapsUnderline = run.beg < wrappedUnderline->content.end &&
                                            wrappedUnderline->content.beg < run.end;
             const bool overlapsCode = run.beg < wrappedCode->content.end &&
                                       wrappedCode->content.beg < run.end;
             if (overlapsUnderline) {
                 lineHasUnderline = true;
-                check(run.style.underline,
+                check(run.style.get().underline,
                       "every measured visible run within the underline must retain underline styling");
             }
             if (overlapsCode) {
                 lineHasNestedCode = true;
-                check(run.style.underline && run.style.fontFamily == style.codeFontFamily,
+                check(run.style.get().underline && run.style.get().fontFamily == style.codeFontFamily,
                       "wrapped nested-code runs must retain both inherited underline and code font");
             }
         }
@@ -2775,14 +2775,14 @@ void testPagedSnapshotStorage() {
     std::vector<IncDeco> source(1025);
     for (std::size_t i = 0; i < source.size(); ++i) {
         source[i].holes = {{static_cast<int>(i * 10), static_cast<int>(i * 10 + 2)}};
-        source[i].imageFailText = "中文/emoji 😀 page " + std::to_string(i);
+        source[i].editRare().imageFailText = "中文/emoji 😀 page " + std::to_string(i);
     }
     auto first = std::make_shared<const Table>(source);
     const std::vector<int> rows{0, 63, 64, 128, 1024};
     std::vector<IncDeco> patches;
     auto expected = source;
     for (int row : rows) {
-        expected[row].imageFailText += " changed";
+        expected[row].editRare().imageFailText += " changed";
         expected[row].holes.clear();
         patches.push_back(expected[row]);
     }
@@ -2816,7 +2816,7 @@ void testPagedSnapshotStorage() {
     for (int i = 0; i < 200; ++i) {
         oldGenerations.push_back(next);
         auto candidate = (*next)[63];
-        candidate.imageFailText = std::to_string(i);
+        candidate.editRare().imageFailText = std::to_string(i);
         expected[63] = candidate;
         next = next->replacing({63}, {std::move(candidate)});
     }
@@ -3413,8 +3413,8 @@ int main() {
         for (std::size_t i = 0; i < diagTable.size(); ++i) {
             std::printf("dec %zu lh=%.2f holes=%zu gridA=%.2f thick=%d\n", i,
                         static_cast<double>(diagTable[i].lineHeight), diagTable[i].holes.size(),
-                        static_cast<double>(diagTable[i].box.gridColor.a),
-                        static_cast<int>(diagTable[i].box.horizontalRuleThickness));
+                        static_cast<double>(diagTable[i].rare().box.gridColor.a),
+                        static_cast<int>(diagTable[i].rare().box.horizontalRuleThickness));
         }
     }
     using components::input_detail::LineDecoration;
@@ -3528,8 +3528,8 @@ int main() {
         std::printf("正文行的样式段 %zu 个：\n", runs.size());
         for (const LineRun& run : runs) {
             std::printf("  [%d,%d) weight=%d mono=%s color=%s strike=%s text=\"%s\"\n", run.beg, run.end,
-                        run.style.weight, run.style.fontFamily.empty() ? "-" : run.style.fontFamily.c_str(),
-                        run.style.color.a > 0.0f ? "有" : "-", run.style.strike ? "有" : "-",
+                        run.style.get().weight, run.style.get().fontFamily.empty() ? "-" : run.style.get().fontFamily.c_str(),
+                        run.style.get().color.a > 0.0f ? "有" : "-", run.style.get().strike ? "有" : "-",
                         escape(slice(kDoc, run.beg, run.end)).c_str());
         }
         bool hasStrong = false;
@@ -3538,16 +3538,16 @@ int main() {
         bool hasStrike = false;
         for (const LineRun& run : runs) {
             const std::string text = slice(kDoc, run.beg, run.end);
-            if (text == "粗体" && run.style.weight >= 700) {
+            if (text == "粗体" && run.style.get().weight >= 700) {
                 hasStrong = true;
             }
-            if (text == "代码" && !run.style.fontFamily.empty() && run.style.background.a > 0.0f) {
+            if (text == "代码" && !run.style.get().fontFamily.empty() && run.style.get().background.a > 0.0f) {
                 hasCode = true;
             }
-            if (text == "链接" && run.style.color.a > 0.0f) {
+            if (text == "链接" && run.style.get().color.a > 0.0f) {
                 hasLink = true;
             }
-            if (text == "删除" && run.style.strike) {
+            if (text == "删除" && run.style.get().strike) {
                 hasStrike = true;
             }
         }
@@ -3575,7 +3575,7 @@ int main() {
         check(!table[headingLine].runs.empty(), "标题行应当有样式段");
         if (!table[headingLine].runs.empty()) {
             const LineRun& run = table[headingLine].runs.front();
-            check(run.style.weight >= 700, "标题内容段应当是粗体");
+            check(run.style.get().weight >= 700, "标题内容段应当是粗体");
             check(run.beg >= plan.lines[headingLine].srcBeg + 2, "标题段应当从容器标记之后开始");
             check(slice(kDoc, run.beg, run.end) == "Head 标题",
                   "标题段内容应是不含 `# ` 的正文（实际=\"" + escape(slice(kDoc, run.beg, run.end)) + "\"）");
@@ -3643,26 +3643,26 @@ int main() {
             const LineDecoration& decoration = boxTable[i];
             if (sourceLine.quoteDepth > 0) {
                 ++quoteLines;
-                if (!(decoration.box.barColor.a > 0.0f && decoration.box.barWidth > 0.0f)) {
+                if (!(decoration.rare().box.barColor.a > 0.0f && decoration.rare().box.barWidth > 0.0f)) {
                     ++quoteMissingBar;
                 }
-            } else if (decoration.box.barColor.a > 0.0f) {
+            } else if (decoration.rare().box.barColor.a > 0.0f) {
                 ++barOutsideQuote;
             }
             if (sourceLine.kind == neo::LpKind::Code) {
                 ++codeLines;
-                if (decoration.box.background.a <= 0.0f) {
+                if (decoration.rare().box.background.a <= 0.0f) {
                     ++codeMissingBackground;
-                } else if (decoration.box.backgroundRadius > 0.0f) {
+                } else if (decoration.rare().box.backgroundRadius > 0.0f) {
                     ++radiusLines;
                 }
-                if (decoration.box.backgroundBlockFirst) {
+                if (decoration.rare().box.backgroundBlockFirst) {
                     ++blockFirstCount;
                 }
-                if (decoration.box.backgroundBlockLast) {
+                if (decoration.rare().box.backgroundBlockLast) {
                     ++blockLastCount;
                 }
-            } else if (decoration.box.background.a > 0.0f) {
+            } else if (decoration.rare().box.background.a > 0.0f) {
                 ++backgroundOutsideCode;
             }
         }
@@ -3698,13 +3698,13 @@ int main() {
         neo::lp::buildDecorations(langPlan, style, 0, langTable);
         check(langTable.size() >= 11, "语言标签样例：行数应为 11，实际 " + std::to_string(langTable.size()));
         if (langTable.size() >= 11) {
-            check(langTable[0].languageLabel == "JavaScript",
-                  "```js 的起始围栏应标成 JavaScript，实际 [" + langTable[0].languageLabel + "]");
-            check(langTable[1].languageLabel.empty(), "代码块内容行不应带语言标签");
-            check(langTable[2].languageLabel.empty(), "结束围栏行不应带语言标签");
-            check(langTable[4].languageLabel == "zig",
-                  "未收录的语言按 info 串原样显示，实际 [" + langTable[4].languageLabel + "]");
-            check(langTable[8].languageLabel.empty(), "没有 info 串的围栏不画标签");
+            check(langTable[0].rare().languageLabel == "JavaScript",
+                  "```js 的起始围栏应标成 JavaScript，实际 [" + langTable[0].rare().languageLabel + "]");
+            check(langTable[1].rare().languageLabel.empty(), "代码块内容行不应带语言标签");
+            check(langTable[2].rare().languageLabel.empty(), "结束围栏行不应带语言标签");
+            check(langTable[4].rare().languageLabel == "zig",
+                  "未收录的语言按 info 串原样显示，实际 [" + langTable[4].rare().languageLabel + "]");
+            check(langTable[8].rare().languageLabel.empty(), "没有 info 串的围栏不画标签");
         }
         // 别名表本身（含大小写与未知回退）。
         check(neo::lp::codeLanguageLabel("JS") == "JavaScript", "info 串大小写不敏感");
@@ -3741,13 +3741,13 @@ int main() {
             if (!sameColor(decoration.textColor, style.muted)) {
                 ++wrongMutedColor;
             }
-            if (decoration.box.background.a <= 0.0f || decoration.box.backgroundRadius <= 0.0f) {
+            if (decoration.rare().box.background.a <= 0.0f || decoration.rare().box.backgroundRadius <= 0.0f) {
                 ++missingBackground;
             }
-            if (decoration.box.backgroundBlockFirst != first) {
+            if (decoration.rare().box.backgroundBlockFirst != first) {
                 ++wrongFirstMark;
             }
-            if (decoration.box.backgroundBlockLast != last) {
+            if (decoration.rare().box.backgroundBlockLast != last) {
                 ++wrongLastMark;
             }
         }
@@ -3761,7 +3761,7 @@ int main() {
         int backgroundOutside = 0;
         for (std::size_t i = 0; i < prefixPlan.lines.size() && i < prefixTable.size(); ++i) {
             if (prefixPlan.lines[i].kind != neo::LpKind::Frontmatter &&
-                prefixTable[i].box.background.a > 0.0f) {
+                prefixTable[i].rare().box.background.a > 0.0f) {
                 ++backgroundOutside;
             }
         }
@@ -3898,7 +3898,7 @@ int main() {
             neo::lp::buildDecorations(italicPlan, style, 0, table, "C:/Windows/Fonts/times.ttf");
             bool hasItalicRun = false;
             for (const LineRun& run : table[0].runs) {
-                if (slice(kItalicDoc, run.beg, run.end) == "斜体" && run.style.fontFamily == timesItalic) {
+                if (slice(kItalicDoc, run.beg, run.end) == "斜体" && run.style.get().fontFamily == timesItalic) {
                     hasItalicRun = true;
                 }
             }
@@ -3906,8 +3906,8 @@ int main() {
 
             bool mergedBoldItalic = false;
             for (const LineRun& run : table[2].runs) {
-                if (slice(kItalicDoc, run.beg, run.end) == "粗斜" && run.style.weight >= 700 &&
-                    run.style.fontFamily == timesItalic) {
+                if (slice(kItalicDoc, run.beg, run.end) == "粗斜" && run.style.get().weight >= 700 &&
+                    run.style.get().fontFamily == timesItalic) {
                     mergedBoldItalic = true;
                 }
             }
@@ -3923,8 +3923,8 @@ int main() {
             check(table[0].runs.empty(), "字体没有斜体字面时，斜体段落不应产出任何样式段");
             bool boldWithoutItalic = false;
             for (const LineRun& run : table[2].runs) {
-                if (slice(kItalicDoc, run.beg, run.end) == "粗斜" && run.style.weight >= 700 &&
-                    run.style.fontFamily.empty()) {
+                if (slice(kItalicDoc, run.beg, run.end) == "粗斜" && run.style.get().weight >= 700 &&
+                    run.style.get().fontFamily.empty()) {
                     boldWithoutItalic = true;
                 }
             }
@@ -4082,12 +4082,12 @@ int main() {
             check(table.size() == plan.lines.size(), "图片样例：装饰表行数与计划一致");
             if (table.size() >= 9) {
                 const LineDecoration& picLine = table[0];
-                check(!picLine.imagePath.empty(), "本地可解析的纯图行应有图片槽");
-                check(fs::exists(picLine.imagePath) &&
-                          fs::equivalent(fs::path(picLine.imagePath), tempDir / "pic.png"),
-                      "图片槽路径应解析到文档目录下的 pic.png，实际 " + picLine.imagePath);
-                check(std::fabs(picLine.imageWidth - 240.0f) < 0.01f &&
-                          std::fabs(picLine.imageHeight - 135.0f) < 0.01f,
+                check(!picLine.rare().imagePath.empty(), "本地可解析的纯图行应有图片槽");
+                check(fs::exists(picLine.rare().imagePath) &&
+                          fs::equivalent(fs::path(picLine.rare().imagePath), tempDir / "pic.png"),
+                      "图片槽路径应解析到文档目录下的 pic.png，实际 " + picLine.rare().imagePath);
+                check(std::fabs(picLine.rare().imageWidth - 240.0f) < 0.01f &&
+                          std::fabs(picLine.rare().imageHeight - 135.0f) < 0.01f,
                       "小图不放大，宽高应保持 240x135");
                 check(std::fabs(picLine.lineHeight - (135.0f + neo::lp::kImageVPad)) < 0.01f,
                       "图片行高应为图高+留白");
@@ -4101,15 +4101,15 @@ int main() {
 
                 // 失败态占位盒（S3f 批次 F）：路径缺失与头解析失败同规格 224×176。
                 const LineDecoration& missLine = table[2];
-                check(missLine.imagePath.empty() && missLine.imageFailed,
+                check(missLine.rare().imagePath.empty() && missLine.rare().imageFailed,
                       "缺图的纯图行应换成失败态占位盒（无图片槽）");
-                check(std::fabs(missLine.imageWidth - neo::lp::kImageFailWidth) < 0.01f &&
-                          std::fabs(missLine.imageHeight - neo::lp::kImageFailHeight) < 0.01f,
+                check(std::fabs(missLine.rare().imageWidth - neo::lp::kImageFailWidth) < 0.01f &&
+                          std::fabs(missLine.rare().imageHeight - neo::lp::kImageFailHeight) < 0.01f,
                       "占位盒应为 ZCode md 规格 224x176");
                 check(std::fabs(missLine.lineHeight -
                                 (neo::lp::kImageFailHeight + neo::lp::kImageVPad)) < 0.01f,
                       "占位盒行高应为盒高+留白");
-                check(missLine.imageFailText == "nope.png", "占位盒应显示缺失的路径");
+                check(missLine.rare().imageFailText == "nope.png", "占位盒应显示缺失的路径");
                 bool missHoleCovers = false;
                 for (const LineHole& hole : missLine.holes) {
                     if (hole.beg <= plan.lines[2].srcBeg && hole.end >= plan.lines[2].srcEnd) {
@@ -4118,20 +4118,20 @@ int main() {
                 }
                 check(missHoleCovers, "占位盒行的源文应整体藏进洞里");
                 const LineDecoration& brokenLine = table[4];
-                check(brokenLine.imagePath.empty() && brokenLine.imageFailed &&
-                          brokenLine.imageFailText == "broken.png",
+                check(brokenLine.rare().imagePath.empty() && brokenLine.rare().imageFailed &&
+                          brokenLine.rare().imageFailText == "broken.png",
                       "头解析失败的本地文件也应有占位盒");
 
-                check(table[6].imagePath.empty() && !table[6].imageFailed &&
+                check(table[6].rare().imagePath.empty() && !table[6].rare().imageFailed &&
                           std::fabs(table[6].lineHeight - style.bodyLineHeight) < 0.01f,
                       "远程图片 v1 维持文本占位（无占位盒、行高不变）");
 
-                check(!table[8].imagePath.empty(), "超大图仍应生成图片槽");
-                check(std::fabs(table[8].imageWidth - neo::lp::kImageMaxWidth) < 0.01f,
-                      "超宽图应夹到 448，实际 " + std::to_string(table[8].imageWidth));
-                check(std::fabs(table[8].imageHeight - 224.0f) < 0.01f,
+                check(!table[8].rare().imagePath.empty(), "超大图仍应生成图片槽");
+                check(std::fabs(table[8].rare().imageWidth - neo::lp::kImageMaxWidth) < 0.01f,
+                      "超宽图应夹到 448，实际 " + std::to_string(table[8].rare().imageWidth));
+                check(std::fabs(table[8].rare().imageHeight - 224.0f) < 0.01f,
                       "10000x5000 等比缩放后应为 448x224，实际 " +
-                          std::to_string(table[8].imageHeight));
+                          std::to_string(table[8].rare().imageHeight));
             }
 
             // 长路径截断：保留尾部、按 UTF-8 边界、以省略号开头。
@@ -4144,10 +4144,10 @@ int main() {
                 // 图片行成了活动块、占位盒被抑制 —— 那是另一条已验证的路径。
                 neo::lp::buildDecorations(longPlan, style, static_cast<int>(kLongDoc.size()),
                                           longTable, "", dir);
-                check(!longTable.empty() && longTable[0].imageFailed,
+                check(!longTable.empty() && longTable[0].rare().imageFailed,
                       "长路径缺图也应有占位盒");
-                if (!longTable.empty() && longTable[0].imageFailed) {
-                    const std::string& shown = longTable[0].imageFailText;
+                if (!longTable.empty() && longTable[0].rare().imageFailed) {
+                    const std::string& shown = longTable[0].rare().imageFailText;
                     check(shown.size() < longName.size(), "长路径应被截断");
                     check(shown.rfind("最终图片.png") == shown.size() - std::strlen("最终图片.png"),
                           "截断应保留文件名尾部，实际 " + shown);
@@ -4161,7 +4161,7 @@ int main() {
             check(activeTable.size() == 1 || !activeTable.empty(),
                   "活动块样例应产出装饰表");
             if (!activeTable.empty()) {
-                check(activeTable[0].imagePath.empty() && !activeTable[0].imageFailed,
+                check(activeTable[0].rare().imagePath.empty() && !activeTable[0].rare().imageFailed,
                       "光标进入图片块后应回到源码（图片槽与占位盒清空）");
             }
             (void) tailLine;
@@ -4256,9 +4256,9 @@ int main() {
                   "预览行应可见但保留 hiddenByFold（光标落上去自愈展开）");
             check(table[2].textColor.a > 0.0f && table[2].textColor.r == style.muted.r,
                   "预览行文字应弱化");
-            check(table[2].box.barColor.a > 0.0f && std::fabs(table[2].box.barWidth - 2.0f) < 0.01f,
+            check(table[2].rare().box.barColor.a > 0.0f && std::fabs(table[2].rare().box.barWidth - 2.0f) < 0.01f,
                   "预览行应带 2px 左条");
-            check(table[1].hidden && table[1].box.barColor.a == 0.0f,
+            check(table[1].hidden && table[1].rare().box.barColor.a == 0.0f,
                   "预览行之前的空行应照常隐藏且不带左条");
         }
 
@@ -4390,14 +4390,14 @@ int main() {
         check(std::fabs(table[1].lineHeight - neo::lp::kTableSeparatorHeight) < 0.01f,
               "分隔行应压成 " + std::to_string(neo::lp::kTableSeparatorHeight) + "px 横条，实际 " +
               std::to_string(table[1].lineHeight));
-        check(table[1].box.background.a > 0.0f, "分隔行应画成一条边框色横条");
-        check(table[1].box.gridColor.a > 0.0f, "分隔行也要带网格色（竖线要穿过去）");
+        check(table[1].rare().box.background.a > 0.0f, "分隔行应画成一条边框色横条");
+        check(table[1].rare().box.gridColor.a > 0.0f, "分隔行也要带网格色（竖线要穿过去）");
 
         // ③ 表格行**没有底色**（R3 对齐 Obsidian：纯 1px 网格 + 表头透明），
         //    行盒 = 正文 1.3 行高 + 单元格上下内边距，文字用 textShiftY 跟着下移。
-        check(table[0].box.background.a <= 0.0f, "表头行不应有底色（Obsidian 表头 transparent）");
-        check(table[2].box.background.a <= 0.0f, "正文行不应有底色");
-        check(table[0].box.gridColor.a > 0.0f, "表格行应带网格色");
+        check(table[0].rare().box.background.a <= 0.0f, "表头行不应有底色（Obsidian 表头 transparent）");
+        check(table[2].rare().box.background.a <= 0.0f, "正文行不应有底色");
+        check(table[0].rare().box.gridColor.a > 0.0f, "表格行应带网格色");
         {
             const float paddingY = style.bodySize * neo::lp::kTableRowPaddingYEm;
             check(std::fabs(table[2].lineHeight - (style.bodySize * 1.3f + paddingY * 2.0f)) < 0.01f,
@@ -4411,7 +4411,7 @@ int main() {
         {
             bool headerWeight = false;
             for (const auto& run : table[0].runs) {
-                if (run.style.weight == 600) {
+                if (run.style.get().weight == 600) {
                     headerWeight = true;
                 }
             }
@@ -4516,9 +4516,9 @@ int main() {
                           "real hidden pipe boundary click must belong to the next cell");
                     const auto& mappedLine = pointerLayout.lineList()[visualRow];
                     const float projectedFirstEndX = components::input_detail::caretXForDocOffset(
-                        mappedLine.metrics, mappedLine.holes, mappedLine.start, first.end);
+                        mappedLine.metrics, mappedLine.presentation().holes, mappedLine.start, first.end);
                     const float projectedSecondBegX = components::input_detail::caretXForDocOffset(
-                        mappedLine.metrics, mappedLine.holes, mappedLine.start, second.beg);
+                        mappedLine.metrics, mappedLine.presentation().holes, mappedLine.start, second.beg);
                     const float mappedFirstEndX = InputModel::caretXInLine(mappedLine, first.end);
                     const float mappedSecondBegX = InputModel::caretXInLine(mappedLine, second.beg);
                     check(std::fabs(projectedFirstEndX - projectedSecondBegX) < 0.01f,
@@ -4574,12 +4574,12 @@ int main() {
                 const auto& cells = pointerDecorations[static_cast<std::size_t>(sourceRow)].cells;
                 const auto* columns = pointerLayout.tableColumnsFor(
                     pointerDecorations[static_cast<std::size_t>(sourceRow)].tableId);
-                const auto run = std::find_if(line.runs.begin(), line.runs.end(),
+                const auto run = std::find_if(line.presentation().runs.begin(), line.presentation().runs.end(),
                     [bPos](const components::input_detail::TextRun& candidate) {
                         return candidate.beg <= static_cast<int>(bPos) &&
                                static_cast<int>(bPos) < candidate.end;
                     });
-                if (columns == nullptr || columns->count() != 4 || run == line.runs.end()) {
+                if (columns == nullptr || columns->count() != 4 || run == line.presentation().runs.end()) {
                     check(false, "aligned four-column repro should retain table geometry and b run");
                 } else {
                     const auto& second = cells[1];
@@ -4666,13 +4666,13 @@ int main() {
         bool hasOperator = false;
         for (const LineRun& run : table[static_cast<std::size_t>(codeLine)].runs) {
             const std::string word = slice(kDoc, run.beg, run.end);
-            if (word == "int" && sameColor(run.style.color, light.tokenKeyword)) {
+            if (word == "int" && sameColor(run.style.get().color, light.tokenKeyword)) {
                 hasKeyword = true;
             }
-            if (word == "1" && sameColor(run.style.color, light.tokenNumber)) {
+            if (word == "1" && sameColor(run.style.get().color, light.tokenNumber)) {
                 hasNumber = true;
             }
-            if (word == "=" && sameColor(run.style.color, light.tokenOperator)) {
+            if (word == "=" && sameColor(run.style.get().color, light.tokenOperator)) {
                 hasOperator = true;
             }
         }
@@ -4742,7 +4742,7 @@ int main() {
         check(gridTable[0].tableId >= 0 && gridTable[0].tableId == gridTable[2].tableId,
               "表头与数据行应共享同一个 tableId");
         check(gridTable[1].tableSeparator, "分隔行应带 tableSeparator 标记");
-        check(gridTable[0].box.gridColor.a > 0.0f, "表格行应带网格线颜色");
+        check(gridTable[0].rare().box.gridColor.a > 0.0f, "表格行应带网格线颜色");
     }
 
     // ── 右键菜单的文本命令（2026-09-25）────────────────────────────────
@@ -5486,7 +5486,7 @@ int main() {
         auto hasAccentRun = [&](const std::vector<LineDecoration>& table, const neo::LpLine& line, int beg,
                                 int end) {
             for (const LineRun& run : table[static_cast<std::size_t>(line.number)].runs) {
-                if (run.beg <= beg && run.end >= end && run.style.color.a > 0.0f) {
+                if (run.beg <= beg && run.end >= end && run.style.get().color.a > 0.0f) {
                     return true;
                 }
             }

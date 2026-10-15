@@ -106,7 +106,7 @@ std::vector<Decoration> makeDecorations(int lineCount) {
         Decoration& heading = decorations[static_cast<std::size_t>(i)];
         heading.fontSize = 18.0f;
         heading.lineHeight = 27.0f;
-        heading.box.background = core::Color{0.12f, 0.18f, 0.30f, 0.35f};
+        heading.editRare().box.background = core::Color{0.12f, 0.18f, 0.30f, 0.35f};
     }
     return decorations;
 }
@@ -119,7 +119,7 @@ std::uintptr_t caretToken(const Model::InputState& state, std::size_t line) {
     if (line >= state.cachedLines.size()) {
         return 0;
     }
-    return reinterpret_cast<std::uintptr_t>(state.cachedLines[line].metrics.caretX.data());
+    return reinterpret_cast<std::uintptr_t>(state.cachedLines[line].metrics.caretX().data());
 }
 
 struct Measurement {
@@ -349,7 +349,7 @@ int main() {
                 const std::size_t stop = stops[nextStop];
                 nextStop = (nextStop + 1) % stops.size();
                 decorations[stop] = baseDecorations[stop];
-                decorations[stop].box.background = highlight;  // 点亮下一处
+                decorations[stop].editRare().box.background = highlight;  // 点亮下一处
                 litStop = stop;
 
                 Model::ensureLayoutCache(state, kFontFamily, kFontSize, kWidth, true,

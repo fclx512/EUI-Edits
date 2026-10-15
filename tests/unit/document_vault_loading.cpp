@@ -14,13 +14,16 @@
 #include "ui/tab_bar.h"
 #include "ui/vault_view.h"
 #include "core/platform/async.h"
+#include "components/input_model.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <set>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -48,6 +51,9 @@ std::string lastRecoveryOrigin;
 std::string sessionConfigDirectory;
 neo::settings::RecoverySnapshot recoverySnapshot;
 neo::dialogs::PickResult nextSavePick{false, true, {}, {}};
+// 选择目录对话框的替身返回值：默认取消，测试按需改写。
+neo::dialogs::PickResult nextDirectoryPick{false, true, {}, {}};
+int directoryPickCalls = 0;
 void check(bool condition, const char* message) {
     if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
 }
@@ -99,8 +105,9 @@ DeleteResult deleteVaultEntry(const std::string&, const std::string&, bool) {
 
 namespace neo::dialogs {
 
-PickResult pickDirectory(const std::string& initialDirectory) {
-    return {false, true, {}, {}};
+PickResult pickDirectory(const std::string&) {
+    ++directoryPickCalls;
+    return nextDirectoryPick;
 }
 PickResult pickSavePath(const std::string&, const std::string&, const std::vector<std::string>&) {
     return nextSavePick;
@@ -169,44 +176,510 @@ bool pumpUntil(const std::function<bool()>& done) {
     }
     return true;
 }
+// A controllable scan double. Worker calls hold until released, so a test can
+// assert the UI never blocked on the scan; caller-thread calls are counted and
+// must stay zero -- that is the negative control against the old synchronous
+// refreshVault path (which scanned on the caller thread and published at once).
 struct Scanner {
     std::thread::id mainThread = std::this_thread::get_id();
     std::atomic<int> mainCalls{0}, workerCalls{0};
     std::mutex mutex;
     std::condition_variable cv;
-    bool released = false;
+    // Configured on the main thread before the scan is requested (that ordering
+    // is what makes the plain reads below race-free on the worker).
     bool fail = false;
     bool addLater = false;
-    neo::vault::ScanResult operator()(const std::string&) {
+    // Encode the scanned root's own name in a leading row so a completion that
+    // belongs to a different root can be told apart from the active root's rows.
+    bool tagByRootName = false;
+    bool releasesAll = false;                 // release(): every worker may run
+    std::set<std::string> releasedRoots;      // releaseRoot(): one root may run
+    std::vector<std::string> scannedRoots;    // worker-visible roots, in order
+
+    neo::vault::ScanResult operator()(const std::string& root) {
         if (std::this_thread::get_id() == mainThread) {
             ++mainCalls;
             // A finite negative-control delay: the old path must fail assertions,
             // never deadlock waiting for a release on its own caller thread.
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        } else {
-            ++workerCalls;
-            std::unique_lock<std::mutex> lock(mutex);
-            cv.wait(lock, [&] { return released; });
+            return build(root, fail);
         }
+        ++workerCalls;
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            scannedRoots.push_back(root);
+            cv.notify_all();
+            cv.wait(lock, [&] { return releasesAll || releasedRoots.count(root) != 0; });
+        }
+        return build(root, fail);
+    }
+    neo::vault::ScanResult build(const std::string& root, bool failed) const {
         neo::vault::ScanResult result;
-        result.ok = !fail;
-        if (fail) { result.error = "test root unreadable"; return result; }
+        result.ok = !failed;
+        if (failed) { result.error = "test root unreadable"; return result; }
         result.fileCount = 4; result.directoryCount = 1;
         result.roots = {{u8"子目录", u8"子目录", true,
                          {{u8"当前.md", u8"子目录/当前.md", false, {}}}},
                         {".hidden", ".hidden", false, {}}, {"noext", "noext", false, {}},
                         {u8"当前.md", u8"当前.md", false, {}}};
         if (addLater) { result.roots.push_back({"later.md", "later.md", false, {}}); ++result.fileCount; }
+        if (tagByRootName) {
+            const std::string marker = neo::textfile::fileName(root);
+            result.roots.insert(result.roots.begin(), neo::vault::Entry{marker, marker, false, {}});
+            ++result.fileCount;
+        }
         return result;
     }
     void release() {
         std::lock_guard<std::mutex> lock(mutex);
-        released = true; cv.notify_all();
+        releasesAll = true; cv.notify_all();
+    }
+    void releaseRoot(const std::string& root) {
+        std::lock_guard<std::mutex> lock(mutex);
+        releasedRoots.insert(root); cv.notify_all();
+    }
+    bool waitForRoot(const std::string& root) {
+        std::unique_lock<std::mutex> lock(mutex);
+        return cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return std::find(scannedRoots.begin(), scannedRoots.end(), root) != scannedRoots.end();
+        });
     }
 };
 void drain(Scanner& scanner, const std::string& root) {
     scanner.release();
     check(pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }), "scan drains before scanner destruction");
+}
+
+// ── chooseVaultDirectory / navigateToVaultPath 的异步换根场景 ──────────────────
+// 这两个入口改用 prepareVault：换根本身不扫，返回时是 loading 态（rows 空），
+// 后台只排一次扫描，完成回调在主线程 pump 时发布。共享同一套场景避免重复。
+using VaultStart = void (*)(neo::AppState&, const std::string&);
+
+void startChooseVault(neo::AppState& state, const std::string& root) {
+    nextDirectoryPick = {true, false, root, {}};
+    neo::chooseVaultDirectory(state);
+}
+
+void startNavigateVault(neo::AppState& state, const std::string& root) {
+    neo::navigateToVaultPath(state, root);
+}
+
+void startParentVaultForEdit(neo::AppState& state, const std::string& root) {
+    const auto child = neo::textfile::pathFromUtf8(root) / "navigation-child";
+    fs::create_directories(child);
+    state.vaultRoot = neo::textfile::pathToUtf8(child);
+    neo::navigateToVaultParent(state);
+}
+
+std::shared_ptr<const neo::vault::ScanResult> warmRootWithFiles(const std::string& root,
+                                                                const std::vector<std::string>& files);
+
+void editAndSaveDuringScan(VaultStart start, const fs::path& rootDir, bool warm, bool fail) {
+    neo::vaultcache::resetForTest();
+    const std::string root = neo::textfile::pathToUtf8(rootDir);
+    const auto path = rootDir / u8"编辑保存🙂.md";
+    const std::string original = u8"正文中🙂\n";
+    put(path, original);
+    neo::AppState state;
+    check(neo::loadDocument(state, neo::textfile::pathToUtf8(path)), "load editable fixture before gated scan");
+    check(pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }), "initial real scan drains");
+    neo::vaultcache::resetForTest();
+    if (warm) warmRootWithFiles(root, {u8"编辑保存🙂.md"});
+    Scanner scanner; scanner.fail = fail;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    start(state, root);
+    const bool reached = scanner.waitForRoot(root);
+    check(reached && scanner.mainCalls == 0, "edit/save scan is gated on worker only");
+    if (!reached) { drain(scanner, root); return; }
+
+    // Exercise the actual UTF-8 input edit/undo model, then the editor callback's
+    // document/revision settlement. No native input event or display is claimed.
+    using Model = components::input_detail::InputModel;
+    Model::InputState input;
+    Model::loadDocument(input, state.doc.text);
+    input.cursor = static_cast<int>(input.text.size());
+    input.selectionStart = input.selectionEnd = input.cursor;
+    Model::insertAtCursor(input, u8"扫描中编辑🙂\n");
+    const std::string edited = input.text;
+    check(Model::undoEdit(input) && input.text == original, "undo remains exact while scan is held");
+    check(Model::redoEdit(input) && input.text == edited, "redo remains exact while scan is held");
+    state.doc.text = input.text; ++state.revision;
+    check(state.dirty() && neo::vaultcache::query(root).scanning, "document is dirty before scan completes");
+    check(neo::saveDocument(state), "real saveDocument succeeds while scan is held");
+    check(get(path) == edited && !state.dirty() && state.savedRevision == state.revision,
+          "on-disk UTF-8 save receipt matches edited bytes and saved revision");
+    check(scanner.mainCalls == 0 && neo::vaultcache::query(root).scanning,
+          "same-root save does not force a caller-thread scan");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }), "edit/save scan drains");
+    state.toastVisible = false; neo::tickVaultScan(state);
+    check(state.vaultScan && state.vaultScan->ok == !fail && state.doc.text == edited && !state.dirty(),
+          "success or scan failure preserves saved text and clean revision");
+    if (fail) check(state.toastVisible && state.rows.empty(), "scan failure ends loading with an error notice");
+
+    Model::insertAtCursor(input, "unsaved\n");
+    state.doc.text = input.text; ++state.revision;
+    put(path, "external rewrite\n");
+    check(!neo::saveDocument(state) && state.dirty() && get(path) == "external rewrite\n",
+          "external rewrite conflict rejects save without losing edits or overwriting disk");
+    neo::vaultcache::invalidate(root);
+    std::cout << "PASS scenario: edit-save-gated warm=" << warm << " fail=" << fail << '\n';
+}
+
+fs::path makeDirectory(const fs::path& parent, const char* name);
+std::shared_ptr<const neo::vault::ScanResult> warmRootWithFiles(const std::string& root,
+                                                                const std::vector<std::string>& files);
+
+void parentVaultActionIsAsync(const fs::path& base) {
+    neo::vaultcache::resetForTest();
+    const fs::path childDir = makeDirectory(base, "parent-child");
+    const std::string child = neo::textfile::pathToUtf8(childDir);
+    const std::string parent = neo::textfile::pathToUtf8(childDir.parent_path());
+    Scanner scanner;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    state.vaultRoot = child;
+    state.vaultAddress = child;
+    state.expanded.insert("stale");
+    neo::navigateToVaultParent(state);
+    check(state.vaultRoot == parent && state.vaultAddress == parent,
+          "parent action switches to the lexical parent root");
+    check(state.expanded.empty() && scanner.mainCalls == 0,
+          "parent action resets projection without scanning on the caller thread");
+    check(!state.vaultScan && state.rows.empty(),
+          "cold parent action enters loading with no stale rows");
+    check(scanner.waitForRoot(parent), "parent action schedules a background scan");
+    check(neo::vaultcache::stats().scanRequests == 1 && scanner.workerCalls == 1,
+          "parent action schedules exactly one background scan");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(parent).scanning; }),
+          "parent scan drains in bounded time");
+    neo::tickVaultScan(state);
+    check(state.vaultScan && state.vaultScan->ok && !state.rows.empty(),
+          "parent action adopts the completed snapshot");
+    neo::vaultcache::invalidate(parent);
+}
+
+void warmParentVaultActionReusesSnapshot(const fs::path& base) {
+    neo::vaultcache::resetForTest();
+    const fs::path childDir = makeDirectory(base, "warm-parent-child");
+    const std::string child = neo::textfile::pathToUtf8(childDir);
+    const std::string parent = neo::textfile::pathToUtf8(childDir.parent_path());
+    const auto warmSnapshot = warmRootWithFiles(parent, {"warm.md"});
+    Scanner scanner;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    state.vaultRoot = child;
+    state.vaultAddress = child;
+    neo::navigateToVaultParent(state);
+    check(state.vaultRoot == parent && state.vaultScan == warmSnapshot && state.rows.size() == 1,
+          "warm parent action reuses the cached snapshot immediately");
+    check(scanner.mainCalls == 0 && scanner.waitForRoot(parent),
+          "warm parent action revalidates in the background");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(parent).scanning; }),
+          "warm parent revalidation drains in bounded time");
+    neo::tickVaultScan(state);
+    check(state.vaultRowsGeneration == 2 && state.vaultScan == neo::vaultcache::query(parent).scan,
+          "warm parent action adopts one newer snapshot");
+    neo::vaultcache::invalidate(parent);
+}
+
+void parentVaultFailuresEndLoading(const fs::path& base) {
+    for (bool warm : {false, true}) {
+        neo::vaultcache::resetForTest();
+        const fs::path childDir = makeDirectory(base, warm ? "parent-fail-warm" : "parent-fail-cold");
+        const std::string parent = neo::textfile::pathToUtf8(base);
+        if (warm) warmRootWithFiles(parent, {"warm.md"});
+        Scanner scanner;
+        scanner.fail = true;
+        neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+        neo::AppState state;
+        state.vaultRoot = neo::textfile::pathToUtf8(childDir);
+        state.doc.text = u8"unsaved 正文🙂\n";
+        ++state.revision;
+        neo::navigateToVaultParent(state);
+        check(scanner.mainCalls == 0 && scanner.waitForRoot(parent),
+              "failed parent scan runs only in the background");
+        check(warm ? bool(state.vaultScan && state.vaultScan->ok) : !state.vaultScan,
+              "failed parent scan initially retains warm rows or cold loading");
+        scanner.release();
+        check(pumpUntil([&] { return !neo::vaultcache::query(parent).scanning; }),
+              "failed parent scan drains in bounded time");
+        neo::tickVaultScan(state);
+        check(state.vaultScan && !state.vaultScan->ok && state.rows.empty() && state.toastVisible,
+              "failed parent scan leaves loading and reports an error");
+        check(state.doc.text == u8"unsaved 正文🙂\n" && state.dirty(),
+              "parent navigation preserves unsaved document bytes");
+    }
+}
+
+void consecutiveParentScansKeepActiveRoot(const fs::path& base) {
+    neo::vaultcache::resetForTest();
+    const fs::path firstDir = makeDirectory(base, "parent-chain");
+    const fs::path childDir = makeDirectory(firstDir, "child");
+    const std::string first = neo::textfile::pathToUtf8(firstDir);
+    const std::string second = neo::textfile::pathToUtf8(base);
+    Scanner scanner;
+    scanner.tagByRootName = true;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    state.vaultRoot = neo::textfile::pathToUtf8(childDir);
+    neo::navigateToVaultParent(state);
+    check(scanner.waitForRoot(first), "first parent scan reaches the worker");
+    neo::navigateToVaultParent(state);
+    check(state.vaultRoot == second && scanner.waitForRoot(second) && scanner.mainCalls == 0,
+          "second parent navigation returns before either scan completes");
+    scanner.releaseRoot(first);
+    check(pumpUntil([&] { return !neo::vaultcache::query(first).scanning; }),
+          "previous parent scan drains");
+    neo::tickVaultScan(state);
+    check(state.vaultRoot == second && !state.vaultScan && state.rows.empty(),
+          "late previous parent result cannot populate the active root");
+    scanner.releaseRoot(second);
+    check(pumpUntil([&] { return !neo::vaultcache::query(second).scanning; }),
+          "active parent scan drains");
+    neo::tickVaultScan(state);
+    check(state.vaultScan == neo::vaultcache::query(second).scan && !state.rows.empty() &&
+              state.rows.front().name == neo::textfile::fileName(second),
+          "active parent adopts only its own rows");
+}
+
+fs::path makeDirectory(const fs::path& parent, const char* name) {
+    const fs::path dir = parent / name;
+    fs::create_directories(dir);
+    return dir;
+}
+
+// 同步预热某根的快照（走 requestScanSync），返回已发布的快照。
+std::shared_ptr<const neo::vault::ScanResult> warmRootWithFiles(const std::string& root,
+                                                                const std::vector<std::string>& files) {
+    neo::vaultcache::setScannerForTest([files](const std::string&) {
+        neo::vault::ScanResult result;
+        result.ok = true;
+        result.fileCount = static_cast<int>(files.size());
+        for (const std::string& name : files) result.roots.push_back({name, name, false, {}});
+        return result;
+    });
+    neo::vaultcache::requestScanSync(root);
+    return neo::vaultcache::query(root).scan;
+}
+
+void coldVaultActionInBackground(VaultStart start, const fs::path& rootDir) {
+    neo::vaultcache::resetForTest();
+    const std::string root = neo::textfile::pathToUtf8(rootDir);
+    Scanner scanner;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    start(state, root);
+    check(state.vaultRoot == root, "cold vault action adopts the requested root");
+    check(scanner.mainCalls == 0, "cold vault action never scans on the caller thread");
+    check(!state.vaultScan && state.rows.empty(), "cold vault action shows loading without placeholder rows");
+    eui::Ui loadingUi; loadingUi.begin("cold.loading"); neo::vaultPanelView(loadingUi, state, 264, 600); loadingUi.end();
+    check(loadingUi.find("vault.loading"), "cold vault action renders the loading panel");
+    check(scanner.waitForRoot(root), "cold vault action schedules a background scan");
+    check(neo::vaultcache::query(root).scanning && scanner.workerCalls == 1 &&
+              neo::vaultcache::stats().scanRequests == 1,
+          "cold vault action schedules exactly one background scan");
+    for (int i = 0; i < 20; ++i) start(state, root);
+    check(!neo::vaultcache::query(root).rescanPending && neo::vaultcache::stats().scanRequests == 1,
+          "repeated cold vault action does not enqueue a redundant scan");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }), "cold vault scan drains in bounded time");
+    neo::tickVaultScan(state);
+    check(state.vaultScan && state.vaultScan->ok && !state.rows.empty(),
+          "cold vault action adopts the background snapshot");
+    neo::vaultcache::invalidate(root);
+}
+
+void warmVaultActionAdoptsSnapshot(VaultStart start, const fs::path& rootDir) {
+    neo::vaultcache::resetForTest();
+    const std::string root = neo::textfile::pathToUtf8(rootDir);
+    const auto warmSnapshot = warmRootWithFiles(root, {"warm.md", "notes.md"});
+    check(warmSnapshot && warmSnapshot->ok, "warm fixture publishes a usable snapshot");
+    Scanner scanner;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    start(state, root);
+    check(scanner.mainCalls == 0, "warm vault action never scans on the caller thread");
+    check(state.vaultScan == warmSnapshot && state.rows.size() == 2,
+          "warm vault action adopts the cached rows immediately");
+    check(scanner.waitForRoot(root), "warm vault action revalidates in the background");
+    check(neo::vaultcache::query(root).scanning && neo::vaultcache::stats().scanRequests == 1,
+          "warm vault action schedules exactly one background revalidation");
+    for (int i = 0; i < 20; ++i) start(state, root);
+    check(neo::vaultcache::stats().scanRequests == 1 && !neo::vaultcache::query(root).rescanPending,
+          "repeated warm vault action shares the single revalidation");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }), "warm revalidation drains in bounded time");
+    neo::tickVaultScan(state);
+    check(state.vaultScan == neo::vaultcache::query(root).scan && state.vaultRowsGeneration == 2,
+          "warm vault action publishes exactly one newer snapshot");
+    neo::vaultcache::invalidate(root);
+}
+
+void lateRootCompletionCannotPollute(VaultStart start, const fs::path& firstDir, const fs::path& secondDir) {
+    neo::vaultcache::resetForTest();
+    const std::string first = neo::textfile::pathToUtf8(firstDir);
+    const std::string second = neo::textfile::pathToUtf8(secondDir);
+    Scanner scanner;
+    scanner.tagByRootName = true;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    start(state, first);
+    check(state.vaultRoot == first && scanner.waitForRoot(first), "first root scan reaches the worker");
+    start(state, second);
+    check(state.vaultRoot == second, "switching root adopts the second root immediately");
+    check(scanner.mainCalls == 0, "root switch never scans on the caller thread");
+    check(!state.vaultScan && state.rows.empty(), "switched root stays loading while its own scan is pending");
+    neo::tickVaultScan(state);
+    check(!state.vaultScan && state.rows.empty() && state.vaultRowsGeneration == 0,
+          "generation reset cannot adopt the previous root's snapshot");
+    scanner.releaseRoot(first);
+    check(pumpUntil([&] { return !neo::vaultcache::query(first).scanning; }), "late first-root scan completes");
+    check(neo::vaultcache::query(first).scan != nullptr, "late first root publishes its own snapshot");
+    neo::tickVaultScan(state);
+    check(state.vaultRoot == second && !state.vaultScan && state.rows.empty(),
+          "late completion of the previous root cannot populate the active view");
+    check(neo::vaultcache::query(second).scan == nullptr, "second root still has no snapshot");
+    scanner.releaseRoot(second);
+    check(pumpUntil([&] { return !neo::vaultcache::query(second).scanning; }), "second-root scan completes");
+    neo::tickVaultScan(state);
+    check(state.vaultScan == neo::vaultcache::query(second).scan &&
+              state.vaultScan != neo::vaultcache::query(first).scan,
+          "second root adopts only its own snapshot");
+    check(!state.rows.empty() && state.rows.front().name == neo::textfile::fileName(state.vaultRoot),
+          "rows are projected from the second root, not the late first snapshot");
+    neo::vaultcache::invalidate(first);
+    neo::vaultcache::invalidate(second);
+}
+
+void coldFailureEndsLoading(VaultStart start, const fs::path& rootDir) {
+    neo::vaultcache::resetForTest();
+    const std::string root = neo::textfile::pathToUtf8(rootDir);
+    Scanner scanner;
+    scanner.fail = true;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    start(state, root);
+    check(!state.vaultScan && state.rows.empty() && scanner.mainCalls == 0,
+          "cold failure starts in loading without a caller-thread scan");
+    check(scanner.waitForRoot(root), "cold failure scan reaches the worker");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }), "failed cold scan drains in bounded time");
+    state.toastVisible = false;
+    neo::tickVaultScan(state);
+    check(state.vaultScan && !state.vaultScan->ok && state.rows.empty() && state.toastVisible,
+          "cold failure ends loading and reports the root error");
+    eui::Ui failedUi; failedUi.begin("cold.failed"); neo::vaultPanelView(failedUi, state, 264, 600); failedUi.end();
+    check(!failedUi.find("vault.loading"), "cold failure leaves the loading state");
+    neo::vaultcache::invalidate(root);
+}
+
+void warmFailureEndsLoading(VaultStart start, const fs::path& rootDir) {
+    neo::vaultcache::resetForTest();
+    const std::string root = neo::textfile::pathToUtf8(rootDir);
+    const auto warmSnapshot = warmRootWithFiles(root, {"warm.md"});
+    check(warmSnapshot && warmSnapshot->ok, "warm failure fixture publishes a usable snapshot");
+    Scanner scanner;
+    scanner.fail = true;
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    start(state, root);
+    check(state.vaultScan == warmSnapshot && state.vaultScan->ok,
+          "warm snapshot stays usable until the revalidation fails");
+    check(scanner.waitForRoot(root), "warm failure revalidation reaches the worker");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }), "failed warm revalidation drains in bounded time");
+    state.toastVisible = false;
+    neo::tickVaultScan(state);
+    check(state.vaultScan && !state.vaultScan->ok && state.rows.empty() && state.toastVisible,
+          "failed warm revalidation ends loading and reports the error");
+    eui::Ui failedUi; failedUi.begin("warm.failed"); neo::vaultPanelView(failedUi, state, 264, 600); failedUi.end();
+    check(!failedUi.find("vault.loading"), "failed warm revalidation leaves the loading state");
+    neo::vaultcache::invalidate(root);
+}
+
+void navigateOpensOutsideDocument(const fs::path& base) {
+    neo::vaultcache::resetForTest();
+    const fs::path homeDir = makeDirectory(base, "nav-out-home");
+    const fs::path targetDir = makeDirectory(base, "nav-out-target");
+    const fs::path document = targetDir / "later.md";
+    put(document, u8"navigate opened bytes 🙂\n");
+    const std::string target = neo::textfile::pathToUtf8(targetDir);
+    Scanner scanner;
+    scanner.addLater = true;  // the deferred target appears once the scan completes
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    state.vaultRoot = neo::textfile::pathToUtf8(homeDir);
+    state.vaultAddress = state.vaultRoot;
+    neo::navigateToVaultPath(state, neo::textfile::pathToUtf8(document));
+    check(state.vaultRoot == target, "navigate to an outside file switches the root to its directory");
+    check(state.path == neo::textfile::pathToUtf8(document) && state.doc.text == u8"navigate opened bytes 🙂\n",
+          "navigate opens the outside document");
+    check(state.vaultPendingReveal == "later.md", "navigate defers the reveal until rows arrive");
+    check(scanner.mainCalls == 0 && !state.vaultScan && state.rows.empty(),
+          "outside navigate scans the new root in the background");
+    eui::Ui loadingUi; loadingUi.begin("nav.loading"); neo::vaultPanelView(loadingUi, state, 264, 600); loadingUi.end();
+    check(loadingUi.find("vault.loading") && state.vaultPendingReveal == "later.md",
+          "loading panel preserves the deferred reveal");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(target).scanning; }), "outside navigate scan drains in bounded time");
+    neo::tickVaultScan(state);
+    eui::Ui readyUi; readyUi.begin("nav.ready"); neo::vaultPanelView(readyUi, state, 264, 600); readyUi.end();
+    check(!readyUi.find("vault.loading") && state.vaultPendingReveal.empty(),
+          "completed scan consumes the deferred reveal");
+    neo::vaultcache::invalidate(target);
+}
+
+void navigateWarmMissingTargetClearsReveal(const fs::path& base) {
+    neo::vaultcache::resetForTest();
+    const fs::path homeDir = makeDirectory(base, "nav-warm-home");
+    const fs::path targetDir = makeDirectory(base, "nav-warm-target");
+    const fs::path document = targetDir / "appeared.md";
+    put(document, "appeared\n");
+    const std::string target = neo::textfile::pathToUtf8(targetDir);
+    const auto warmSnapshot = warmRootWithFiles(target, {"present.md"});
+    check(warmSnapshot && warmSnapshot->ok, "warm navigate fixture publishes a usable snapshot");
+    Scanner scanner;  // revalidation returns the default set, still without appeared.md
+    neo::vaultcache::setScannerForTest([&scanner](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    state.vaultRoot = neo::textfile::pathToUtf8(homeDir);
+    state.vaultAddress = state.vaultRoot;
+    neo::navigateToVaultPath(state, neo::textfile::pathToUtf8(document));
+    check(state.vaultRoot == target && state.vaultScan == warmSnapshot && state.rows.size() == 1,
+          "warm navigate adopts the cached rows immediately");
+    check(state.vaultPendingReveal == "appeared.md", "a target missing from the warm snapshot keeps its reveal");
+    check(scanner.mainCalls == 0, "warm navigate revalidates in the background");
+    eui::Ui staleUi; staleUi.begin("nav.stale"); neo::vaultPanelView(staleUi, state, 264, 600); staleUi.end();
+    check(state.vaultPendingReveal == "appeared.md", "reveal is preserved while revalidation is in flight");
+    scanner.release();
+    check(pumpUntil([&] { return !neo::vaultcache::query(target).scanning; }), "warm navigate revalidation drains in bounded time");
+    neo::tickVaultScan(state);
+    eui::Ui settledUi; settledUi.begin("nav.settled"); neo::vaultPanelView(settledUi, state, 264, 600); settledUi.end();
+    check(state.vaultPendingReveal.empty(), "completed scan clears an unmatched warm target");
+    neo::vaultcache::invalidate(target);
+}
+
+void vaultActionCancellationPreservesDocument(const fs::path& base) {
+    neo::vaultcache::resetForTest();
+    const fs::path homeDir = makeDirectory(base, "nav-cancel-home");
+    const std::string home = neo::textfile::pathToUtf8(homeDir);
+    neo::AppState state;
+    state.vaultRoot = home;
+    state.vaultAddress = home;
+    state.doc.text = "in progress\n";
+    ++state.revision;  // unsaved
+    neo::navigateToVaultPath(state, neo::textfile::pathToUtf8(homeDir / "ghost"));
+    check(state.vaultRoot == home && state.doc.text == "in progress\n" && state.dirty(),
+          "navigating to a missing path keeps the current root and document");
+    check(state.toastVisible, "navigating to a missing path reports a toast");
+    const int picksBefore = directoryPickCalls;
+    nextDirectoryPick = {false, true, {}, {}};
+    neo::chooseVaultDirectory(state);
+    check(directoryPickCalls == picksBefore + 1 && state.vaultRoot == home &&
+              state.doc.text == "in progress\n" && state.dirty(),
+          "a cancelled chooser keeps the current root and document");
 }
 }
 
@@ -332,6 +805,38 @@ int main() {
               "new root adopts its own snapshot after actual document switch");
         check(oldScanner.mainCalls == 0 && newScanner.mainCalls == 0,
               "neither actual root switch scans on caller thread");
+    }
+    {
+        // chooseVaultDirectory 与 navigateToVaultPath 是唯一改走 prepareVault 的两个
+        // 入口：同一套有界场景对两者各跑一遍，避免重复。旧同步实现对每条断言都反向。
+        const fs::path actionBase = base / "actions";
+        fs::create_directories(actionBase);
+        const VaultStart actions[] = {&startChooseVault, &startNavigateVault};
+        const char* const kinds[] = {"choose", "navigate"};
+        for (std::size_t a = 0; a < 2; ++a) {
+            const std::string prefix = std::string("act-") + kinds[a] + "-";
+            coldVaultActionInBackground(actions[a], makeDirectory(actionBase, (prefix + "cold").c_str()));
+            warmVaultActionAdoptsSnapshot(actions[a], makeDirectory(actionBase, (prefix + "warm").c_str()));
+            lateRootCompletionCannotPollute(actions[a],
+                makeDirectory(actionBase, (prefix + "late-a").c_str()),
+                makeDirectory(actionBase, (prefix + "late-b").c_str()));
+            coldFailureEndsLoading(actions[a], makeDirectory(actionBase, (prefix + "fail-cold").c_str()));
+            warmFailureEndsLoading(actions[a], makeDirectory(actionBase, (prefix + "fail-warm").c_str()));
+        }
+        parentVaultActionIsAsync(actionBase);
+        const VaultStart editActions[] = {&startChooseVault, &startNavigateVault, &startParentVaultForEdit};
+        for (std::size_t action = 0; action < 3; ++action)
+            for (int warm = 0; warm < 2; ++warm)
+                for (int fail = 0; fail < 2; ++fail) {
+                    const auto name = "edit-save-" + std::to_string(action) + "-" + std::to_string(warm) + "-" + std::to_string(fail);
+                    editAndSaveDuringScan(editActions[action], makeDirectory(actionBase, name.c_str()), warm != 0, fail != 0);
+                }
+        warmParentVaultActionReusesSnapshot(actionBase);
+        parentVaultFailuresEndLoading(actionBase);
+        consecutiveParentScansKeepActiveRoot(actionBase);
+        navigateOpensOutsideDocument(actionBase);
+        navigateWarmMissingTargetClearsReveal(actionBase);
+        vaultActionCancellationPreservesDocument(actionBase);
     }
     neo::vaultcache::resetScannerForTest();
     core::async::shutdown(); neo::vaultcache::resetForTest();

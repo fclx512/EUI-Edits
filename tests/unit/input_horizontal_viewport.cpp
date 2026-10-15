@@ -36,9 +36,9 @@ void testHorizontalViewport() {
         components::input_detail::LineRun run;
         run.beg = beg;
         run.end = static_cast<int>(text.size());
-        run.style.color = i % 2 ? core::Color{1, 0, 0, 1} : core::Color{0, 0, 1, 1};
-        if (i == 1) { run.style.link = true; run.style.background = {1, 1, 0, 1}; }
-        if (i == 2) { run.style.strike = true; run.style.underline = true; }
+        run.style.edit().color = i % 2 ? core::Color{1, 0, 0, 1} : core::Color{0, 0, 1, 1};
+        if (i == 1) { run.style.edit().link = true; run.style.edit().background = {1, 1, 0, 1}; }
+        if (i == 2) { run.style.edit().strike = true; run.style.edit().underline = true; }
         d.runs.push_back(run);
     }
     std::vector<Decoration> decorations{d};
@@ -60,9 +60,9 @@ void testHorizontalViewport() {
     check(!state.cachedLines.empty(), "the input must create a layout in its page state scope");
     if (state.cachedLines.empty()) return;
     const auto& row = state.cachedLines.front();
-    check(row.runs.size() == 2000, "the full styled line must remain available for editing");
+    check(row.presentation().runs.size() == 2000, "the full styled line must remain available for editing");
     const std::size_t emitted = textRuns(ui);
-    std::cout << "initial styled nodes=" << emitted << ", source runs=" << row.runs.size() << '\n';
+    std::cout << "initial styled nodes=" << emitted << ", source runs=" << row.presentation().runs.size() << '\n';
     check(emitted < 100, "offscreen styled tokens must not become UI text nodes");
     check(ui.find("editor.text.0r0") && ui.find("editor.text.0r1.linkhover") &&
           ui.find("editor.text.0r1.bg"), "visible token and link/chip decorations must be retained");
@@ -72,7 +72,7 @@ void testHorizontalViewport() {
 
     // Place a real text run across the left clip edge. Its source text and style
     // must remain intact, and hit/selection geometry still uses the full line.
-    const auto crossing = row.runs[500];
+    const auto crossing = row.presentation().runs[500];
     state.horizontalScroll = crossing.x + crossing.width * 0.5f;
     state.selectionStart = crossing.beg;
     state.selectionEnd = crossing.end;

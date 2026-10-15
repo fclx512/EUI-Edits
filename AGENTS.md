@@ -30,11 +30,12 @@
 ```powershell
 ./scripts/check-neoeditor.ps1 -BuildDirectory ./out/check-unique/build `
   -CMake 'D:/ruanjian/Microsoft Visual Studio/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe' `
-  -Python D:/Python312/python.exe -Parallel 6
+  -Python D:/Python312/python.exe -Parallel 2
 git -c core.whitespace=cr-at-eol diff --check
 ```
 
 - 正确性、性能、真实窗口和独立打包分开验收。正式包使用 `scripts/package-neoeditor.ps1`，明确版本和全新构建/输出目录，验证最终资产 SHA256；开发 EXE 不改名冒充发布包。
+- 更新发版先读 `docs/发版流程.md`，统一使用 `scripts/prepare-neoeditor-release.ps1`：先 `-PreflightOnly`，冻结后去掉该开关，默认 `-Parallel 2` 串行门禁与独立包。`READY_FOR_GUI` 只表示可验收，不能发布。推源提交后先等该 SHA 的新检出/Windows checks 成功，再授权标签；最终上传资产哈希变化须重新绑定 GUI。一个主代理执行，不并行修改候选或同时跑多套完整构建。
 
 ## 证据与文档
 

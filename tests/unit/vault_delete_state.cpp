@@ -21,9 +21,11 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #if defined(_WIN32)
@@ -145,6 +147,22 @@ neo::AppState makeState(const fs::path& root, const fs::path& document, bool dir
     state.doc.hadBom = true;
     state.doc.lineEnding = neo::textfile::LineEnding::CrLf;
     return state;
+}
+
+// chooseVaultDirectory/navigateToVaultPath now drive prepareVault: the root is
+// adopted without scanning, one background scan is scheduled, and the snapshot
+// is published on the main thread. Pump dispatchReady with a hard deadline so
+// the worker and its runtimes are drained before the scanner/shutdown lifecycle
+// proceeds, then adopt the published generation into the view.
+bool pumpVaultScan(neo::AppState& state, const std::string& root, int timeoutMs = 5000) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (neo::vaultcache::query(root).scanning) {
+        core::async::dispatchReady();
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    neo::tickVaultScan(state);
+    return true;
 }
 
 void successfulCleanCurrentFile(TempTree& tree) {
@@ -325,7 +343,15 @@ void currentPathCaseVariantAndRelocation(TempTree& tree) {
 
     nextDirectoryPick = {true, false, utf8(tree.otherVault), {}};
     neo::chooseVaultDirectory(state);
-    check(state.vaultRoot == utf8(tree.otherVault) && (state.vaultScan && state.vaultScan->ok),
+    check(state.vaultRoot == utf8(tree.otherVault),
+          "successful relocation adopts the selected isolated directory");
+    // The old synchronous refresh published a snapshot before returning; the
+    // async path must hand back a loading view and schedule exactly one scan.
+    check(!state.vaultScan && state.rows.empty(),
+          "successful relocation returns while the background scan is in flight");
+    check(pumpVaultScan(state, state.vaultRoot),
+          "successful relocation scan completes within the bounded pump");
+    check(state.vaultScan && state.vaultScan->ok,
           "successful relocation scans the selected isolated directory");
     check(state.path == originalPath && state.doc.text == originalDoc.text && state.dirty() &&
               state.revision == originalRevision && state.savedRevision == originalSavedRevision,
@@ -451,6 +477,34 @@ void vaultListingOrderMatchesReference(TempTree& tree) {
     const auto singleton = neo::vault::scan(utf8(empty));
     check(singleton.ok && singleton.roots.size() == 1 && singleton.roots[0].name == "one.md",
           "singleton sorting group remains valid");
+}
+
+void ordinaryVaultFilesRetainListingSemantics(TempTree& tree) {
+    const fs::path root = tree.vault / "ordinary-metadata-fixture";
+    const fs::path original = root / neo::textfile::pathFromUtf8(u8"只读🙂.bin");
+    check(writeSample(original), "create ordinary Unicode file without a known text extension");
+    check(writeSample(root / "README"), "create ordinary extensionless file");
+    std::ofstream(root / "empty", std::ios::binary).close();
+    std::error_code error;
+    fs::create_hard_link(original, root / "alias.bin", error);
+    check(!error, "create hard link with a distinct listing name");
+#if defined(_WIN32)
+    check(SetFileAttributesW(original.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_READONLY) != 0,
+          "mark isolated ordinary file hidden and readonly");
+#endif
+    const auto result = neo::vault::scan(utf8(root));
+    check(result.ok && result.warning.empty() && result.fileCount == 4 && result.directoryCount == 0,
+          "ordinary files retain counts regardless of attributes, extension or shared file identity");
+    check(containsEntry(result.roots, u8"只读🙂.bin") && containsEntry(result.roots, "README") &&
+              containsEntry(result.roots, "empty") && containsEntry(result.roots, "alias.bin"),
+          "ordinary files retain their own UTF-8 relative paths");
+    for (const auto& entry : result.roots) {
+        check(!entry.isDir && entry.children.empty(), "ordinary metadata never creates recursive entries");
+    }
+#if defined(_WIN32)
+    check(SetFileAttributesW(original.c_str(), FILE_ATTRIBUTE_NORMAL) != 0,
+          "restore attributes for isolated fixture cleanup");
+#endif
 }
 
 void directoryReparsePointIsLeaf(TempTree& tree) {
@@ -669,6 +723,7 @@ int main() {
     currentPathCaseVariantAndRelocation(tree);
     completeVaultListing(tree);
     vaultListingOrderMatchesReference(tree);
+    ordinaryVaultFilesRetainListingSemantics(tree);
     directoryReparsePointIsLeaf(tree);
 
     std::cout << (failures == 0 ? "PASS" : "FAIL") << ": vault_delete_state ("

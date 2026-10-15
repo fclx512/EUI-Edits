@@ -1,52 +1,52 @@
-﻿#Requires -Version 5.1
+﻿#Requires -Version 7
 [CmdletBinding()]
 param(
     [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$')]
-    [string]$Version = '0.1.3',
+    [string]$Version,
     [string]$BuildDirectory,
     [string]$OutputDirectory,
     [string]$CMake,
     [string]$Dumpbin,
     [string]$Generator,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [ValidateRange(1, 32)][int]$Parallel = 2,
+    [switch]$PreflightOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $PSScriptRoot 'neoeditor-release-common.ps1')
+if (-not $Version) {
+    $versionSource = Get-Content -LiteralPath (Join-Path $repo 'cmake/NeoEditorVersion.cmake') -Raw
+    if ($versionSource -notmatch 'set\(NEO_EDITOR_VERSION "([^"]+)"') { throw 'Cannot read the default product version.' }
+    $Version = $Matches[1]
+}
 if (-not $BuildDirectory) { $BuildDirectory = Join-Path $repo ('build-neoeditor-package-' + [Guid]::NewGuid().ToString('N')) }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repo ("out/euiedits-$Version-single-exe") }
-$BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
-$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$BuildDirectory = Assert-EuiRepositoryPath $BuildDirectory $repo 'BuildDirectory'
+$OutputDirectory = Assert-EuiRepositoryPath $OutputDirectory $repo 'OutputDirectory'
+if ($OutputDirectory -eq $BuildDirectory -or
+    $OutputDirectory.StartsWith($BuildDirectory + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    $BuildDirectory.StartsWith($OutputDirectory + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'BuildDirectory and OutputDirectory must be separate non-nested directories.'
+}
+Assert-EuiEmptyOutput $OutputDirectory
 if ($env:OS -ne 'Windows_NT') { throw 'EUI-Edits packaging requires Windows with MSVC x64.' }
 if ($BuildDirectory -eq $repo) { throw 'BuildDirectory must be separate from the source directory.' }
 if (-not $SkipBuild -and (Test-Path -LiteralPath $BuildDirectory)) {
     throw 'Use a new, empty build directory. Existing directories are never reset or deleted.'
 }
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-if (-not $Generator) {
-    if (Test-Path -LiteralPath $vswhere) {
-        $vsVersion = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion) | Select-Object -First 1
-        if ($vsVersion -and $vsVersion.StartsWith('18.')) { $Generator = 'Visual Studio 18 2026' }
-        elseif ($vsVersion -and $vsVersion.StartsWith('17.')) { $Generator = 'Visual Studio 17 2022' }
-    }
-    if (-not $Generator) { throw 'Supported Visual Studio installation not found. Pass -Generator explicitly.' }
-}
-if (-not $CMake) {
-    $command = Get-Command cmake -ErrorAction SilentlyContinue
-    if ($command) { $CMake = $command.Source }
-    elseif (Test-Path -LiteralPath $vswhere) {
-        $CMake = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe') | Select-Object -First 1
+$tools = Get-EuiReleaseTools -CMake $CMake -Generator $Generator -Dumpbin $Dumpbin -NeedDumpbin
+$CMake = $tools.CMake; $Generator = $tools.Generator; $Dumpbin = $tools.Dumpbin
+if ($SkipBuild) {
+    $existingCache = Get-Content -LiteralPath (Join-Path $BuildDirectory 'CMakeCache.txt') -Raw
+    if ($existingCache -notmatch '(?m)^CMAKE_HOME_DIRECTORY:INTERNAL=([^\r\n]+)') { throw 'Build cache has no source directory identity.' }
+    $cacheSource = [IO.Path]::GetFullPath($Matches[1]).TrimEnd('\', '/')
+    if (-not $cacheSource.Equals($repo.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Build cache belongs to another source checkout.'
     }
 }
-if (-not $CMake -or -not (Test-Path -LiteralPath $CMake)) { throw 'CMake not found. Pass -CMake with an absolute executable path.' }
-if (-not $Dumpbin) {
-    $command = Get-Command dumpbin -ErrorAction SilentlyContinue
-    if ($command) { $Dumpbin = $command.Source }
-    elseif (Test-Path -LiteralPath $vswhere) {
-        $Dumpbin = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe') | Select-Object -Last 1
-    }
-}
-if (-not $Dumpbin -or -not (Test-Path -LiteralPath $Dumpbin)) { throw 'dumpbin not found. Pass -Dumpbin with an absolute executable path.' }
+if ($PreflightOnly) { $tools; return }
 if (-not $SkipBuild) {
     & $CMake -S $repo -B $BuildDirectory -G $Generator -A x64 `
         '-DEUI_BUILD_NEOEDITOR_ONLY=ON' '-DEUI_WINDOW_BACKEND=win32' '-DEUI_RENDER_BACKEND=d2d' `
@@ -55,7 +55,7 @@ if (-not $SkipBuild) {
         '-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE' '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>' `
         "-DNEO_EDITOR_VERSION=$Version"
     if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits CMake configuration failed.' }
-    & $CMake --build $BuildDirectory --config Release --target neo_editor --parallel
+    & $CMake --build $BuildDirectory --config Release --target neo_editor --parallel $Parallel
     if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits Release build failed.' }
 }
 $cache = Get-Content -LiteralPath (Join-Path $BuildDirectory 'CMakeCache.txt') -Raw

@@ -42,7 +42,7 @@ std::vector<EditDecoration> blockDecorationsFor(const std::string& text) {
                 code = true;
             }
             if (code) {
-                decoration.fontFamily = "monospace";
+                decoration.editRare().fontFamily = "monospace";
             }
         }
         table.push_back(std::move(decoration));
@@ -124,10 +124,10 @@ bool sameLayoutLines(const std::vector<EditModel::TextLine>& actual,
         const EditModel::TextLine& b = reference[i];
         if (a.start != b.start || a.end != b.end || a.lineNumber != b.lineNumber ||
             a.lineStart != b.lineStart || a.hardBreakAfter != b.hardBreakAfter ||
-            a.holes != b.holes || !sameRuns(a.runs, b.runs) || a.fontSize != b.fontSize ||
-            a.lineHeight != b.lineHeight || a.fontFamily != b.fontFamily ||
-            a.metrics.caretX != b.metrics.caretX ||
-            a.metrics.byteIndices != b.metrics.byteIndices ||
+            a.presentation().holes != b.presentation().holes || !sameRuns(a.presentation().runs, b.presentation().runs) || a.fontSize != b.fontSize ||
+            a.lineHeight != b.lineHeight || a.rare().fontFamily != b.rare().fontFamily ||
+            a.metrics.caretX() != b.metrics.caretX() ||
+            a.metrics.byteIndices() != b.metrics.byteIndices() ||
             a.metrics.width != b.metrics.width) {
             return false;
         }
@@ -158,13 +158,13 @@ int sameFrameDoubleBackspace() {
 
     const std::vector<EditDecoration> decorations = blockDecorationsFor(text);
     if (decorations.size() != 4 || decorations[0].fontSize != 24.0f ||
-        decorations[1].holes.size() != 2 || decorations[2].fontFamily != "monospace" ||
+        decorations[1].holes.size() != 2 || decorations[2].rare().fontFamily != "monospace" ||
         decorations[2].holes.size() != 2) {
         fail("跨块装饰样例没构造出来（标题字号 / 粗体洞 / 代码等宽+洞）：行数=" +
              std::to_string(decorations.size()) +
              " 标题字号=" + std::to_string(decorations.empty() ? 0.0f : decorations[0].fontSize) +
              " 粗体洞=" + std::to_string(decorations.size() > 1 ? decorations[1].holes.size() : 0) +
-             " 代码字体=" + (decorations.size() > 2 ? decorations[2].fontFamily : std::string()) +
+             " 代码字体=" + (decorations.size() > 2 ? decorations[2].rare().fontFamily : std::string()) +
              " 代码洞=" + std::to_string(decorations.size() > 2 ? decorations[2].holes.size() : 0));
         return failures;
     }
@@ -306,8 +306,8 @@ int main() {
             const auto& actual = edited.cachedLines[j];
             const auto& expected = reference[j];
             if (actual.start != expected.start || actual.end != expected.end ||
-                actual.hardBreakAfter != expected.hardBreakAfter || actual.metrics.caretX != expected.metrics.caretX ||
-                actual.metrics.byteIndices != expected.metrics.byteIndices) {
+                actual.hardBreakAfter != expected.hardBreakAfter || actual.metrics.caretX() != expected.metrics.caretX() ||
+                actual.metrics.byteIndices() != expected.metrics.byteIndices()) {
                 std::cerr << "Incremental metrics differ at edit " << i << ", line " << j << "\n";
                 return 2;
             }
@@ -329,8 +329,8 @@ int main() {
             Model::InputLayout::build(state, 480.f, 500.f, 500.f, 10.f, 10.f, 10.f, 19.2f, "monospace", 16.f, true);
         };
         layout();
-        const auto* prefixMetrics = state.cachedLines.front().metrics.caretX.data();
-        const auto* suffixMetrics = state.cachedLines[state.cachedLines.size() - 2].metrics.caretX.data();
+        const auto* prefixMetrics = state.cachedLines.front().metrics.caretX().data();
+        const auto* suffixMetrics = state.cachedLines[state.cachedLines.size() - 2].metrics.caretX().data();
         state.cursor = Model::clampUtf8Boundary(state.text, static_cast<int>(state.text.size() / 2));
         Model::clearSelection(state);
         const auto start = Clock::now();
@@ -345,8 +345,8 @@ int main() {
             layout();
         }
         const auto milliseconds = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
-        if (prefixMetrics != state.cachedLines.front().metrics.caretX.data() ||
-            suffixMetrics != state.cachedLines[state.cachedLines.size() - 2].metrics.caretX.data()) {
+        if (prefixMetrics != state.cachedLines.front().metrics.caretX().data() ||
+            suffixMetrics != state.cachedLines[state.cachedLines.size() - 2].metrics.caretX().data()) {
             std::cerr << "Editing replaced untouched paragraph metrics\n";
             return 8;
         }
@@ -356,11 +356,11 @@ int main() {
             state.compositionText = "中文预编辑";
             auto& display = Model::displayState(state, true);
             Model::ensureLayoutCache(display, "monospace", 16.f, 480.f, true);
-            if (display.cachedLines.front().metrics.caretX.data() != prefixMetrics) return 9;
+            if (display.cachedLines.front().metrics.caretX().data() != prefixMetrics) return 9;
             state.compositionText.clear();
             Model::displayState(state, false);
             layout();
-            if (state.cachedLines.front().metrics.caretX.data() != prefixMetrics) return 10;
+            if (state.cachedLines.front().metrics.caretX().data() != prefixMetrics) return 10;
         }
         std::cout << count << " lines: " << std::chrono::duration<double, std::milli>(Clock::now() - compositionStart).count() / 20.0
                   << " ms/preedit update (start/cancel + layout)" << std::endl;

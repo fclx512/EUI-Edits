@@ -219,17 +219,17 @@ int main() {
         }
         const float bodyColumn = core::TextPrimitive::measureTextWidth("1. ", "monospace", fontSize);
         // marker 行：正文列 = 实测前缀宽（caret 起点、run.x、行宽都含同一个 advance）。
-        const float markerAdvance = lines[0].glyph.advance;
+        const float markerAdvance = lines[0].presentation().glyph.advance;
         if (!(markerAdvance > 0.0f && std::fabs(markerAdvance - bodyColumn) < 0.01f)) {
             std::cerr << "text-marker advance mismatch: advance=" << markerAdvance
                       << " measured=" << bodyColumn << "\n";
             return 1;
         }
-        if (std::fabs(lines[0].metrics.caretX[0] - bodyColumn) >= 0.01f) {
+        if (std::fabs(lines[0].metrics.caretX()[0] - bodyColumn) >= 0.01f) {
             std::cerr << "marker line first caretX should sit at body column\n";
             return 1;
         }
-        if (lines[0].glyph.text != "3.") {
+        if (lines[0].presentation().glyph.text != "3.") {
             std::cerr << "marker text lost in layout\n";
             return 1;
         }
@@ -404,26 +404,26 @@ int main() {
         const Model::InputLayout::Line& row0 = tableLayout.lineList()[0];
         const Model::InputLayout::Line& row2 = tableLayout.lineList()[2];
         const Model::InputLayout::Line& separatorLine = tableLayout.lineList()[1];
-        if (row0.runs.size() < 3 || row2.runs.size() < 3) {
-            std::cerr << "table rows must lay out one run per cell (row0=" << row0.runs.size()
-                      << " row2=" << row2.runs.size() << ")\n";
+        if (row0.presentation().runs.size() < 3 || row2.presentation().runs.size() < 3) {
+            std::cerr << "table rows must lay out one run per cell (row0=" << row0.presentation().runs.size()
+                      << " row2=" << row2.presentation().runs.size() << ")\n";
             return 1;
         }
         const float kEps = 0.01f;
         // ① 同列的行 x 必须一致（这正是"列对齐"）。
         for (std::size_t column = 0; column < 3; ++column) {
-            if (std::fabs(row0.runs[column].x - row2.runs[column].x) > kEps) {
-                std::cerr << "table column " << column << " not aligned: row0=" << row0.runs[column].x
-                          << " row2=" << row2.runs[column].x << "\n";
+            if (std::fabs(row0.presentation().runs[column].x - row2.presentation().runs[column].x) > kEps) {
+                std::cerr << "table column " << column << " not aligned: row0=" << row0.presentation().runs[column].x
+                          << " row2=" << row2.presentation().runs[column].x << "\n";
                 return 1;
             }
         }
         // ② 列间有内边距：第 2 格整体在第 1 格右侧且不重叠。
-        if (!(row2.runs[1].x >= row2.runs[0].x + row2.runs[0].width) ||
-            !(row2.runs[2].x >= row2.runs[1].x + row2.runs[1].width)) {
-            std::cerr << "columns must not overlap (x0=" << row2.runs[0].x << " w0=" << row2.runs[0].width
-                      << " x1=" << row2.runs[1].x << " w1=" << row2.runs[1].width
-                      << " x2=" << row2.runs[2].x << ")\n";
+        if (!(row2.presentation().runs[1].x >= row2.presentation().runs[0].x + row2.presentation().runs[0].width) ||
+            !(row2.presentation().runs[2].x >= row2.presentation().runs[1].x + row2.presentation().runs[1].width)) {
+            std::cerr << "columns must not overlap (x0=" << row2.presentation().runs[0].x << " w0=" << row2.presentation().runs[0].width
+                      << " x1=" << row2.presentation().runs[1].x << " w1=" << row2.presentation().runs[1].width
+                      << " x2=" << row2.presentation().runs[2].x << ")\n";
             return 1;
         }
         // ③ 格首字节的光标 x = 该列文字起点（分界处归**下一格**：上一格末尾与下一格开头
@@ -431,15 +431,15 @@ int main() {
         for (std::size_t column = 0; column < 3; ++column) {
             const int cellBeg = tableDecorations[2].cells[column].beg;
             const float caretX = components::input_detail::caretXForDocOffset(
-                row2.metrics, row2.holes, row2.start, cellBeg);
-            if (std::fabs(caretX - row2.runs[column].x) > kEps) {
+                row2.metrics, row2.presentation().holes, row2.start, cellBeg);
+            if (std::fabs(caretX - row2.presentation().runs[column].x) > kEps) {
                 std::cerr << "caret at cell " << column << " start should snap to column x ("
-                          << caretX << " vs " << row2.runs[column].x << ")\n";
+                          << caretX << " vs " << row2.presentation().runs[column].x << ")\n";
                 return 1;
             }
         }
         // ④ 命中：点第 2 格墨迹中部 → 字节必须落在第 2 格里。
-        const float hitX = bounds.x + inset + row2.runs[1].x + row2.runs[1].width * 0.5f;
+        const float hitX = bounds.x + inset + row2.presentation().runs[1].x + row2.presentation().runs[1].width * 0.5f;
         const float hitY = bounds.y + inset + tableLayout.geometryTable().top(2) + 2.0f;
         const auto tableHit = tableLayout.pointerHit(hitX, hitY, bounds, width, inset);
         if (tableHit.byteIndex < body2.beg || tableHit.byteIndex > body2.end) {
@@ -450,10 +450,10 @@ int main() {
         // ④b 回归（2026-10-06）：点第 2 格**开头**（列间空隙的右缘）。格界共享停靠点
         //     的字节过去会按"歧义归洞之前"解析到第 1 格末尾 —— 点第 2 格开头输入，
         //     文字却插进第 1 格。命中字节必须 clamp 回第 2 格。
-        const float hitStartX = bounds.x + inset + row2.runs[1].x + 0.5f;
+        const float hitStartX = bounds.x + inset + row2.presentation().runs[1].x + 0.5f;
         const auto hitStart = tableLayout.pointerHit(hitStartX, hitY, bounds, width, inset);
         const int rawProjectedHit = components::input_detail::docOffsetForX(
-            row2.metrics, row2.holes, row2.start, row2.runs[1].x + 0.5f);
+            row2.metrics, row2.presentation().holes, row2.start, row2.presentation().runs[1].x + 0.5f);
         if (rawProjectedHit != body1.end) {
             std::cerr << "fixture no longer exposes the hidden-cell-boundary ambiguity (raw hit="
                       << rawProjectedHit << ", expected first-cell end=" << body1.end << ")\n";
@@ -542,7 +542,7 @@ int main() {
                 break;
             }
         }
-        if (indentedRow2 == nullptr || indentedRow2->runs.size() < 2) {
+        if (indentedRow2 == nullptr || indentedRow2->presentation().runs.size() < 2) {
             std::cerr << "indented table body did not expose the second-column start run\n";
             return 1;
         }
@@ -569,7 +569,7 @@ int main() {
         // ④c 列间空隙的**左半**归第 1 格：字节落在第 1 格区间（格尾）——与共享
         //     停靠点把光标画在第 2 格开头的既有观感一致。
         const float gapMidX =
-            bounds.x + inset + (row2.runs[0].x + row2.runs[0].width + row2.runs[1].x) * 0.5f;
+            bounds.x + inset + (row2.presentation().runs[0].x + row2.presentation().runs[0].width + row2.presentation().runs[1].x) * 0.5f;
         const auto hitGap = tableLayout.pointerHit(gapMidX, hitY, bounds, width, inset);
         if (hitGap.byteIndex < body1.beg || hitGap.byteIndex > body1.end) {
             std::cerr << "pointer in gap left half resolved to byte " << hitGap.byteIndex
@@ -581,7 +581,7 @@ int main() {
         float previousX = -1.0f;
         for (int offset = row2.start; offset <= row2.end; ++offset) {
             const float caretX = components::input_detail::caretXForDocOffset(
-                row2.metrics, row2.holes, row2.start, offset);
+                row2.metrics, row2.presentation().holes, row2.start, offset);
             if (caretX < previousX - kEps) {
                 std::cerr << "caret x must not decrease (byte " << offset << " -> " << caretX
                           << " after " << previousX << ")\n";
@@ -593,7 +593,7 @@ int main() {
         (void) previousByte;
         // ⑥ 分隔行：整行藏空（投影文本为空）+ 高度换成细横条。
         const std::string separatorVisible =
-            components::input_detail::projectText(text, separatorBeg, separatorEnd, separatorLine.holes);
+            components::input_detail::projectText(text, separatorBeg, separatorEnd, separatorLine.presentation().holes);
         if (!separatorVisible.empty() || std::fabs(separatorLine.lineHeight - 3.0f) > 0.01f) {
             std::cerr << "separator row must be fully concealed and thin (visible=\"" << separatorVisible
                       << "\" height=" << separatorLine.lineHeight << ")\n";
@@ -614,7 +614,7 @@ int main() {
             fontSize, "monospace", fontSize, true, &tableDecorations);
         const Model::InputLayout::Line& narrowRow2 = narrowLayout.lineList()[2];
         float narrowRight = 0.0f;
-        for (const components::input_detail::TextRun& run : narrowRow2.runs) {
+        for (const components::input_detail::TextRun& run : narrowRow2.presentation().runs) {
             narrowRight = std::max(narrowRight, run.x + run.width);
         }
         if (narrowRight > narrowWidth + 0.5f) {
@@ -622,8 +622,8 @@ int main() {
             return 1;
         }
         bool clipped = false;
-        for (std::size_t column = 0; column < narrowRow2.runs.size() && column < 3; ++column) {
-            if (narrowRow2.runs[column].end < tableDecorations[2].cells[column].end) {
+        for (std::size_t column = 0; column < narrowRow2.presentation().runs.size() && column < 3; ++column) {
+            if (narrowRow2.presentation().runs[column].end < tableDecorations[2].cells[column].end) {
                 clipped = true;
             }
         }
@@ -641,9 +641,9 @@ int main() {
         const Model::InputLayout touchLayout = Model::InputLayout::build(
             touchState, viewportWidth, viewportHeight, width, inset, inset, inset,
             fontSize, "monospace", fontSize, true, &touchDecorations);
-        if (touchLayout.lineList()[0].holes.size() != 2) {
+        if (touchLayout.lineList()[0].presentation().holes.size() != 2) {
             std::cerr << "touching holes must stay separate, got "
-                      << touchLayout.lineList()[0].holes.size() << "\n";
+                      << touchLayout.lineList()[0].presentation().holes.size() << "\n";
             return 1;
         }
     }
@@ -751,7 +751,7 @@ int main() {
         const auto emptyHit = wrappedLayout.pointerHit(
             emptyCellX, emptyCellY, wrappedBounds, wrappedWidth, wrappedInset);
         const bool hasContinuationEmptyStop = std::any_of(
-            continuationLine.tableDocCaretStops.begin(), continuationLine.tableDocCaretStops.end(),
+            continuationLine.rare().tableDocCaretStops.begin(), continuationLine.rare().tableDocCaretStops.end(),
             [](const Model::TableDocCaretStop& stop) { return stop.column == 1; });
         if (emptyHit.byteIndex != emptyCell.beg || hasContinuationEmptyStop) {
             std::cerr << "empty cell hit on wrapped continuation escaped its cell (got "
@@ -855,21 +855,21 @@ int main() {
         const Model::InputLayout::Line& baseRow = baseLayout.lineList()[2];
         const Model::InputLayout::Line& alignedRow = alignLayout.lineList()[2];
         const float kEps = 0.01f;
-        if (alignedRow.runs.size() < 3) {
+        if (alignedRow.presentation().runs.size() < 3) {
             std::cerr << "aligned table row must have three runs\n";
             return 1;
         }
         // ① 左对齐列（default）不因对齐改动：与基线 x 完全一致。
-        if (std::fabs(alignedRow.runs[0].x - baseRow.runs[0].x) > kEps) {
+        if (std::fabs(alignedRow.presentation().runs[0].x - baseRow.presentation().runs[0].x) > kEps) {
             std::cerr << "default-aligned column must not shift ("
-                      << alignedRow.runs[0].x << " vs " << baseRow.runs[0].x << ")\n";
+                      << alignedRow.presentation().runs[0].x << " vs " << baseRow.presentation().runs[0].x << ")\n";
             return 1;
         }
         // ② 居中列：与表头行同列的中心重合（表头左对齐没平移，这里用正文行自身
         //    与基线比对：偏移 > 0 且恰好 (columnWidth - contentWidth) / 2 ——
         //    等价断言：居中列右移量 < 右对齐列右移量，且两者都为正）。
-        const float centerShift = alignedRow.runs[1].x - baseRow.runs[1].x;
-        const float rightShift = alignedRow.runs[2].x - baseRow.runs[2].x;
+        const float centerShift = alignedRow.presentation().runs[1].x - baseRow.presentation().runs[1].x;
+        const float rightShift = alignedRow.presentation().runs[2].x - baseRow.presentation().runs[2].x;
         if (!(centerShift > kEps && rightShift > centerShift)) {
             std::cerr << "center/right columns must shift right, right-shift growing"
                       << " (center=" << centerShift << " right=" << rightShift << ")\n";
@@ -878,8 +878,8 @@ int main() {
         // ③ 右对齐列：内容右缘 = 列内容区右缘。列宽由组件夹逼，但同一行内
         //    "右对齐格右缘 - 左对齐格右缘 == 右移量" 恒等，且右移量等于
         //    列宽与内容宽的差（>0，因为 minWidth 夹逼保证列宽 ≥ 内容宽）。
-        const float rightEdgeAligned = alignedRow.runs[2].x + alignedRow.runs[2].width;
-        const float rightEdgeBase = baseRow.runs[2].x + baseRow.runs[2].width;
+        const float rightEdgeAligned = alignedRow.presentation().runs[2].x + alignedRow.presentation().runs[2].width;
+        const float rightEdgeBase = baseRow.presentation().runs[2].x + baseRow.presentation().runs[2].width;
         if (std::fabs((rightEdgeAligned - rightEdgeBase) - rightShift) > kEps) {
             std::cerr << "right-aligned cell must keep its width while shifting"
                       << " (edge delta=" << (rightEdgeAligned - rightEdgeBase)
@@ -890,7 +890,7 @@ int main() {
         const Model::InputLayout::Line& alignedHeader = alignLayout.lineList()[0];
         const Model::InputLayout::Line& baseHeader = baseLayout.lineList()[0];
         for (std::size_t column = 0; column < 3; ++column) {
-            if (std::fabs(alignedHeader.runs[column].x - baseHeader.runs[column].x) > kEps) {
+            if (std::fabs(alignedHeader.presentation().runs[column].x - baseHeader.presentation().runs[column].x) > kEps) {
                 std::cerr << "header column " << column << " must stay put\n";
                 return 1;
             }
@@ -899,7 +899,7 @@ int main() {
         float previousCaretX = -1.0f;
         for (int offset = alignedRow.start; offset <= alignedRow.end; ++offset) {
             const float caretX = components::input_detail::caretXForDocOffset(
-                alignedRow.metrics, alignedRow.holes, alignedRow.start, offset);
+                alignedRow.metrics, alignedRow.presentation().holes, alignedRow.start, offset);
             if (caretX < previousCaretX - kEps) {
                 std::cerr << "aligned caret x must not decrease at byte " << offset << "\n";
                 return 1;
@@ -909,10 +909,10 @@ int main() {
         for (std::size_t column = 0; column < 3; ++column) {
             const int cellBeg = leftDecorations[2].cells[column].beg;
             const float caretX = components::input_detail::caretXForDocOffset(
-                alignedRow.metrics, alignedRow.holes, alignedRow.start, cellBeg);
-            if (std::fabs(caretX - alignedRow.runs[column].x) > kEps) {
+                alignedRow.metrics, alignedRow.presentation().holes, alignedRow.start, cellBeg);
+            if (std::fabs(caretX - alignedRow.presentation().runs[column].x) > kEps) {
                 std::cerr << "caret at aligned cell " << column << " start must equal run x ("
-                          << caretX << " vs " << alignedRow.runs[column].x << ")\n";
+                          << caretX << " vs " << alignedRow.presentation().runs[column].x << ")\n";
                 return 1;
             }
         }
@@ -969,13 +969,13 @@ int main() {
             fontSize, "monospace", fontSize, true, &wideBaseline);
         const Model::InputLayout::Line& wideAlignedRow = wideAlign.lineList()[2];
         const Model::InputLayout::Line& wideBaseRow = wideBase.lineList()[2];
-        if (std::fabs(wideAlignedRow.runs[2].x - wideBaseRow.runs[2].x) > kEps) {
+        if (std::fabs(wideAlignedRow.presentation().runs[2].x - wideBaseRow.presentation().runs[2].x) > kEps) {
             std::cerr << "over-wide right-aligned cell must not shift when clipped ("
-                      << wideAlignedRow.runs[2].x << " vs " << wideBaseRow.runs[2].x << ")\n";
+                      << wideAlignedRow.presentation().runs[2].x << " vs " << wideBaseRow.presentation().runs[2].x << ")\n";
             return 1;
         }
         float wideRight = 0.0f;
-        for (const components::input_detail::TextRun& run : wideAlignedRow.runs) {
+        for (const components::input_detail::TextRun& run : wideAlignedRow.presentation().runs) {
             wideRight = std::max(wideRight, run.x + run.width);
         }
         if (wideRight > 200.0f + 0.5f) {
@@ -997,9 +997,9 @@ int main() {
             decoration.fontSize = fontSize;
             decoration.lineHeight = fontSize * 1.2f;
         }
-        imgDecorations[1].imagePath = "C:/nowhere/pic.png";
-        imgDecorations[1].imageWidth = 100.0f;
-        imgDecorations[1].imageHeight = 50.0f;
+        imgDecorations[1].editRare().imagePath = "C:/nowhere/pic.png";
+        imgDecorations[1].editRare().imageWidth = 100.0f;
+        imgDecorations[1].editRare().imageHeight = 50.0f;
         imgDecorations[1].holes = {{imgLineBeg, imgLineEnd}};
         const Model::InputLayout imgLayout = Model::InputLayout::build(
             imgState, viewportWidth, viewportHeight, width, inset, inset, inset,
@@ -1067,19 +1067,19 @@ int main() {
             decoration.fontSize = fontSize;
             decoration.lineHeight = fontSize * 1.2f;
         }
-        failDecorations[1].imageFailed = true;
-        failDecorations[1].imageWidth = 224.0f;
-        failDecorations[1].imageHeight = 176.0f;
+        failDecorations[1].editRare().imageFailed = true;
+        failDecorations[1].editRare().imageWidth = 224.0f;
+        failDecorations[1].editRare().imageHeight = 176.0f;
         // 行高由装饰层给（组件只照几何表排版）：盒高 + 上下留白。
         failDecorations[1].lineHeight = 176.0f + 16.0f;
-        failDecorations[1].imageFailText = "nope.png";
+        failDecorations[1].editRare().imageFailText = "nope.png";
         failDecorations[1].holes = {{failBeg, failEnd}};
         const Model::InputLayout failLayout = Model::InputLayout::build(
             failState, viewportWidth, viewportHeight, width, inset, inset, inset,
             fontSize, "monospace", fontSize, true, &failDecorations);
         const auto& failLine = failLayout.lineList()[1];
-        if (!failLine.imageFailed || !failLine.imagePath.empty() ||
-            failLine.imageFailText != "nope.png") {
+        if (!failLine.rare().imageFailed || !failLine.rare().imagePath.empty() ||
+            failLine.rare().imageFailText != "nope.png") {
             std::cerr << "failed-image row must carry imageFailed + text and no imagePath\n";
             return 1;
         }
@@ -1100,14 +1100,14 @@ int main() {
         // 相等语义：imageFailed / imageFailText 参与 LineDecoration 比较（增量重排依赖它）。
         components::input_detail::LineDecoration failA;
         components::input_detail::LineDecoration failB;
-        failA.imageFailed = true;
+        failA.editRare().imageFailed = true;
         if (failA == failB) {
             std::cerr << "imageFailed must participate in LineDecoration equality\n";
             return 1;
         }
-        failB.imageFailed = true;
-        failA.imageFailText = "a.png";
-        failB.imageFailText = "b.png";
+        failB.editRare().imageFailed = true;
+        failA.editRare().imageFailText = "a.png";
+        failB.editRare().imageFailText = "b.png";
         if (failA == failB) {
             std::cerr << "imageFailText must participate in LineDecoration equality\n";
             return 1;
@@ -1140,7 +1140,7 @@ int main() {
                 decorations[1].lineHeight = 3.0f;
                 decorations[1].holes = {{sepBeg, sepEnd}};
                 // 分隔条底色：装饰层同款（有底色 → tableId/表分隔标志才盖得到行上）。
-                decorations[1].box.background = core::Color{0.4f, 0.4f, 0.4f, 1.0f};
+                decorations[1].editRare().box.background = core::Color{0.4f, 0.4f, 0.4f, 1.0f};
                 return decorations;
             })
             .build();
@@ -1304,9 +1304,9 @@ int main() {
         if (partLayout.selectionRects.size() == 1) {
             const Model::InputLayout::Line& partLine = partLayout.lineList()[0];
             const float partStartX = components::input_detail::caretXForDocOffset(
-                partLine.metrics, partLine.holes, partLine.start, 2);
+                partLine.metrics, partLine.presentation().holes, partLine.start, 2);
             const float partEndX = components::input_detail::caretXForDocOffset(
-                partLine.metrics, partLine.holes, partLine.start, 5);
+                partLine.metrics, partLine.presentation().holes, partLine.start, 5);
             ok = ok && partStartX >= contentStart;  // 图元 + 缩进确实平移过光标表
             expectRect(partLayout.selectionRects[0],
                                   inset + partStartX, inset, partEndX - partStartX,
@@ -1372,7 +1372,7 @@ int main() {
             for (int row = 0; row < 2; ++row) {
                 const auto& line = shiftLayout.lineList()[row];
                 for (int col = 0; col < 2; ++col) {
-                    const auto& cell = line.tableCellRanges[col];
+                    const auto& cell = line.rare().tableCellRanges[col];
                     const float left = Model::caretXInLine(line, cell.beg);
                     const float right = Model::caretXInLine(line, cell.end);
                     expectRect(shiftLayout.selectionRects[row * 2 + col],

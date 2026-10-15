@@ -73,7 +73,7 @@ std::vector<Decoration> makeDecorations(const std::string& text, bool rich) {
             components::input_detail::LineRun run;
             run.beg = start + 2;
             run.end = std::min(end, start + 10);
-            run.style.weight = 700;
+            run.style.edit().weight = 700;
             d.runs.push_back(run);
         }
         if (rich && rows.size() % 29 == 2) {
@@ -145,11 +145,11 @@ bool sameLineShape(const Line& a, const Line& b, int index) {
         !near(a.top, b.top) || !near(a.lineHeight, b.lineHeight) ||
         !near(a.fontSize, b.fontSize) || !near(a.metrics.width, b.metrics.width) ||
         !near(a.spaceBefore, b.spaceBefore) || !near(a.textShiftY, b.textShiftY) ||
-        !near(a.textBandHeight, b.textBandHeight) ||
+        !near(a.rare().textBandHeight, b.rare().textBandHeight) ||
         a.hidden != b.hidden || a.hiddenByFold != b.hiddenByFold ||
         a.lineNumber != b.lineNumber || a.lineStart != b.lineStart ||
-        a.tableId != b.tableId || a.holes != b.holes || !sameRuns(a.runs, b.runs) ||
-        !near(a.contentIndent, b.contentIndent) || a.glyph != b.glyph) {
+        a.tableId != b.tableId || a.presentation().holes != b.presentation().holes || !sameRuns(a.presentation().runs, b.presentation().runs) ||
+        !near(a.contentIndent, b.contentIndent) || a.presentation().glyph != b.presentation().glyph) {
         std::cerr << prefix << '\n';
         return false;
     }
@@ -160,7 +160,7 @@ std::size_t caretStops(const std::vector<Line>& lines, bool tablesOnly = false) 
     std::size_t result = 0;
     for (const auto& line : lines) {
         if (tablesOnly && line.tableId < 0) continue;
-        result += std::min(line.metrics.byteIndices.size(), line.metrics.caretX.size());
+        result += std::min(line.metrics.byteIndices().size(), line.metrics.caretX().size());
     }
     return result;
 }
@@ -168,8 +168,8 @@ std::size_t caretStops(const std::vector<Line>& lines, bool tablesOnly = false) 
 std::size_t caretCapacityBytes(const std::vector<Line>& lines) {
     std::size_t bytes = 0;
     for (const auto& line : lines) {
-        bytes += line.metrics.byteIndices.capacity() * sizeof(int);
-        bytes += line.metrics.caretX.capacity() * sizeof(float);
+        bytes += line.metrics.byteIndices().capacity() * sizeof(int);
+        bytes += line.metrics.caretX().capacity() * sizeof(float);
     }
     return bytes;
 }
@@ -459,6 +459,73 @@ int main() {
     }
     check(caretCapacityBytes(twoMiBCompactLines) < caretCapacityBytes(twoMiBFullLines) / 8,
           "2 MiB compact caret capacity is bounded independently of text-metrics cache bytes");
+
+    // Sparse rich metadata must not change ordinary wrapping or allocate records
+    // on a read/offset translation. Rich copies detach before either translation.
+    const auto plainRows = Model::measureLines(u8"中文🙂 long plain text long plain text\n", "monospace", 16, 70);
+    check(plainRows.size() > 2, "plain sparse regression exercises soft-wrapped segments");
+    for (auto row : plainRows) {
+        check(!row.hasRare() && !row.hasPresentation() && row.rare().imagePath.empty() && row.presentation().glyph.codepoint == 0,
+              "ordinary soft-wrapped rows read shared defaults without allocating metadata");
+        Model::translateLineMetadata(row, 5, 1);
+        Model::applyLineIndent(row, 4);
+        check(!row.hasRare() && !row.hasPresentation(), "plain offset and indent changes retain empty sidecars");
+        components::input_detail::LineGlyph marker;
+        marker.text = "3."; marker.advance = 12;
+        Model::applyLineGlyph(row, marker);
+        check(!row.hasRare() && row.hasPresentation() && row.presentation().glyph.text == "3.",
+              "list glyph allocates only the small presentation record");
+        const auto kept = row;
+        row.editPresentation().glyph.text = "4.";
+        check(kept.presentation().glyph.text == "3.", "common marker copies retain independent value semantics");
+    }
+    Line rich;
+    rich.start = 10; rich.end = 20; rich.tableId = 10;
+    rich.editPresentation().holes.push_back({11, 13});
+    rich.editPresentation().runs.push_back({13, 18, 2, 5, {}});
+    rich.editPresentation().color = {0.2f, 0.3f, 0.4f, 1.0f};
+    rich.metrics.width = 20;
+    rich.metrics.editDetails().byteIndices = {0, 2, 5};
+    rich.metrics.editDetails().caretX = {0, 4, 20};
+    rich.editRare().tableCellRanges.push_back({10, 20, 0});
+    rich.editRare().tableDocCaretStops.push_back({10, 2, 0});
+    rich.editRare().imagePath = "image.png";
+    rich.editRare().fontFamily = "monospace";
+    rich.editRare().box.backgroundBlockFirst = true;
+    const Line retained = rich;
+    check(retained.rareIdentity() == rich.rareIdentity(), "copied rich rows initially share immutable metadata");
+    Model::translateLineMetadata(rich, 7, 1);
+    Model::applyLineIndent(rich, 3);
+    check(retained.metrics.caretX()[1] == 4 && rich.metrics.caretX()[1] == 7,
+          "copied detailed caret arrays remain independent during geometry shifts");
+    check(retained.presentation().holes[0].beg == 11 && retained.presentation().runs[0].beg == 13 &&
+          retained.presentation().runs[0].x == 2 && rich.presentation().holes[0].beg == 18 &&
+          rich.presentation().runs[0].beg == 20 && rich.presentation().runs[0].x == 5,
+          "source and x translations preserve a copied row's holes and styled runs");
+    Line assigned;
+    assigned = rich;
+    assigned.editPresentation().color.r = 0.9f;
+    assigned.editPresentation().runs[0].width = 20;
+    check(rich.presentation().color.r == 0.2f && rich.presentation().runs[0].width == 5,
+          "presentation copy assignment retains independent value semantics");
+    assigned = Line{};
+    check(!assigned.hasPresentation(), "assignment of an ordinary row releases its old presentation");
+    Model::releaseLineDetails(rich);
+    check(!rich.metrics.hasDetails() && rich.metrics.byteIndices().empty() && rich.metrics.caretX().empty() &&
+          rich.metrics.width == 23 && retained.metrics.hasDetails(),
+          "releasing offscreen caret storage keeps exact width and copied detailed rows");
+    check(retained.rare().tableCellRanges[0].beg == 10 &&
+          retained.rare().tableDocCaretStops[0].byteIndex == 10 &&
+          retained.rare().tableDocCaretStops[0].x == 2,
+          "incremental source/x translation never changes retained table metadata");
+    check(rich.rare().tableCellRanges[0].beg == 17 &&
+          rich.rare().tableDocCaretStops[0].byteIndex == 17 &&
+          rich.rare().tableDocCaretStops[0].x == 5 &&
+          rich.rareIdentity() != retained.rareIdentity(), "table translations detach exactly before mutation");
+    rich.editRare().imagePath = "changed.png";
+    rich.editRare().box.backgroundBlockFirst = false;
+    check(retained.rare().imagePath == "image.png" && retained.rare().box.backgroundBlockFirst,
+          "image and rounded block metadata remain independent across rich copies");
 
     std::cout << (failures == 0 ? "PASS" : "FAIL")
               << ": input_viewport_metrics (" << failures << " failures)\n";

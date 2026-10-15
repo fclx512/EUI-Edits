@@ -73,8 +73,8 @@ int main() {
     Fixture single("甲",longCn);
     auto all=single.build(single.leftBeg,single.rightEnd);
     const auto& last=all.lineList().back();
-    const auto tail=last.tableDocCaretStops.back();
-    const auto before=last.tableDocCaretStops[last.tableDocCaretStops.size()-2];
+    const auto tail=last.rare().tableDocCaretStops.back();
+    const auto before=last.rare().tableDocCaretStops[last.rare().tableDocCaretStops.size()-2];
     const float expectedY=12+4.4f+static_cast<float>(all.lineList().size()-1)*20.8f;
     auto one=single.build(before.byteIndex,tail.byteIndex);
     check(one.selectionRects.size()==1,"one final Chinese character must have exactly one span");
@@ -91,7 +91,7 @@ int main() {
     auto bothAll=both.build(both.leftBeg,both.rightEnd);
     const auto& finalLine=bothAll.lineList().back();
     int leftTailStart=both.leftEnd;
-    for(const auto& s:finalLine.tableDocCaretStops)
+    for(const auto& s:finalLine.rare().tableDocCaretStops)
         if(s.column==0) {leftTailStart=s.byteIndex;break;}
     auto crossed=both.build(leftTailStart,both.rightBeg+3);
     bool firstRow=false,lastRow=false;

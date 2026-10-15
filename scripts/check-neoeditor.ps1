@@ -1,42 +1,25 @@
-#Requires -Version 5.1
+﻿#Requires -Version 7
 [CmdletBinding()]
 param(
     [string]$BuildDirectory,
     [string]$CMake,
     [string]$Python,
     [string]$Generator,
-    [ValidateRange(1, 32)][int]$Parallel = 2
+    [ValidateRange(1, 32)][int]$Parallel = 2,
+    [switch]$PreflightOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $PSScriptRoot 'neoeditor-release-common.ps1')
 if ($env:OS -ne 'Windows_NT') { throw 'EUI-Edits release checks require Windows with MSVC x64.' }
 if (-not $BuildDirectory) { $BuildDirectory = Join-Path $repo ('build-neoeditor-check-' + [Guid]::NewGuid().ToString('N')) }
-$BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
+$BuildDirectory = Assert-EuiRepositoryPath $BuildDirectory $repo 'BuildDirectory'
 if (Test-Path -LiteralPath $BuildDirectory) { throw 'Use a new build directory. Existing directories are never changed or deleted.' }
 
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-if (-not $Generator -and (Test-Path -LiteralPath $vswhere)) {
-    $vsVersion = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion) | Select-Object -First 1
-    if ($vsVersion -and $vsVersion.StartsWith('18.')) { $Generator = 'Visual Studio 18 2026' }
-    elseif ($vsVersion -and $vsVersion.StartsWith('17.')) { $Generator = 'Visual Studio 17 2022' }
-}
-if (-not $Generator) { throw 'Supported Visual Studio installation not found. Pass -Generator explicitly.' }
-if (-not $CMake) {
-    $command = Get-Command cmake -ErrorAction SilentlyContinue
-    if ($command) { $CMake = $command.Source }
-    elseif (Test-Path -LiteralPath $vswhere) {
-        $CMake = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe') | Select-Object -First 1
-    }
-}
-if (-not $CMake -or -not (Test-Path -LiteralPath $CMake)) { throw 'CMake not found. Pass -CMake with an absolute executable path.' }
-$ctest = Join-Path (Split-Path -Parent $CMake) 'ctest.exe'
-if (-not (Test-Path -LiteralPath $ctest)) { throw 'ctest.exe must be next to the selected CMake executable.' }
-if (-not $Python) {
-    $command = Get-Command python -ErrorAction SilentlyContinue
-    if ($command) { $Python = $command.Source }
-}
-if (-not $Python -or -not (Test-Path -LiteralPath $Python)) { throw 'Python 3 not found. Pass -Python with an absolute executable path.' }
+$tools = Get-EuiReleaseTools -CMake $CMake -Generator $Generator -Python $Python -NeedPython
+$CMake = $tools.CMake; $ctest = $tools.CTest; $Generator = $tools.Generator; $Python = $tools.Python
+if ($PreflightOnly) { $tools; return }
 
 & $Python (Join-Path $repo 'tests/tools/check_i18n.py')
 if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits translation checks failed.' }
@@ -60,7 +43,7 @@ $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encod
     'input_horizontal_viewport', 'input_callback_layout', 'input_drag_feedback', 'input_pointer_feedback',
     'document_vault_loading', 'virtual_list_wheel', 'win32_event_pump', 'runtime_scroll_sync',
     'main_window_frame_reentry', 'dsl_window_resize_throttle', 'd2d_render_policy', 'd2d_atlas_capacity',
-    'input_model', 'input_value_reference', 'input_source_line_count', 'table_selection_background', 'lp_decorations', 'undo_incremental', 'image_attach')
+    'input_model', 'input_value_reference', 'input_source_line_count', 'table_selection_background', 'lp_decorations', 'source_decorations', 'decoration_uniform_pages', 'undo_incremental', 'image_attach')
 $tests = @($targets) + @('settings_language_zh', 'settings_language_en', 'settings_language_invalid', 'settings_language_legacy')
 $filter = '^(' + (($tests | ForEach-Object { [Regex]::Escape($_) }) -join '|') + ')$'
 # CTest can otherwise succeed with an accidentally empty or incomplete selection.

@@ -239,6 +239,9 @@ bool testJsonTrustedEdits(const neo::EditorColors& colors) {
                     "trusted edit row count matches text and snapshot");
         ok &= check(cache.tokenizedRows == expectedTokenizedRows,
                     "trusted JSON edit takes the described partial-reparse path");
+        for (const auto& row : cache.rows) for (const auto& token : row.tokens)
+            ok &= check(token.beg >= 0 && token.end >= token.beg && token.end <= row.length,
+                        "cached token offsets stay relative and inside their physical row");
         text = std::move(change.text);
     };
 
@@ -278,7 +281,7 @@ bool testIncrementalStateAndFreshOracle(const neo::EditorColors& colors) {
         ok &= check(cache.rows.size() >= 4, "multiline test has suffix rows");
         if (cache.rows.size() < 4) return;
         if (language == "python") {
-            ok &= check(hasToken(cache.rows[0].tokens, cache.rows[0].text, TokenKind::String, "'''"),
+            ok &= check(hasToken(cache.rows[0].tokens, oldText.substr(0, cache.rows[0].length), TokenKind::String, "'''"),
                         "Python triple-string opening delimiter is highlighted");
         }
         const bool oldState = language == "python" ? cache.rows[0].out.tripleString
@@ -379,15 +382,37 @@ bool testThemeSnapshotImmutability() {
         const auto newRuns = (*newer)[0].runs;
         ok &= check(!oldRuns.empty() && !newRuns.empty(), "keyword line has colored token runs");
         if (!oldRuns.empty() && !newRuns.empty()) {
-            ok &= check(colorEqual(oldRuns[0].style.color, oldColor),
+            ok &= check(colorEqual(oldRuns[0].style.get().color, oldColor),
                         "held old snapshot keeps its original theme color");
-            ok &= check(colorEqual(newRuns[0].style.color, light.tokenKeyword),
+            ok &= check(colorEqual(newRuns[0].style.get().color, light.tokenKeyword),
                         "new snapshot uses the new theme color");
         }
     }
     return ok;
 }
 } // namespace
+
+bool testUnicodeAndEmptyRows() {
+    bool ok = true;
+    const auto colors = neo::makeColors(true);
+    for (const std::string text : {std::string{}, std::string("\n"), std::string("\r\n"),
+                                  std::string(u8"/* 中文🙂\r\n继续 */\r\nreturn 1;\r\n")}) {
+        neo::source::Cache cache;
+        DecoratorEditInfo info;info.textRevision = 1;
+        auto old = neo::source::build(cache, text, "c", colors, 0, info);
+        ok &= check(old && old->size() == lineStarts(text).size(), "empty/CRLF row count preserves LF contract");
+        auto changed = replaceLine(text, 0, u8"// 改🙂", 2);
+        info.textRevision = 2;info.edit = &changed.edit;
+        auto next = neo::source::build(cache, changed.text, "c", colors, 0, info);
+        auto oracle = fresh(changed.text, "c", colors, 0, 2);
+        ok &= check(next && oracle && *next == *oracle,
+                    "UTF-8 first-row edit and multiline state changes equal a fresh oracle");
+        for (const auto& row : cache.rows) for (const auto& token : row.tokens)
+            ok &= check(token.beg >= 0 && token.end >= token.beg && token.end <= row.length,
+                        "UTF-8/CRLF tokens remain within relative byte ranges");
+    }
+    return ok;
+}
 
 int main() {
     bool ok = true;
@@ -398,5 +423,6 @@ int main() {
     ok &= testJsonTrustedEdits(colors);
     ok &= testImeAndUntrustedEditIsolation(colors);
     ok &= testThemeSnapshotImmutability();
+    ok &= testUnicodeAndEmptyRows();
     return ok ? 0 : 1;
 }

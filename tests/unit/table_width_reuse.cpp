@@ -5,13 +5,13 @@ using M = components::input_detail::InputModel;
 using D = components::input_detail::LineDecoration;
 
 bool same(const M::TextLine& a, const M::TextLine& b) {
-    if (a.start != b.start || a.end != b.end || a.holes != b.holes ||
-        a.metrics.byteIndices != b.metrics.byteIndices || a.metrics.caretX != b.metrics.caretX ||
+    if (a.start != b.start || a.end != b.end || a.presentation().holes != b.presentation().holes ||
+        a.metrics.byteIndices() != b.metrics.byteIndices() || a.metrics.caretX() != b.metrics.caretX() ||
         a.metrics.width != b.metrics.width || a.lineHeight != b.lineHeight ||
-        a.textBandHeight != b.textBandHeight ||
-        a.tableId != b.tableId || a.runs.size() != b.runs.size()) return false;
-    for (size_t i = 0; i < a.runs.size(); ++i) {
-        const auto& x = a.runs[i]; const auto& y = b.runs[i];
+        a.rare().textBandHeight != b.rare().textBandHeight ||
+        a.tableId != b.tableId || a.presentation().runs.size() != b.presentation().runs.size()) return false;
+    for (size_t i = 0; i < a.presentation().runs.size(); ++i) {
+        const auto& x = a.presentation().runs[i]; const auto& y = b.presentation().runs[i];
         if (x.beg != y.beg || x.end != y.end || x.x != y.x || x.width != y.width || x.style != y.style) return false;
     }
     return true;
@@ -35,7 +35,7 @@ int main() {
     rows[0].cells = {{2, firstEnd - 2, 2}};
     rows[0].holes = {{0, 2}, {firstEnd - 2, firstEnd}};
     components::input_detail::LineRun run;
-    run.beg = 2; run.end = firstEnd - 2; run.style.weight = 700;
+    run.beg = 2; run.end = firstEnd - 2; run.style.edit().weight = 700;
     rows[0].runs = {run};
     rows[1].cells = {{firstEnd + 1, secondEnd, 3}};
     rows[2].cells = {{secondEnd + 1, thirdEnd}};

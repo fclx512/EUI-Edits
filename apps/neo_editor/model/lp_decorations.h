@@ -303,24 +303,24 @@ inline void appendLineRuns(const LpLine& line,
         run.end = span.content.end;
         switch (span.kind) {
             case LpSpanKind::Strong:
-                run.style.weight = 700;
+                run.style.edit().weight = 700;
                 break;
             case LpSpanKind::InlineCode:
             case LpSpanKind::Math:
-                run.style.fontFamily = style.codeFontFamily;
-                run.style.color = style.codeText;
-                run.style.background = style.codeBackground;
+                run.style.edit().fontFamily = style.codeFontFamily;
+                run.style.edit().color = style.codeText;
+                run.style.edit().background = style.codeBackground;
                 break;
             case LpSpanKind::Link:
             case LpSpanKind::Image:
             case LpSpanKind::WikiLink:
-                run.style.color = style.accent;
-                run.style.link = true;  // 命中测试用：单击跳转 / 右键编辑（2026-09-26）
-                run.style.underline = true;
+                run.style.edit().color = style.accent;
+                run.style.edit().link = true;  // 命中测试用：单击跳转 / 右键编辑（2026-09-26）
+                run.style.edit().underline = true;
                 break;
             case LpSpanKind::Strikethrough:
-                run.style.strike = true;
-                run.style.color = style.muted;
+                run.style.edit().strike = true;
+                run.style.edit().color = style.muted;
                 break;
             case LpSpanKind::Emphasis:
                 if (italicFamily.empty()) {
@@ -328,10 +328,10 @@ inline void appendLineRuns(const LpLine& line,
                 }
                 // 走 fontFamily = 斜体文件路径这条路，测量与渲染拿到的是同一份字面，
                 // caret 宽度天然对得上（组件本来就把 run 的 fontFamily 透给两条路径）。
-                run.style.fontFamily = italicFamily;
+                run.style.edit().fontFamily = italicFamily;
                 break;
             case LpSpanKind::Underline:
-                run.style.underline = true;
+                run.style.edit().underline = true;
                 break;
             default:
                 continue;  // 没有可见样式差别：不生成段，让行保持"一个文本图元"的老路径
@@ -377,14 +377,14 @@ inline void mergeRuns(std::vector<LineRun>& runs) {
         segment.beg = beg;
         segment.end = events[event].offset;
         for (const std::size_t i : active) {
-            const auto& style = runs[i].style;
-            segment.style.weight = std::max(segment.style.weight, style.weight);
-            if (segment.style.color.a == 0.0f) segment.style.color = style.color;
-            if (segment.style.background.a == 0.0f) segment.style.background = style.background;
-            if (segment.style.fontFamily.empty()) segment.style.fontFamily = style.fontFamily;
-            segment.style.strike |= style.strike;
-            segment.style.link |= style.link;
-            segment.style.underline |= style.underline;
+            const auto& style = runs[i].style.get();
+            segment.style.edit().weight = std::max(segment.style.get().weight, style.weight);
+            if (segment.style.get().color.a == 0.0f) segment.style.edit().color = style.color;
+            if (segment.style.get().background.a == 0.0f) segment.style.edit().background = style.background;
+            if (segment.style.get().fontFamily.empty()) segment.style.edit().fontFamily = style.fontFamily;
+            segment.style.edit().strike |= style.strike;
+            segment.style.edit().link |= style.link;
+            segment.style.edit().underline |= style.underline;
         }
         if (!merged.empty() && merged.back().end == segment.beg &&
             merged.back().style == segment.style) merged.back().end = segment.end;
@@ -409,11 +409,11 @@ inline void appendLineBox(const LpPlan& plan,
                           LineDecoration& decoration) {
     const LpLine& line = plan.lines[index];
     if (line.kind == LpKind::Code && line.codeBlockBeg >= 0) {
-        decoration.box.background = style.codeBackground;
-        decoration.box.backgroundRadius = style.radius;
-        decoration.box.backgroundBlockFirst =
+        decoration.editRare().box.background = style.codeBackground;
+        decoration.editRare().box.backgroundRadius = style.radius;
+        decoration.editRare().box.backgroundBlockFirst =
             index == 0 || plan.lines[index - 1].codeBlockBeg != line.codeBlockBeg;
-        decoration.box.backgroundBlockLast =
+        decoration.editRare().box.backgroundBlockLast =
             index + 1 >= plan.lines.size() || plan.lines[index + 1].codeBlockBeg != line.codeBlockBeg;
         // 代码文字从背景条左缘让开一个 em（Obsidian 的 16px 左内边距，规格表 §2）。
         // 缩进不占源文字节，走装饰层的 contentIndent 平移机制。
@@ -422,11 +422,11 @@ inline void appendLineBox(const LpPlan& plan,
     // frontmatter：整段连成一个弱化小块，与代码块共用同一套矩形机制（底色 + 首末圆角）。
     // 块首/块末只能按"相邻行还是不是 frontmatter"判 —— 它没有 codeBlockBeg 那样的区间字段。
     if (line.kind == LpKind::Frontmatter) {
-        decoration.box.background = style.codeBackground;
-        decoration.box.backgroundRadius = style.radius;
-        decoration.box.backgroundBlockFirst =
+        decoration.editRare().box.background = style.codeBackground;
+        decoration.editRare().box.backgroundRadius = style.radius;
+        decoration.editRare().box.backgroundBlockFirst =
             index == 0 || plan.lines[index - 1].kind != LpKind::Frontmatter;
-        decoration.box.backgroundBlockLast =
+        decoration.editRare().box.backgroundBlockLast =
             index + 1 >= plan.lines.size() || plan.lines[index + 1].kind != LpKind::Frontmatter;
         decoration.contentIndent = style.bodySize;
     }
@@ -435,11 +435,11 @@ inline void appendLineBox(const LpPlan& plan,
         // Reserve that space in layout so wrapping, caret and hit testing agree.
         // 2px borders, 0.75em first padding and 1.2em nesting match the local
         // Obsidian Live Preview reference at 16px text and 125% system DPI.
-        decoration.box.barColor = style.accent;
-        decoration.box.barWidth = 2.0f;
-        decoration.box.barCount = static_cast<unsigned char>(std::min(line.quoteDepth, 4));
+        decoration.editRare().box.barColor = style.accent;
+        decoration.editRare().box.barWidth = 2.0f;
+        decoration.editRare().box.barCount = static_cast<unsigned char>(std::min(line.quoteDepth, 4));
         decoration.contentIndent += style.bodySize *
-            (0.75f + (decoration.box.barCount - 1) * 1.2f);
+            (0.75f + (decoration.rare().box.barCount - 1) * 1.2f);
     }
     appendTableBox(plan, index, style, decoration);
 }
@@ -466,14 +466,14 @@ inline void appendTableBox(const LpPlan& plan,
     if (line.tableId < 0) {
         return;
     }
-    decoration.box.backgroundRadius = 0.0f;
-    decoration.box.gridColor = style.divider;
+    decoration.editRare().box.backgroundRadius = 0.0f;
+    decoration.editRare().box.gridColor = style.divider;
     if (line.tableSeparator) {
         // 分隔行 = 表头下边框：1px 横条，竖线照穿（渲染层在分隔行不另画横线）。
         decoration.lineHeight = kTableSeparatorHeight;
-        decoration.box.background = style.divider;
-        decoration.box.backgroundBlockFirst = true;
-        decoration.box.backgroundBlockLast = true;
+        decoration.editRare().box.background = style.divider;
+        decoration.editRare().box.backgroundBlockFirst = true;
+        decoration.editRare().box.backgroundBlockLast = true;
         return;
     }
     // 单元格底色透明：不置 background，渲染层的底色带合并逻辑就不会画这一行。
@@ -672,17 +672,17 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
                 // 代码块整行走等宽字面（行级字体，S3f 批次 J）：正文用的自选字体多为
                 // 比例字体，字符宽窄不一，代码的缩进与对齐全被打破（极端时视觉重叠）。
                 // 语法 token 着色段没有自己的字体，渲染时继承这一份（见 input.h）。
-                decoration.fontFamily = style.codeFontFamily;
+                decoration.editRare().fontFamily = style.codeFontFamily;
                 decoration.textColor = style.codeText;
                 // 起始围栏行右上角的语言标签（Obsidian LP 的 "JavaScript"，见规格表 §2）。
                 // 只认**起始**围栏（srcBeg == codeBlockBeg）；结束围栏与内容行都不给。
                 if (line.codeFence && line.srcBeg == line.codeBlockBeg) {
-                    decoration.languageLabel = codeLanguageLabel(line.codeLang);
+                    decoration.editRare().languageLabel = codeLanguageLabel(line.codeLang);
                 }
                 break;
             case LpKind::Frontmatter:
                 // frontmatter 与代码块同一档：等宽 + 元数据弱化色。
-                decoration.fontFamily = style.codeFontFamily;
+                decoration.editRare().fontFamily = style.codeFontFamily;
                 // 弱化成次要文字色：元数据不该跟正文抢注意力（同 Obsidian 的"属性"观感）。
                 decoration.textColor = style.muted;
                 break;
@@ -704,7 +704,7 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
                 LineRun heading;
                 heading.beg = contentBeg;
                 heading.end = line.srcEnd;
-                heading.style.weight = 700;
+                heading.style.edit().weight = 700;
                 decoration.runs.push_back(std::move(heading));
             }
         }
@@ -714,7 +714,7 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
             LineRun headerRun;
             headerRun.beg = line.srcBeg;
             headerRun.end = line.srcEnd;
-            headerRun.style.weight = 600;
+            headerRun.style.edit().weight = 600;
             decoration.runs.push_back(std::move(headerRun));
         }
         // 代码块语法着色（2026-09-25，规格表 §4）：只给围栏内容行上色；活动块
@@ -736,25 +736,25 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
                     }
                     switch (token.kind) {
                         case TokenKind::Keyword:
-                            run.style.color = colors->tokenKeyword;
+                            run.style.edit().color = colors->tokenKeyword;
                             break;
                         case TokenKind::String:
-                            run.style.color = colors->tokenString;
+                            run.style.edit().color = colors->tokenString;
                             break;
                         case TokenKind::Number:
-                            run.style.color = colors->tokenNumber;
+                            run.style.edit().color = colors->tokenNumber;
                             break;
                         case TokenKind::Comment:
-                            run.style.color = colors->tokenComment;
+                            run.style.edit().color = colors->tokenComment;
                             break;
                         case TokenKind::Operator:
-                            run.style.color = colors->tokenOperator;
+                            run.style.edit().color = colors->tokenOperator;
                             break;
                         case TokenKind::Function:
-                            run.style.color = colors->tokenFunction;
+                            run.style.edit().color = colors->tokenFunction;
                             break;
                         case TokenKind::Property:
-                            run.style.color = colors->tokenProperty;
+                            run.style.edit().color = colors->tokenProperty;
                             break;
                         case TokenKind::Plain:
                             continue;  // 普通标识符 = 行级 codeText，不加段
@@ -767,8 +767,8 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
         // The projected text is empty; draw a rule only while its source is concealed.
         // The active block shows editable Markdown markers instead.
         if (line.kind == LpKind::Divider && !isActiveBlock) {
-            decoration.box.gridColor = style.divider;
-            decoration.box.horizontalRuleThickness = 2;
+            decoration.editRare().box.gridColor = style.divider;
+            decoration.editRare().box.horizontalRuleThickness = 2;
         }
 
         // 表格（S3f 批次 D）：把格区间交给组件做列吸附，并把**管道与两侧空白**补成
@@ -828,7 +828,7 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
                 completed.beg = content;
                 completed.end = line.srcEnd;
                 decoration.textColor = style.muted;
-                completed.style.strike = true;
+                completed.style.edit().strike = true;
                 decoration.runs.push_back(std::move(completed));
             }
         }
@@ -876,8 +876,8 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
         if (line.kind == LpKind::Heading && plan.foldHeadingBegFor(line.srcBeg) == line.srcBeg) {
             const bool folded = foldedHeadings != nullptr &&
                                 foldedHeadings->count(line.srcBeg) > 0;
-            decoration.gutterGlyph.codepoint = folded ? kFoldChevronRight : kFoldChevronDown;
-            decoration.gutterGlyph.color = style.muted;
+            decoration.editRare().gutterGlyph.codepoint = folded ? kFoldChevronRight : kFoldChevronDown;
+            decoration.editRare().gutterGlyph.color = style.muted;
         }
 
         // 块级图片（S3f 批次 B）：非活动块的纯图行整行藏掉、原位画真图。
@@ -898,22 +898,22 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
                     {1.0f,
                      kImageMaxWidth / static_cast<float>(extent->width),
                      kImageMaxHeight / static_cast<float>(extent->height)});
-                decoration.imagePath = resolved;
-                decoration.imageWidth = static_cast<float>(extent->width) * scale;
-                decoration.imageHeight = static_cast<float>(extent->height) * scale;
-                decoration.lineHeight = decoration.imageHeight + kImageVPad;
+                decoration.editRare().imagePath = resolved;
+                decoration.editRare().imageWidth = static_cast<float>(extent->width) * scale;
+                decoration.editRare().imageHeight = static_cast<float>(extent->height) * scale;
+                decoration.lineHeight = decoration.rare().imageHeight + kImageVPad;
                 // 整行源文藏进洞里（与块级标记的洞一起被 normalizeHoles 合并）。
                 decoration.holes.push_back({line.srcBeg, line.srcEnd});
             } else if (!imageSrcIsRemote(line.pureImageSrc)) {
-                decoration.imageFailed = true;
-                decoration.imageWidth = kImageFailWidth;
-                decoration.imageHeight = kImageFailHeight;
-                decoration.lineHeight = decoration.imageHeight + kImageVPad;
+                decoration.editRare().imageFailed = true;
+                decoration.editRare().imageWidth = kImageFailWidth;
+                decoration.editRare().imageHeight = kImageFailHeight;
+                decoration.lineHeight = decoration.rare().imageHeight + kImageVPad;
                 decoration.holes.push_back({line.srcBeg, line.srcEnd});
                 // 路径文字按失败盒的内宽预算（左右各 12px 内边距），字号 = 正文 0.8 档。
                 const float pathFontSize = size.fontSize * 0.8f;
-                decoration.imageFailText = imageFailDisplayText(
-                    line.pureImageSrc, decoration.imageWidth - 24.0f, pathFontSize);
+                decoration.editRare().imageFailText = imageFailDisplayText(
+                    line.pureImageSrc, decoration.rare().imageWidth - 24.0f, pathFontSize);
             }
         }
 
@@ -941,9 +941,9 @@ inline void buildDecorationForLine(DecorationBuildContext& ctx,
             if (preview) {
                 decoration.hidden = false;
                 decoration.textColor = style.muted;
-                decoration.box.barColor = style.muted;
-                decoration.box.barWidth = 2.0f;
-                decoration.box.barCount = 0;  // 预览横条恒单条（多条是嵌套引用的语义）
+                decoration.editRare().box.barColor = style.muted;
+                decoration.editRare().box.barWidth = 2.0f;
+                decoration.editRare().box.barCount = 0;  // 预览横条恒单条（多条是嵌套引用的语义）
             } else if (static_cast<int>(lineIndex) == cursorLine) {
                 decoration.hidden = false;
             } else {

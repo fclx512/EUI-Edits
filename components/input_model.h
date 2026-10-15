@@ -1,4 +1,8 @@
 #pragma once
+#define EUI_SPARSE_TEXTLINE_RARE 1
+#define EUI_COMPACT_RUN_STYLE 1
+#define EUI_COMPACT_ROW_PRESENTATION 1
+#define EUI_COMPACT_ROW_METRICS 1
 
 #include "components/input_line_map.h"
 #include "core/dsl.h"
@@ -19,6 +23,7 @@
 #include <string>
 #include <utility>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace components::input_detail {
@@ -53,12 +58,67 @@ struct LineRunStyle {
     bool operator!=(const LineRunStyle& other) const { return !(*this == other); }
 };
 
+// Published runs share exact style values; editing a copied run detaches first.
+// The small thread-local interner retains at most 256 values, never documents.
+// No tolerant equality is used to choose a canonical value.
+class LineStyleHandle {
+public:
+    LineStyleHandle() = default;
+    LineStyleHandle(const LineRunStyle& value) { assign(value); }
+    const LineRunStyle& get() const {
+        static const LineRunStyle empty;
+        return value_ ? *value_ : empty;
+    }
+    operator const LineRunStyle&() const { return get(); }
+    // Mutable references are scoped to one immediate edit. Do not retain them
+    // across handle copies or immutable snapshot publication.
+    LineRunStyle& edit() {
+        if (!value_) value_ = std::make_shared<LineRunStyle>();
+        else if (value_.use_count() > 1) value_ = std::make_shared<LineRunStyle>(*value_);
+        return *value_;
+    }
+    void freeze() { if (value_) assign(*value_); }
+    const void* identity() const { return value_.get(); }
+    std::uint64_t residentCapacityBytes() const {
+        return value_ ? sizeof(LineRunStyle) + 2 * sizeof(void*) +
+            (value_->fontFamily.capacity() > 15 ? value_->fontFamily.capacity() + 1 : 0) : 0;
+    }
+    bool operator==(const LineStyleHandle& other) const {
+        return value_ == other.value_ || get() == other.get();
+    }
+    bool operator!=(const LineStyleHandle& other) const { return !(*this == other); }
+    bool storageEquals(const LineStyleHandle& other) const { return exact(get(), other.get()); }
+private:
+    static bool exact(const LineRunStyle& a, const LineRunStyle& b) {
+        return a.weight == b.weight && a.fontFamily == b.fontFamily &&
+            std::memcmp(&a.color, &b.color, sizeof(a.color)) == 0 &&
+            std::memcmp(&a.background, &b.background, sizeof(a.background)) == 0 &&
+            a.strike == b.strike && a.link == b.link && a.underline == b.underline;
+    }
+    void assign(const LineRunStyle& value) {
+        static const LineRunStyle empty;
+        if (exact(value, empty)) { value_.reset(); return; }
+        thread_local std::vector<std::shared_ptr<LineRunStyle>> dictionary;
+        for (const auto& entry : dictionary) {
+            if (exact(*entry, value)) { value_ = entry; return; }
+        }
+        auto next = std::make_shared<LineRunStyle>(value);
+        // Oversized family names are valid values but are never retained globally.
+        if (value.fontFamily.size() <= 4096) {
+            if (dictionary.size() >= 256) dictionary.clear();
+            dictionary.push_back(next);
+        }
+        value_ = std::move(next);
+    }
+    std::shared_ptr<LineRunStyle> value_;
+};
+
 // 一个行内样式段（文本绝对偏移，半开 [beg, end)）。**可以稀疏**：没被任何段覆盖的文字
 // 就是默认样式，不需要上层为"普通文字"也填一段。
 struct LineRun {
     int beg = 0;
     int end = 0;
-    LineRunStyle style;
+    LineStyleHandle style;
 
     bool empty() const { return beg >= end; }
     bool operator==(const LineRun& other) const {
@@ -163,6 +223,19 @@ struct LineCell {
     bool operator!=(const LineCell& other) const { return !(*this == other); }
 };
 
+// Rich block metadata is absent from source-color-only and ordinary rows.
+struct LineDecorationRare {
+    std::string fontFamily;
+    LineBoxStyle box;
+    LineGlyph gutterGlyph;
+    std::string imagePath;
+    float imageWidth = 0.0f;
+    float imageHeight = 0.0f;
+    bool imageFailed = false;
+    std::string imageFailText;
+    std::string languageLabel;
+};
+
 struct LineDecoration {
     float fontSize = 0.0f;    // <= 0 表示沿用控件默认字号
     float lineHeight = 0.0f;  // <= 0 表示沿用控件默认行高（该行字号的 1.2 倍）
@@ -170,19 +243,16 @@ struct LineDecoration {
     core::Color textColor{0.0f, 0.0f, 0.0f, 0.0f};
     // 行级字体（空 = 沿用控件字体）。Live Preview 的代码块/frontmatter 用它换等宽：
     // 测量与渲染都以这份字面为准，样式段（语法 token 着色）没有自己的字体时也继承它。
-    std::string fontFamily;
     std::vector<LineHole> holes;  // 该行要隐藏的区间（**文本绝对偏移**），乱序/重叠会被规范化
     // 行内样式段（**文本绝对偏移**），乱序会被排序；稀疏合法。
     // 注意：样式段目前只在**多行**模式下参与渲染（Live Preview 是唯一的调用方）。
     std::vector<LineRun> runs;
     // 行级矩形（代码块底色 / 引用竖条），见 LineBoxStyle。
-    LineBoxStyle box;
     // 行首图元（任务复选框），见 LineGlyph。
     LineGlyph glyph;
     // 行号位图元（折叠箭头，2026-09-25）：非 0 时该源行的**行号**被这个图标替掉
     // （Obsidian 的标题折叠箭头）。画在行号槽里，命中走既有的 onGutter 路径。
     // 只在 lineStart 段画。
-    LineGlyph gutterGlyph;
     // 行内容左缩进（像素）：整行文字（含行首图元之后的一切）从文本原点右移这么多。
     // 与 LineGlyph 的 advance 同一套平移机制（caretX / run.x 一起移），但不画任何图标 ——
     // Live Preview 的代码块用它把文字从背景条左缘让开（Obsidian 的 16px 左内边距）。
@@ -200,18 +270,12 @@ struct LineDecoration {
     float spaceBefore = 0.0f;
     // 独占一行的块级图片（S3f 批次 B）。非空 = 该行文字整体藏进洞里、原位画这张图；
     // 宽高已在装饰层按文件头算好（渲染层不再猜尺寸）。行高由 lineHeight 给。
-    std::string imagePath;
-    float imageWidth = 0.0f;
-    float imageHeight = 0.0f;
     // 图片失败态占位盒（S3f 批次 F）：本地路径解析失败/头解析不出 → 原位画一个
     // "图标 + 路径"的占位盒（尺寸在 imageWidth/Height，装饰层已按 ZCode 失败盒规格给）。
     // imageFailText 是要显示的路径（装饰层已按盒宽截断），不是文档切片。
-    bool imageFailed = false;
-    std::string imageFailText;
     // 代码块起始围栏行右上角的语言标签（Obsidian LP 的 "JavaScript"）。
     // 只在**起始**围栏行非空；渲染层右对齐画在底色条右上角。放末尾、NSDMI，
     // partial-init 聚合初始化不受影响。
-    std::string languageLabel;
     // 折叠隐藏（S3f 批次 C）：true = 该行不占高度、不画、命中绕开（几何 0 高）。
     bool hidden = false;
     // 「折叠致隐」的原始值：光标行会被装饰层强制可见（hidden 放开），但"这一行
@@ -255,21 +319,21 @@ struct LineDecoration {
         return std::fabs(fontSize - other.fontSize) < 0.001f &&
                std::fabs(lineHeight - other.lineHeight) < 0.001f &&
                colorEquals(textColor, other.textColor) &&
-               fontFamily == other.fontFamily &&
+               rare().fontFamily == other.rare().fontFamily &&
                holes == other.holes &&
                runs == other.runs &&
-               box == other.box &&
+               rare().box == other.rare().box &&
                glyph == other.glyph &&
-               gutterGlyph == other.gutterGlyph &&
+               rare().gutterGlyph == other.rare().gutterGlyph &&
                std::fabs(contentIndent - other.contentIndent) < 0.001f &&
                std::fabs(textShiftY - other.textShiftY) < 0.001f &&
                std::fabs(spaceBefore - other.spaceBefore) < 0.001f &&
-               imagePath == other.imagePath &&
-               std::fabs(imageWidth - other.imageWidth) < 0.001f &&
-               std::fabs(imageHeight - other.imageHeight) < 0.001f &&
-               imageFailed == other.imageFailed &&
-               imageFailText == other.imageFailText &&
-               languageLabel == other.languageLabel &&
+               rare().imagePath == other.rare().imagePath &&
+               std::fabs(rare().imageWidth - other.rare().imageWidth) < 0.001f &&
+               std::fabs(rare().imageHeight - other.rare().imageHeight) < 0.001f &&
+               rare().imageFailed == other.rare().imageFailed &&
+               rare().imageFailText == other.rare().imageFailText &&
+               rare().languageLabel == other.rare().languageLabel &&
                hidden == other.hidden &&
                hiddenByFold == other.hiddenByFold &&
                hiddenByView == other.hiddenByView &&
@@ -281,7 +345,20 @@ struct LineDecoration {
                listIndentBeg == other.listIndentBeg &&
                listIndentEnd == other.listIndentEnd;
     }
+    const LineDecorationRare& rare() const {
+        static const LineDecorationRare empty;
+        return rare_ ? *rare_ : empty;
+    }
+    bool hasRare() const { return bool(rare_); }
+    const void* rareIdentity() const { return rare_.get(); }
+    LineDecorationRare& editRare() {
+        if (!rare_) rare_ = std::make_shared<LineDecorationRare>();
+        else if (rare_.use_count() > 1) rare_ = std::make_shared<LineDecorationRare>(*rare_);
+        return *rare_;
+    }
     bool operator!=(const LineDecoration& other) const { return !(*this == other); }
+private:
+    std::shared_ptr<LineDecorationRare> rare_;
 };
 
 // 排版产出的样式段：视图层照着它逐段画。坐标已算好（相对本行/本段左端的 x 与宽度），
@@ -291,7 +368,7 @@ struct TextRun {
     int end = 0;
     float x = 0.0f;      // 相对本行左端
     float width = 0.0f;
-    LineRunStyle style;
+    LineStyleHandle style;
 };
 
 // 返回"每个物理行一项"的装饰表（物理行 = 按 '\n' 切分的行）。
@@ -365,6 +442,7 @@ public:
     LineDecorationTable() = default;
     explicit LineDecorationTable(std::vector<LineDecoration> rows) : size_(rows.size()),
         pages_((size_ + pageSize - 1) / pageSize) {
+        for (auto& row : rows) for (auto& run : row.runs) run.style.freeze();
         // Large plain/paragraph-heavy documents repeat the same decoration. A
         // uniform immutable page owns ONE exact row; source positions remain in
         // the plan/layout, never in a guessed decoration. Nonuniform pages retain
@@ -413,9 +491,10 @@ public:
         return result;
     }
     std::uint64_t residentCapacityBytes() const {
+        std::unordered_set<const void*> styles, rare;
         std::uint64_t bytes = sizeof(*this) + pages_.capacity() * sizeof(pages_[0]);
-        if (base_) bytes += pageBytes(*base_);
-        for (const auto& page : pages_) if (page) bytes += pageBytes(*page);
+        if (base_) bytes += pageBytes(*base_, styles, rare);
+        for (const auto& page : pages_) if (page) bytes += pageBytes(*page, styles, rare);
         return bytes;
     }
     // rows is sorted/unique/in-range and proved against the unchanged source plan.
@@ -457,20 +536,35 @@ private:
         // Legacy equality has sub-pixel tolerances. Storage sharing requires exact
         // geometry equality so close but distinct values are never rounded away.
         return a == b && a.fontSize == b.fontSize && a.lineHeight == b.lineHeight &&
+            std::memcmp(&a.textColor, &b.textColor, sizeof(a.textColor)) == 0 &&
+            std::equal(a.runs.begin(), a.runs.end(), b.runs.begin(), [](const auto& x, const auto& y) {
+                return x.style.storageEquals(y.style);
+            }) &&
             a.contentIndent == b.contentIndent && a.textShiftY == b.textShiftY &&
-            a.spaceBefore == b.spaceBefore && a.imageWidth == b.imageWidth &&
-            a.imageHeight == b.imageHeight && a.cellPadding == b.cellPadding &&
-            a.glyph.advance == b.glyph.advance && a.gutterGlyph.advance == b.gutterGlyph.advance &&
-            a.box.backgroundRadius == b.box.backgroundRadius && a.box.barWidth == b.box.barWidth;
+            a.spaceBefore == b.spaceBefore && a.rare().imageWidth == b.rare().imageWidth &&
+            a.rare().imageHeight == b.rare().imageHeight && a.cellPadding == b.cellPadding &&
+            a.glyph.advance == b.glyph.advance && a.rare().gutterGlyph.advance == b.rare().gutterGlyph.advance &&
+            a.rare().box.backgroundRadius == b.rare().box.backgroundRadius && a.rare().box.barWidth == b.rare().box.barWidth;
     }
-    static std::uint64_t pageBytes(const Page& rows) {
+    static std::uint64_t pageBytes(const Page& rows, std::unordered_set<const void*>& styles,
+                                   std::unordered_set<const void*>& rareRecords) {
+        const auto heapString = [](const std::string& value) -> std::uint64_t {
+            return value.capacity() > 15 ? value.capacity() + 1 : 0;
+        };
         std::uint64_t bytes = sizeof(Page) + rows.capacity() * sizeof(LineDecoration);
         for (const auto& row : rows) {
-            bytes += row.fontFamily.capacity() + row.imagePath.capacity() + row.imageFailText.capacity() +
-                row.languageLabel.capacity() + row.glyph.text.capacity() + row.gutterGlyph.text.capacity();
+            bytes += heapString(row.glyph.text);
+            if (row.hasRare() && rareRecords.insert(row.rareIdentity()).second) {
+                bytes += sizeof(LineDecorationRare) + 2 * sizeof(void*);
+                const auto& rare = row.rare();
+                bytes += heapString(rare.fontFamily) + heapString(rare.imagePath) + heapString(rare.imageFailText) +
+                    heapString(rare.languageLabel) + heapString(rare.gutterGlyph.text);
+            }
             bytes += row.holes.capacity() * sizeof(LineHole) + row.runs.capacity() * sizeof(LineRun) +
                 row.cells.capacity() * sizeof(LineCell);
-            for (const auto& run : row.runs) bytes += run.style.fontFamily.capacity();
+            for (const auto& run : row.runs)
+                if (run.style.identity() && styles.insert(run.style.identity()).second)
+                    bytes += run.style.residentCapacityBytes();
         }
         return bytes;
     }
@@ -578,89 +672,145 @@ struct InputModel {
         int column = 0;
     };
 
-    struct TextLine {
-        int start = 0;
-        int end = 0;
-        bool hardBreakAfter = false;
-        core::TextPrimitive::TextMetrics metrics;
-
-        // ── Live Preview 的逐行排版元数据 ──
-        // metrics 对应的是**投影后文本**（本行的 holes 被删掉之后的那串字），下面这些是它的参数。
-        // 不使用装饰时它们等于控件统一值，排版结果与改造前逐字节一致。
-        float fontSize = 0.0f;    // 该行字号（> 0）
-        float lineHeight = 0.0f;  // 该行行高（> 0）
-        float top = 0.0f;         // 行顶相对内容区原点的 y（前缀和，由 ensureLayoutCache 统一写入）
-        // 本行隐藏的区间。**与 start/end 同一坐标系（文本绝对偏移）**，空 = 本行不隐藏任何字节。
-        std::vector<LineHole> holes;
-        // 行级文字色（alpha == 0 = 用控件默认）。标题/代码块靠它上色。
-        core::Color color{0.0f, 0.0f, 0.0f, 0.0f};
-        // 本行的样式段（**已按投影文本排完版**，含"整段覆盖"的默认段）。空 = 该行没有样式段，
-        // 视图走"整行一个文本图元"的老路径（未使用装饰时逐字节等价于改造前）。
-        std::vector<TextRun> runs;
-        // 行级矩形（代码块底色 / 引用竖条）。默认值 = 什么都不画，所以不使用装饰时与改造前等价。
+    // Ordinary visual rows retain exact wrap/width/height/source mappings.
+    // Rich Markdown, image and table metadata is absent from their resident head.
+    struct TextLineRare {
         LineBoxStyle box;
-        // 行首图元（任务复选框）。同样默认不画；注意它**已经**把 metrics.width 与
-        // 各 caretX / run.x 平移过了（见 appendMeasuredLine），视图层只需按 x=0 画图标。
-        LineGlyph glyph;
-        // 行号位图元（折叠箭头）。默认不画；只在 lineStart 段的行号槽里画，
-        // 顶替该行的行号数字。
         LineGlyph gutterGlyph;
-        // 块级图片（S3f 批次 B）。非空 = 该行文字整体藏进 holes、原位画这张图。
-        // 只在 lineStart 段画（软换行的续行沿用行高但不重复画，v1 已知限制）。
         std::string imagePath;
         float imageWidth = 0.0f;
         float imageHeight = 0.0f;
-        // 图片失败态占位盒（S3f 批次 F）。imageFailed 时 imagePath 为空、
-        // 视图按 imageWidth/Height 画占位盒；imageFailText 是盒内显示的路径。
         bool imageFailed = false;
         std::string imageFailText;
-        // 行号（源文档第几行，从 1 起）。软换行把一个源行拆成多条可视行，
-        // 它们共享同一个 lineNumber；lineStart 只在第一条上为 true，
-        // 视图层用它决定"画不画行号"。
-        int lineNumber = 1;
-        bool lineStart = true;
-        // 折叠隐藏（S3f 批次 C）。放在末尾：:1087 那处聚合初始化按位置取前几个字段，
-        // 新字段带 NSDMI，partial-init 下取默认值，不受影响。
-        bool hidden = false;
-        // 「折叠致隐」原始值（光标行强制可见时 hidden=false 而 hiddenByFold 仍为 true），
-        // onRevealHiddenLine 的自愈检查看它。同样放末尾、NSDMI。
-        bool hiddenByFold = false;
-        // 行内容左缩进（装饰层给，测量时已把 metrics/runs 平移过，渲染层只用来
-        // 给"没有样式段的整行文本图元"补同一个偏移）。放末尾：partial-init 聚合
-        // 初始化不受影响。
-        float contentIndent = 0.0f;
-        // 行内文字在行盒内的整体下移（像素，0 = 顶对齐）。渲染层画文字/行首图元、
-        // 几何层算光标 Y 都要加上它。放末尾、NSDMI，partial-init 不受影响。
-        float textShiftY = 0.0f;
-        // 表格行（2026-09-25 网格线）：本行所属表格的 id（渲染层据此查列几何画
-        // 网格）与"是否分隔行"。同上放末尾、NSDMI，partial-init 下取默认值。
-        int tableId = -1;
-        bool tableSeparator = false;
-        // 行级字体（空 = 控件字体；代码块等宽从这里来）。渲染层的整行文字图元与
-        // 没有自带字体的样式段都以它为准，测量层已经在 appendMeasuredLineCore 里
-        // 用同一份字面算过 metrics。放末尾、NSDMI，partial-init 不受影响。
         std::string fontFamily;
-        // 本行**之前**的块间距（像素，0 = 首尾相接）。只在本源行的第一条可视段上盖章
-        // （软换行的续行不重复），隐藏行恒 0。几何表把它当行间 gap 用，行高/文字位置
-        // 一点都不受影响。放末尾、NSDMI，partial-init 不受影响。
-        float spaceBefore = 0.0f;
-        // 代码块起始围栏行的语言标签（渲染层右对齐画在底色条右上角）。放末尾、NSDMI。
         std::string languageLabel;
-        // Exact row geometry stays resident. Non-table caret arrays are materialized
-        // only for the viewport or an explicit hit/navigation request.
+        std::vector<LineCell> tableCellRanges;
+        std::vector<TableDocCaretStop> tableDocCaretStops;
+        float textBandHeight = 0.0f;
+    };
+
+    struct TextLinePresentation {
+        std::vector<LineHole> holes;
+        core::Color color{0.0f, 0.0f, 0.0f, 0.0f};
+        std::vector<TextRun> runs;
+        LineGlyph glyph;
+    };
+
+    // A row owns its presentation just as the former inline vectors/marker did.
+    // Deep copy preserves independent mutation without sharing writable aliases;
+    // noexcept moves keep vector reallocation from copying decorated rows.
+    template<class T> class RowStorage {
+    public:
+        RowStorage() = default;
+        RowStorage(const RowStorage& other)
+            : value_(other.value_ ? std::make_unique<T>(*other.value_) : nullptr) {}
+        RowStorage& operator=(const RowStorage& other) {
+            if (this != &other) {
+                auto next = other.value_ ? std::make_unique<T>(*other.value_) : nullptr;
+                value_ = std::move(next);
+            }
+            return *this;
+        }
+        RowStorage(RowStorage&&) noexcept = default;
+        RowStorage& operator=(RowStorage&&) noexcept = default;
+        const T& get() const {
+            static const T empty;
+            return value_ ? *value_ : empty;
+        }
+        bool hasValue() const { return bool(value_); }
+        void reset() { value_.reset(); }
+        T& edit() {
+            if (!value_) value_ = std::make_unique<T>();
+            return *value_;
+        }
+    private:
+        std::unique_ptr<T> value_;
+    };
+
+    struct TextLineMetrics {
+        struct Details {
+            std::vector<int> byteIndices;
+            std::vector<float> caretX;
+        };
+        float width = 0.0f;
+        TextLineMetrics() = default;
+        TextLineMetrics(core::TextPrimitive::TextMetrics measured) : width(measured.width) {
+            if (!measured.byteIndices.empty() || !measured.caretX.empty()) {
+                auto& arrays = editDetails();
+                arrays.byteIndices = std::move(measured.byteIndices);
+                arrays.caretX = std::move(measured.caretX);
+            }
+        }
+        const std::vector<int>& byteIndices() const { return details_.get().byteIndices; }
+        const std::vector<float>& caretX() const { return details_.get().caretX; }
+        bool hasDetails() const { return details_.hasValue(); }
+        Details& editDetails() { return details_.edit(); }
+        void releaseDetails() { details_.reset(); }
+        operator CaretMetricsView() const { return {byteIndices(), caretX()}; }
+    private:
+        RowStorage<Details> details_;
+    };
+
+    struct TextLine {
+        int start = 0;
+        int end = 0;
+        TextLineMetrics metrics;
+        float fontSize = 0.0f;
+        float lineHeight = 0.0f;
+        float top = 0.0f;
+        int lineNumber = 1;
+        float contentIndent = 0.0f;
+        float textShiftY = 0.0f;
+        int tableId = -1;
+        float spaceBefore = 0.0f;
+        // Keep byte flags together after the aligned hot fields. Interleaving
+        // them with metrics/floats adds padding to every resident visual row.
+        bool hardBreakAfter = false;
+        bool lineStart = true;
+        bool hidden = false;
+        bool hiddenByFold = false;
+        bool tableSeparator = false;
         bool metricsDeferred = false;
         bool metricsTracked = false;
-        // 表格行的命中 clamp（2026-10-06）：本行各单元格的文档字节区间（与装饰层
-        // LineCell 同源，取前 columns 个）。格与格分界处上一格末尾与下一格开头共享
-        // 同一个投影停靠点，其字节经"歧义归洞之前"总解析到上一格 —— pointerHit
-        // 用这份区间把命中字节 clamp 回点击所在列。非表格行为空。放末尾、NSDMI。
-        std::vector<LineCell> tableCellRanges;
-        // Exact source-byte caret positions for this visual table segment. Unlike
-        // metrics.byteIndices, this preserves both sides of hidden cell borders.
-        std::vector<TableDocCaretStop> tableDocCaretStops;
-        // Table segments share one text height, with padding only at the outer
-        // edges of the source row. Zero keeps the ordinary-line band fallback.
-        float textBandHeight = 0.0f;
+
+        TextLine() = default;
+        // Preserve the measurement helpers' common prefix construction. The
+        // sidecar is never allocated just to construct/read an ordinary row.
+        TextLine(int beg, int stop = 0, bool hard = false,
+                 core::TextPrimitive::TextMetrics measured = {}, float size = 0.0f,
+                 float height = 0.0f, float y = 0.0f, std::vector<LineHole> hiddenBytes = {},
+                 core::Color textColor = {0.0f, 0.0f, 0.0f, 0.0f}, std::vector<TextRun> styled = {})
+            : start(beg), end(stop), metrics(std::move(measured)),
+               fontSize(size), lineHeight(height), top(y), hardBreakAfter(hard) {
+            if (!hiddenBytes.empty() || !styled.empty() || textColor.r != 0.0f ||
+                textColor.g != 0.0f || textColor.b != 0.0f || textColor.a != 0.0f) {
+                auto& content = editPresentation();
+                content.holes = std::move(hiddenBytes);
+                content.color = textColor;
+                content.runs = std::move(styled);
+            }
+        }
+
+        const TextLinePresentation& presentation() const { return presentation_.get(); }
+        bool hasPresentation() const { return presentation_.hasValue(); }
+        TextLinePresentation& editPresentation() { return presentation_.edit(); }
+
+        const TextLineRare& rare() const {
+            static const TextLineRare empty;
+            return rare_ ? *rare_ : empty;
+        }
+        bool hasRare() const { return bool(rare_); }
+        const void* rareIdentity() const { return rare_.get(); }
+        TextLineRare& editRare() {
+            if (!rare_) rare_ = std::make_shared<TextLineRare>();
+            else if (rare_.use_count() > 1) rare_ = std::make_shared<TextLineRare>(*rare_);
+            return *rare_;
+        }
+    private:
+        // Copies share immutable reads. Every mutation must pass editRare(),
+        // including table source-offset and caret-coordinate translations.
+        std::shared_ptr<TextLineRare> rare_;
+        RowStorage<TextLinePresentation> presentation_;
     };
 
     struct TextSelectionRect {
@@ -847,6 +997,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         using Line = TextLine;
         using SelectionRect = TextSelectionRect;
 
+        // Single-line mode owns its metrics here. Multiline mapping uses the
+        // owner's row cache; only the cursor row width is mirrored here.
         core::TextPrimitive::TextMetrics metrics;
         const std::vector<Line>* lines = nullptr;
         // 逐行几何（指向 state.cachedGeometry，生命周期由调用方保证，与 lines 同）。
@@ -920,7 +1072,10 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 layout.cursorLine = layout.lineIndexFor(state.cursor);
                 ensureLineDetails(state, layout.cursorLine);
                 const Line& cursorLine = layout.lineList()[static_cast<size_t>(layout.cursorLine)];
-                layout.metrics = cursorLine.metrics;
+                // Multiline hit testing/selection/navigation already reads the
+                // detailed row cache. Keeping another owned pair of arrays in
+                // the callback layout duplicates a potentially very long row.
+                layout.metrics.width = cursorLine.metrics.width;
                 if(state.wordWrap) state.horizontalScroll = 0.0f;
                 else {
                     const float maximum=std::max(0.0f,state.cachedTextWidth-viewportWidth+fontSize);
@@ -953,7 +1108,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                         : 0.0f;
                 const auto cursorBand = lineTextBand(layout.geometryTable().top(layout.cursorLine),
                                                       layout.geometryTable().height(layout.cursorLine), cursorTextShift,
-                                                      cursorLine.textBandHeight);
+                                                      cursorLine.rare().textBandHeight);
                 const float caretHeight = layout.cursorLineFontSize() * 1.18f;
                 layout.cursorY = textTop + cursorBand.top +
                                  std::max(0.0f, cursorBand.height - caretHeight) * 0.5f - state.verticalScroll;
@@ -1038,14 +1193,14 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             if (lineIndex >= 0 && lineIndex < static_cast<int>(lineListRef.size())) {
                 const Line& line = lineListRef[static_cast<std::size_t>(lineIndex)];
                 hit.lineNumber = line.lineNumber;
-                hit.onGlyph = line.lineStart && line.glyph.codepoint != 0 &&
+                hit.onGlyph = line.lineStart && line.presentation().glyph.codepoint != 0 &&
                               targetX >= line.contentIndent &&
-                              targetX < line.contentIndent + (line.glyph.checkbox
-                                  ? std::min(line.fontSize, line.glyph.advance) : line.glyph.advance);
+                              targetX < line.contentIndent + (line.presentation().glyph.checkbox
+                                  ? std::min(line.fontSize, line.presentation().glyph.advance) : line.presentation().glyph.advance);
                 // 链接命中（2026-09-26）：落点字节落在带 link 样式的段区间里（段两端
                 // 边界也算 —— caret 恰好停在段边界时热区与可见文字保持一致）。
-                for (const TextRun& run : line.runs) {
-                    if (run.style.link && targetX >= run.x && targetX < run.x + run.width) {
+                for (const TextRun& run : line.presentation().runs) {
+                    if (run.style.get().link && targetX >= run.x && targetX < run.x + run.width) {
                         hit.onLink = true;
                         hit.linkBeg = run.beg;
                         hit.linkEnd = run.end;
@@ -1058,8 +1213,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 hit.onGutter = multiline && targetX < 0.0f;
                 // 块级图片（S3f 批次 E）：行框内 [0, imageWidth] 都是图的点击区
                 // （行高含上下留白，留白也算——图就是这一行）。
-                hit.onImage = line.lineStart && !line.imagePath.empty() &&
-                              targetX >= 0.0f && targetX <= line.imageWidth;
+                hit.onImage = line.lineStart && !line.rare().imagePath.empty() &&
+                              targetX >= 0.0f && targetX <= line.rare().imageWidth;
             }
             return hit;
         }
@@ -1073,7 +1228,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             const Line& line = lineListRef[static_cast<size_t>(std::clamp(lineIndex, 0, static_cast<int>(lineListRef.size()) - 1))];
             const int tableHit = tableDocOffsetForX(line, targetX, tableColumnsFor(line.tableId));
             if (tableHit >= 0) return tableHit;
-            return docOffsetForX(line.metrics, line.holes, line.start, targetX);
+            return docOffsetForX(line.metrics, line.presentation().holes, line.start, targetX);
         }
 
         // 表格换行续段的判定辅助（2026-09-26）：byteIndex 在这一段里有没有 caret
@@ -1200,7 +1355,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 if (line.hidden) {
                     continue;
                 }
-                if (line.tableId >= 0 && !line.tableCellRanges.empty()) {
+                if (line.tableId >= 0 && !line.rare().tableCellRanges.empty()) {
                     buildTableSelectionRects(line, lineIndex, startIndex, endIndex, hasGeometry);
                     continue;
                 }
@@ -1233,7 +1388,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 const float rowHeight = hasGeometry ? table.height(lineIndex) : lineHeight;
                 // 文字带（与渲染层同一个纯几何 helper）：y/height 跟着文字走，
                 // 表格行的上下内边距不被吞进选区背景。
-                const LineTextBand band = lineTextBand(rowTop, rowHeight, line.textShiftY, line.textBandHeight);
+                const LineTextBand band = lineTextBand(rowTop, rowHeight, line.textShiftY, line.rare().textBandHeight);
                 const float y = textTop + band.top - currentVerticalScroll;
                 // 粘连补偿：只在与下一条**同样要画**的行首尾相接时补 1px（普通正文
                 // 相邻行的带严格相接，行为与旧版一致）；中间隔着块间距 / 单元格内边距
@@ -1247,7 +1402,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                     const Line& nextLine = lineListRef[next];
                     const float nextTop = lineTextBand(hasGeometry ? table.top(static_cast<int>(next)) : 0.0f,
                                                        hasGeometry ? table.height(static_cast<int>(next)) : lineHeight,
-                                                       nextLine.textShiftY, nextLine.textBandHeight).top;
+                                                       nextLine.textShiftY, nextLine.rare().textBandHeight).top;
                     if (nextTop - (band.top + band.height) <= 0.5f) {
                         stitch = 1.0f;
                     }
@@ -1266,14 +1421,14 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             const auto& geometry = geometryTable();
             const auto band = lineTextBand(hasGeometry ? geometry.top(lineIndex) : 0.0f,
                 hasGeometry ? geometry.height(lineIndex) : lineHeight,
-                line.textShiftY, line.textBandHeight);
+                line.textShiftY, line.rare().textBandHeight);
             const float y = textTop + band.top - currentVerticalScroll;
             if (y + band.height < textTop || y > textTop + viewportHeight) return;
             std::vector<std::pair<float, float>> spans;
-            const auto& stops = line.tableDocCaretStops;
-            const int selectedBeg = visibleLength(line.holes, line.start,
+            const auto& stops = line.rare().tableDocCaretStops;
+            const int selectedBeg = visibleLength(line.presentation().holes, line.start,
                 std::clamp(startIndex, line.start, line.end));
-            const int selectedEnd = visibleLength(line.holes, line.start,
+            const int selectedEnd = visibleLength(line.presentation().holes, line.start,
                 std::clamp(endIndex, line.start, line.end));
             for (std::size_t i = 1; i < stops.size(); ++i) {
                 const auto& before = stops[i - 1];
@@ -1282,8 +1437,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 // Compare projected boundaries to avoid highlighting concealed
                 // markup alone. Only this segment's actual glyph intervals own
                 // a span; an already exhausted short column owns none.
-                const int glyphBeg = visibleLength(line.holes, line.start, before.byteIndex);
-                const int glyphEnd = visibleLength(line.holes, line.start, after.byteIndex);
+                const int glyphBeg = visibleLength(line.presentation().holes, line.start, before.byteIndex);
+                const int glyphEnd = visibleLength(line.presentation().holes, line.start, after.byteIndex);
                 if (selectedBeg >= glyphEnd || selectedEnd <= glyphBeg || glyphBeg == glyphEnd) continue;
                 const float left = std::min(before.x, after.x);
                 const float right = std::max(before.x, after.x);
@@ -1810,7 +1965,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             const int tableHit = tableDocOffsetForX(
                 line, targetX, findTableColumns(state.cachedTables, state.cachedTableIndex, line.tableId));
             if (tableHit >= 0) return tableHit;
-            return docOffsetForX(line.metrics, line.holes, line.start, targetX);
+            return docOffsetForX(line.metrics, line.presentation().holes, line.start, targetX);
         };
 
         const int previous = state.cursor;
@@ -1894,7 +2049,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             lines[target], preferred,
             findTableColumns(state.cachedTables, state.cachedTableIndex, lines[target].tableId));
         moveCursorTo(state, tableHit >= 0 ? tableHit :
-                     docOffsetForX(lines[target].metrics, lines[target].holes,
+                     docOffsetForX(lines[target].metrics, lines[target].presentation().holes,
                                    lines[target].start, preferred), keepSelection);
         state.preferredCursorX = preferred;
         state.hasPreferredCursorX = true;
@@ -2012,7 +2167,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             if (pieceBeg > cursor) {
                 pieces.push_back({cursor, pieceBeg, nullptr});
             }
-            pieces.push_back({pieceBeg, runEnd, &run->style});
+            pieces.push_back({pieceBeg, runEnd, &run->style.get()});
             cursor = runEnd;
         }
         if (cursor < visibleLen) {
@@ -2231,21 +2386,25 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         line.end += deltaBytes;
         line.lineNumber += deltaLines;
         if (line.tableId >= 0) line.tableId += deltaBytes;
-        for (LineHole& hole : line.holes) {
-            hole.beg += deltaBytes;
-            hole.end += deltaBytes;
-        }
-        for (TextRun& run : line.runs) {
-            run.beg += deltaBytes;
-            run.end += deltaBytes;
+        if (line.hasPresentation()) {
+            auto& content = line.editPresentation();
+            for (LineHole& hole : content.holes) {
+                hole.beg += deltaBytes;
+                hole.end += deltaBytes;
+            }
+            for (TextRun& run : content.runs) {
+                run.beg += deltaBytes;
+                run.end += deltaBytes;
+            }
         }
         // 表格命中 clamp 的格区间同样是文档绝对偏移，随行一起平移（2026-10-06）。
-        for (LineCell& cell : line.tableCellRanges) {
-            cell.beg += deltaBytes;
-            cell.end += deltaBytes;
-        }
-        for (TableDocCaretStop& stop : line.tableDocCaretStops) {
-            stop.byteIndex += deltaBytes;
+        if (!line.rare().tableCellRanges.empty() || !line.rare().tableDocCaretStops.empty()) {
+            auto& rare = line.editRare();
+            for (LineCell& cell : rare.tableCellRanges) {
+                cell.beg += deltaBytes;
+                cell.end += deltaBytes;
+            }
+            for (TableDocCaretStop& stop : rare.tableDocCaretStops) stop.byteIndex += deltaBytes;
         }
     }
 
@@ -2255,16 +2414,16 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
     static bool decorationsEquivalent(const LineDecoration& a, const LineDecoration& b, int delta) {
         if (std::fabs(a.fontSize - b.fontSize) >= 0.001f ||
             std::fabs(a.lineHeight - b.lineHeight) >= 0.001f ||
-            !colorEquals(a.textColor, b.textColor) || a.fontFamily != b.fontFamily ||
-            !(a.box == b.box) || !(a.glyph == b.glyph) || !(a.gutterGlyph == b.gutterGlyph) ||
+            !colorEquals(a.textColor, b.textColor) || a.rare().fontFamily != b.rare().fontFamily ||
+            !(a.rare().box == b.rare().box) || !(a.glyph == b.glyph) || !(a.rare().gutterGlyph == b.rare().gutterGlyph) ||
             std::fabs(a.contentIndent - b.contentIndent) >= 0.001f ||
             std::fabs(a.textShiftY - b.textShiftY) >= 0.001f ||
             std::fabs(a.spaceBefore - b.spaceBefore) >= 0.001f ||
-            a.imagePath != b.imagePath ||
-            std::fabs(a.imageWidth - b.imageWidth) >= 0.001f ||
-            std::fabs(a.imageHeight - b.imageHeight) >= 0.001f ||
-            a.imageFailed != b.imageFailed || a.imageFailText != b.imageFailText ||
-            a.languageLabel != b.languageLabel ||
+            a.rare().imagePath != b.rare().imagePath ||
+            std::fabs(a.rare().imageWidth - b.rare().imageWidth) >= 0.001f ||
+            std::fabs(a.rare().imageHeight - b.rare().imageHeight) >= 0.001f ||
+            a.rare().imageFailed != b.rare().imageFailed || a.rare().imageFailText != b.rare().imageFailText ||
+            a.rare().languageLabel != b.rare().languageLabel ||
             a.hidden != b.hidden || a.hiddenByFold != b.hiddenByFold ||
             ((a.tableId < 0 || b.tableId < 0) ? a.tableId != b.tableId
                                              : a.tableId + delta != b.tableId) ||
@@ -3129,8 +3288,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
     }
 
     static void releaseLineDetails(TextLine& line) {
-        std::vector<int>{}.swap(line.metrics.byteIndices);
-        std::vector<float>{}.swap(line.metrics.caretX);
+        line.metrics.releaseDetails();
         line.metricsDeferred = true;
         line.metricsTracked = false;
     }
@@ -3142,23 +3300,24 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         if (index < 0 || index >= static_cast<int>(state.cachedLines.size())) return;
         auto& line = state.cachedLines[static_cast<std::size_t>(index)];
         if (line.metricsDeferred) {
-            const auto& family = line.fontFamily.empty() ? state.cachedFontFamily : line.fontFamily;
+            const auto& family = line.rare().fontFamily.empty() ? state.cachedFontFamily : line.rare().fontFamily;
             core::TextPrimitive::TextMetrics metrics;
-            if (line.runs.empty()) {
-                metrics = measureMetrics(projectText(state.text, line.start, line.end, line.holes),
+            if (line.presentation().runs.empty()) {
+                metrics = measureMetrics(projectText(state.text, line.start, line.end, line.presentation().holes),
                                          family, line.fontSize);
             } else {
                 std::vector<LineRun> runs;
-                runs.reserve(line.runs.size());
-                for (const auto& run : line.runs) runs.push_back({run.beg, run.end, run.style});
-                const auto pieces = buildVisiblePieces(line.holes, line.start, line.end, runs);
-                metrics = layoutStyledRange(state.text, line.start, line.end, line.holes, pieces,
-                    0, visibleLength(line.holes, line.start, line.end), line.fontSize, family).metrics;
+                runs.reserve(line.presentation().runs.size());
+                for (const auto& run : line.presentation().runs) runs.push_back({run.beg, run.end, run.style});
+                const auto pieces = buildVisiblePieces(line.presentation().holes, line.start, line.end, runs);
+                metrics = layoutStyledRange(state.text, line.start, line.end, line.presentation().holes, pieces,
+                    0, visibleLength(line.presentation().holes, line.start, line.end), line.fontSize, family).metrics;
             }
-            const float shift = line.contentIndent + glyphAdvanceOf(line.glyph, line.fontSize);
+            const float shift = line.contentIndent + glyphAdvanceOf(line.presentation().glyph, line.fontSize);
             for (auto& x : metrics.caretX) x += shift;
-            line.metrics.byteIndices = std::move(metrics.byteIndices);
-            line.metrics.caretX = std::move(metrics.caretX);
+            auto& arrays = line.metrics.editDetails();
+            arrays.byteIndices = std::move(metrics.byteIndices);
+            arrays.caretX = std::move(metrics.caretX);
             line.metricsDeferred = false;
             ++debugLayoutStats().detailMeasuredRows;
         }
@@ -3284,7 +3443,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                     static_cast<std::size_t>(decoration->listIndentBeg),
                     static_cast<std::size_t>(decoration->listIndentEnd - decoration->listIndentBeg));
                 const std::string& measureFont =
-                    decoration->fontFamily.empty() ? fontFamily : decoration->fontFamily;
+                    decoration->rare().fontFamily.empty() ? fontFamily : decoration->rare().fontFamily;
                 const float bodyColumn =
                     core::TextPrimitive::measureTextWidth(measureSource, measureFont, effectiveFontSize);
                 if (!resolvedGlyph.text.empty() && resolvedGlyph.codepoint == 0 &&
@@ -3320,16 +3479,16 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             }
         }
         // 行级字体盖章（代码块等宽）：渲染层从 TextLine.fontFamily 取，与测量同源。
-        if (decoration != nullptr && !decoration->fontFamily.empty()) {
+        if (decoration != nullptr && !decoration->rare().fontFamily.empty()) {
             for (std::size_t index = firstNew; index < out.size(); ++index) {
-                out[index].fontFamily = decoration->fontFamily;
+                out[index].editRare().fontFamily = decoration->rare().fontFamily;
             }
         }
         // 行号位盖章（折叠箭头）：只在 lineStart 段画，续段保留行号数字。
-        if (decoration != nullptr && decoration->gutterGlyph.codepoint != 0) {
+        if (decoration != nullptr && decoration->rare().gutterGlyph.codepoint != 0) {
             for (std::size_t index = firstNew; index < out.size(); ++index) {
                 if (out[index].lineStart) {
-                    out[index].gutterGlyph = decoration->gutterGlyph;
+                    out[index].editRare().gutterGlyph = decoration->rare().gutterGlyph;
                 }
             }
         }
@@ -3351,14 +3510,14 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             out[firstNew].spaceBefore = decoration->spaceBefore;
         }
         // 语言标签盖章（只给本源行的第一条可视段，同 spaceBefore）。
-        if (decoration != nullptr && !decoration->languageLabel.empty() && !decoration->hidden &&
+        if (decoration != nullptr && !decoration->rare().languageLabel.empty() && !decoration->hidden &&
             firstNew < out.size()) {
-            out[firstNew].languageLabel = decoration->languageLabel;
+            out[firstNew].editRare().languageLabel = decoration->rare().languageLabel;
         }
         if (decoration == nullptr) {
             return;
         }
-        const LineBoxStyle& box = decoration->box;
+        const LineBoxStyle& box = decoration->rare().box;
         // gridColor 也算"有盒"：表格行现在**没有底色**（Obsidian 的表格是纯网格），
         // 网格线是这一行唯一的视觉信息，漏掉它整张表就只剩文字了。
         const bool hasBox = box.background.a > 0.0f ||
@@ -3366,8 +3525,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                             box.gridColor.a > 0.0f;
         const bool hasGlyph = decoration->glyph.codepoint != 0 || !decoration->glyph.text.empty();
         const bool hasIndent = resolvedIndent > 0.0f;
-        const bool hasImage = !decoration->imagePath.empty();
-        const bool hasImageFail = decoration->imageFailed;
+        const bool hasImage = !decoration->rare().imagePath.empty();
+        const bool hasImageFail = decoration->rare().imageFailed;
         const bool hasHidden = decoration->hidden || decoration->hiddenByFold;
         if (!hasBox && !hasGlyph && !hasIndent && !hasImage && !hasImageFail && !hasHidden) {
             return;
@@ -3381,11 +3540,11 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 line.tableSeparator = decoration->tableSeparator;
             }
             if (hasBox) {
-                line.box = box;
+                line.editRare().box = box;
                 // A physical source line can wrap into several visual segments.
                 // Its rounded block edges belong only to the outermost segments.
-                line.box.backgroundBlockFirst = box.backgroundBlockFirst && index == firstNew;
-                line.box.backgroundBlockLast = box.backgroundBlockLast && index + 1 == out.size();
+                line.editRare().box.backgroundBlockFirst = box.backgroundBlockFirst && index == firstNew;
+                line.editRare().box.backgroundBlockLast = box.backgroundBlockLast && index + 1 == out.size();
             }
             if (hasGlyph) {
                 applyLineGlyph(line, resolvedGlyph);
@@ -3394,15 +3553,15 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 applyLineIndent(line, resolvedIndent);
             }
             if (hasImage) {
-                line.imagePath = decoration->imagePath;
-                line.imageWidth = decoration->imageWidth;
-                line.imageHeight = decoration->imageHeight;
+                line.editRare().imagePath = decoration->rare().imagePath;
+                line.editRare().imageWidth = decoration->rare().imageWidth;
+                line.editRare().imageHeight = decoration->rare().imageHeight;
             }
             if (hasImageFail) {
-                line.imageFailed = true;
-                line.imageWidth = decoration->imageWidth;
-                line.imageHeight = decoration->imageHeight;
-                line.imageFailText = decoration->imageFailText;
+                line.editRare().imageFailed = true;
+                line.editRare().imageWidth = decoration->rare().imageWidth;
+                line.editRare().imageHeight = decoration->rare().imageHeight;
+                line.editRare().imageFailText = decoration->rare().imageFailText;
             }
             if (hasHidden) {
                 line.hidden = decoration->hidden;
@@ -3420,14 +3579,15 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
     // line.fontSize 就是 appendMeasuredLineCore 的 lineFontSize，与装饰/控件字号同源。
     static void applyLineGlyph(InputLayout::Line& line, const LineGlyph& glyph) {
         const float advance = glyphAdvanceOf(glyph, line.fontSize);
-        line.glyph = glyph;
-        line.glyph.advance = advance;
+        auto& content = line.editPresentation();
+        content.glyph = glyph;
+        content.glyph.advance = advance;
         line.metrics.width += advance;
-        for (float& caret : line.metrics.caretX) {
-            caret += advance;
-        }
-        for (TableDocCaretStop& stop : line.tableDocCaretStops) stop.x += advance;
-        for (TextRun& run : line.runs) {
+        if (line.metrics.hasDetails())
+            for (float& caret : line.metrics.editDetails().caretX) caret += advance;
+        if (!line.rare().tableDocCaretStops.empty())
+            for (TableDocCaretStop& stop : line.editRare().tableDocCaretStops) stop.x += advance;
+        for (TextRun& run : content.runs) {
             run.x += advance;
         }
     }
@@ -3438,13 +3598,12 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
     static void applyLineIndent(InputLayout::Line& line, float indent) {
         line.contentIndent = indent;
         line.metrics.width += indent;
-        for (float& caret : line.metrics.caretX) {
-            caret += indent;
-        }
-        for (TableDocCaretStop& stop : line.tableDocCaretStops) stop.x += indent;
-        for (TextRun& run : line.runs) {
-            run.x += indent;
-        }
+        if (line.metrics.hasDetails())
+            for (float& caret : line.metrics.editDetails().caretX) caret += indent;
+        if (!line.rare().tableDocCaretStops.empty())
+            for (TableDocCaretStop& stop : line.editRare().tableDocCaretStops) stop.x += indent;
+        if (line.hasPresentation())
+            for (TextRun& run : line.editPresentation().runs) run.x += indent;
     }
 
     static void appendMeasuredLineCore(std::vector<InputLayout::Line>& out,
@@ -3469,7 +3628,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         // 行级字体（Live Preview 的代码块等宽）：装饰给了就用它，否则控件字体。
         // 下面三条测量路径与渲染层用的是同一份字面，光标/caret 天然对得上。
         const std::string lineFontFamily =
-            decoration != nullptr && !decoration->fontFamily.empty() ? decoration->fontFamily : fontFamily;
+            decoration != nullptr && !decoration->rare().fontFamily.empty() ? decoration->rare().fontFamily : fontFamily;
         std::vector<LineHole> holes;
         std::vector<LineRun> runs;
         if (decoration != nullptr) {
@@ -3926,11 +4085,11 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             out.push_back({start, end, hardBreakAfter && lastSegment, std::move(metrics),
                            lineFontSize, segmentHeight, 0.0f,
                            holes, lineColor, std::move(outRuns)});
-            out.back().tableDocCaretStops = std::move(docStops);
-            out.back().textBandHeight = textLineHeight;
+            out.back().editRare().tableDocCaretStops = std::move(docStops);
+            out.back().editRare().textBandHeight = textLineHeight;
             // 命中 clamp 用（2026-10-06）：每条可视行都带整行的格区间 —— 任一列在
             // 这条可视行上都至少有一个停靠点，点击列归属按 x 几何即可判定。
-            out.back().tableCellRanges.assign(decoration.cells.begin(),
+            out.back().editRare().tableCellRanges.assign(decoration.cells.begin(),
                                               decoration.cells.begin() + columns);
         }
     }
@@ -3997,28 +4156,28 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
     }
 
     static bool lineHasDocCaretStop(const InputLayout::Line& line, int byteIndex) {
-        if (line.tableDocCaretStops.empty()) {
+        if (line.rare().tableDocCaretStops.empty()) {
             const int clamped = std::clamp(byteIndex, line.start, line.end);
-            const int visible = visibleLength(line.holes, line.start, clamped);
+            const int visible = visibleLength(line.presentation().holes, line.start, clamped);
             const std::size_t count =
-                std::min(line.metrics.byteIndices.size(), line.metrics.caretX.size());
+                std::min(line.metrics.byteIndices().size(), line.metrics.caretX().size());
             for (std::size_t i = 0; i < count; ++i) {
-                if (line.metrics.byteIndices[i] == visible) return true;
+                if (line.metrics.byteIndices()[i] == visible) return true;
             }
             return false;
         }
-        for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+        for (const TableDocCaretStop& stop : line.rare().tableDocCaretStops) {
             if (stop.byteIndex == byteIndex) return true;
         }
         // Decoration cell.end can include concealed closing markup. Compare in the
         // cell-local projection so that byte offsets inside that hidden suffix still
         // resolve to the visual segment owning the cell's final caret.
-        for (std::size_t column = 0; column < line.tableCellRanges.size(); ++column) {
-            const LineCell& cell = line.tableCellRanges[column];
+        for (std::size_t column = 0; column < line.rare().tableCellRanges.size(); ++column) {
+            const LineCell& cell = line.rare().tableCellRanges[column];
             if (byteIndex < cell.beg || byteIndex > cell.end) continue;
-            const auto cellHoles = clipHoles(line.holes, cell.beg, cell.end);
+            const auto cellHoles = clipHoles(line.presentation().holes, cell.beg, cell.end);
             const int visible = visibleLength(cellHoles, cell.beg, byteIndex);
-            for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+            for (const TableDocCaretStop& stop : line.rare().tableDocCaretStops) {
                 if (stop.column == static_cast<int>(column) &&
                     visibleLength(cellHoles, cell.beg, stop.byteIndex) == visible) return true;
             }
@@ -4100,13 +4259,13 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
 
     // 行内光标 x：文档偏移 → x。落在隐藏区间里会被投影吸附，看得到的光标一定落在可见文本上。
     static float caretXInLine(const InputLayout::Line& line, int docOffset) {
-        for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+        for (const TableDocCaretStop& stop : line.rare().tableDocCaretStops) {
             if (stop.byteIndex == docOffset) return stop.x;
         }
         int ownerColumn = -1;
         int closestByteDistance = std::numeric_limits<int>::max();
-        for (std::size_t column = 0; column < line.tableCellRanges.size(); ++column) {
-            const LineCell& cell = line.tableCellRanges[column];
+        for (std::size_t column = 0; column < line.rare().tableCellRanges.size(); ++column) {
+            const LineCell& cell = line.rare().tableCellRanges[column];
             if (docOffset < cell.beg || docOffset > cell.end) continue;
             const int distance = std::min(std::abs(docOffset - cell.beg),
                                           std::abs(docOffset - cell.end));
@@ -4118,7 +4277,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         if (ownerColumn >= 0) {
             const TableDocCaretStop* nearest = nullptr;
             int nearestDistance = std::numeric_limits<int>::max();
-            for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+            for (const TableDocCaretStop& stop : line.rare().tableDocCaretStops) {
                 if (stop.column != ownerColumn) continue;
                 const int distance = std::abs(docOffset - stop.byteIndex);
                 if (distance < nearestDistance) {
@@ -4128,15 +4287,15 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             }
             if (nearest != nullptr) return nearest->x;
         }
-        return caretXForDocOffset(line.metrics, line.holes, line.start, docOffset);
+        return caretXForDocOffset(line.metrics, line.presentation().holes, line.start, docOffset);
     }
 
     static int tableDocOffsetForX(const InputLayout::Line& line, float targetX,
                                   const TableColumns* columns) {
-        if (line.tableDocCaretStops.empty() || columns == nullptr) return -1;
-        const int count = std::min(columns->count(), static_cast<int>(line.tableCellRanges.size()));
+        if (line.rare().tableDocCaretStops.empty() || columns == nullptr) return -1;
+        const int count = std::min(columns->count(), static_cast<int>(line.rare().tableCellRanges.size()));
         if (count <= 0) return -1;
-        const float columnX = targetX - line.contentIndent - glyphAdvanceOf(line.glyph, line.fontSize);
+        const float columnX = targetX - line.contentIndent - glyphAdvanceOf(line.presentation().glyph, line.fontSize);
         int selected = 0;
         for (int c = 1; c < count; ++c) {
             const float boundary = (columns->x[static_cast<std::size_t>(c - 1)] +
@@ -4146,7 +4305,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         }
         const TableDocCaretStop* best = nullptr;
         float bestDistance = std::numeric_limits<float>::max();
-        for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+        for (const TableDocCaretStop& stop : line.rare().tableDocCaretStops) {
             if (stop.column != selected) continue;
             const float distance = std::fabs(targetX - stop.x);
             if (distance < bestDistance) {
@@ -4155,7 +4314,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             }
         }
         if (best != nullptr) return best->byteIndex;
-        const LineCell& cell = line.tableCellRanges[static_cast<std::size_t>(selected)];
+        const LineCell& cell = line.rare().tableCellRanges[static_cast<std::size_t>(selected)];
         return cell.beg == cell.end ? cell.beg : cell.end;
     }
 
@@ -4178,14 +4337,14 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             return line.end;
         }
         if (byteIndex > line.start) {
-            if (!line.tableDocCaretStops.empty()) {
+            if (!line.rare().tableDocCaretStops.empty()) {
                 int best = line.start;
-                for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+                for (const TableDocCaretStop& stop : line.rare().tableDocCaretStops) {
                     if (stop.byteIndex < byteIndex && stop.byteIndex > best) best = stop.byteIndex;
                 }
                 if (best < byteIndex) return best;
             }
-            return previousVisibleCaret(line.metrics, line.holes, line.start, byteIndex);
+            return previousVisibleCaret(line.metrics, line.presentation().holes, line.start, byteIndex);
         }
         if (lineIndex <= 0) {
             return line.start;
@@ -4204,14 +4363,14 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             return std::min(static_cast<int>(text.size()), line.end + 1);
         }
         if (byteIndex < line.end) {
-            if (!line.tableDocCaretStops.empty()) {
+            if (!line.rare().tableDocCaretStops.empty()) {
                 int best = line.end;
-                for (const TableDocCaretStop& stop : line.tableDocCaretStops) {
+                for (const TableDocCaretStop& stop : line.rare().tableDocCaretStops) {
                     if (stop.byteIndex > byteIndex && stop.byteIndex < best) best = stop.byteIndex;
                 }
                 if (best > byteIndex) return best;
             }
-            return nextVisibleCaret(line.metrics, line.holes, line.start, byteIndex);
+            return nextVisibleCaret(line.metrics, line.presentation().holes, line.start, byteIndex);
         }
         if (lineIndex + 1 >= static_cast<int>(lines.size())) {
             return line.end;

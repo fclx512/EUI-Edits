@@ -24,7 +24,7 @@ struct Fixture {
                 row.hidden = firstGroup && i == 0 && hidden;
                 if (firstGroup && i == 0 && bold) {
                     components::input_detail::LineRun run;
-                    run.beg = beg; run.end = row.cells[0].end; run.style.weight = 700;
+                    run.beg = beg; run.end = row.cells[0].end; run.style.edit().weight = 700;
                     row.runs.push_back(run);
                 }
                 rows.push_back(std::move(row));
@@ -39,12 +39,12 @@ struct Fixture {
 
 bool sameLine(const M::TextLine& a, const M::TextLine& b) {
     if (a.start != b.start || a.end != b.end || a.lineNumber != b.lineNumber ||
-        a.holes != b.holes || a.metrics.byteIndices != b.metrics.byteIndices ||
-        a.metrics.caretX != b.metrics.caretX || a.metrics.width != b.metrics.width ||
+        a.presentation().holes != b.presentation().holes || a.metrics.byteIndices() != b.metrics.byteIndices() ||
+        a.metrics.caretX() != b.metrics.caretX() || a.metrics.width != b.metrics.width ||
         a.lineHeight != b.lineHeight || a.hidden != b.hidden || a.tableId != b.tableId ||
-        a.runs.size() != b.runs.size()) return false;
-    for (size_t i = 0; i < a.runs.size(); ++i) {
-        const auto& x = a.runs[i]; const auto& y = b.runs[i];
+        a.presentation().runs.size() != b.presentation().runs.size()) return false;
+    for (size_t i = 0; i < a.presentation().runs.size(); ++i) {
+        const auto& x = a.presentation().runs[i]; const auto& y = b.presentation().runs[i];
         if (x.beg != y.beg || x.end != y.end || x.x != y.x || x.width != y.width || x.style != y.style)
             return false;
     }

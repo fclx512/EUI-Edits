@@ -259,17 +259,17 @@ bool snapshotsComposeBlockDecorations() {
     std::vector<Decoration> decorations(5);
     for (auto& line : decorations) line.lineHeight = 24.0f;
     for (int i = 0; i < 3; ++i) {
-        decorations[i].box.background = {0.10f, 0.15f, 0.20f, 1.0f};
-        decorations[i].box.backgroundRadius = 4.0f;
+        decorations[i].editRare().box.background = {0.10f, 0.15f, 0.20f, 1.0f};
+        decorations[i].editRare().box.backgroundRadius = 4.0f;
     }
-    decorations[0].box.backgroundBlockFirst = true;
-    decorations[2].box.backgroundBlockLast = true;
-    decorations[3].box.barColor = {0.20f, 0.40f, 0.80f, 1.0f};
-    decorations[3].box.barWidth = 2.0f;
-    decorations[3].box.barCount = 2;
+    decorations[0].editRare().box.backgroundBlockFirst = true;
+    decorations[2].editRare().box.backgroundBlockLast = true;
+    decorations[3].editRare().box.barColor = {0.20f, 0.40f, 0.80f, 1.0f};
+    decorations[3].editRare().box.barWidth = 2.0f;
+    decorations[3].editRare().box.barCount = 2;
     decorations[4].tableId = 4;
     decorations[4].cells = {{12, 13, 0}, {14, 15, 0}};
-    decorations[4].box.gridColor = {0.50f, 0.50f, 0.50f, 1.0f};
+    decorations[4].editRare().box.gridColor = {0.50f, 0.50f, 0.50f, 1.0f};
     const auto snapshot = std::make_shared<const components::input_detail::LineDecorationTable>(decorations);
     const auto compose = [&](core::dsl::Ui& ui, bool shared) {
         ui.begin("block-decorations");

@@ -74,11 +74,19 @@ bool readDirectory(const fs::path& directory,
         const std::string name = textfile::pathToUtf8(item.path().filename());
         bool directoryLink = false;
         bool directoryEntry = false;
+        bool regularEntry = false;
 #if defined(_WIN32)
+        // The iterator's directory_entry already contains enumeration metadata.
+        // Only ordinary files use that snapshot: directories and links retain
+        // the tag/error checks below. This does not read file contents.
+        std::error_code cachedError;
+        const auto cachedStatus = item.symlink_status(cachedError);
+        regularEntry = !cachedError && fs::is_regular_file(cachedStatus);
         // Junctions and symbolic links are reparse points, but cloud placeholders
         // and other reparse directories may contain listable children. Inspect
         // the tag so only link-like directory entries are leaves.
-        const DWORD attributes = GetFileAttributesW(item.path().c_str());
+        const DWORD attributes = regularEntry ? INVALID_FILE_ATTRIBUTES
+                                             : GetFileAttributesW(item.path().c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES &&
             (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
             directoryEntry = true;
@@ -100,7 +108,7 @@ bool readDirectory(const fs::path& directory,
             }
         }
 #endif
-        if (!directoryEntry) {
+        if (!regularEntry && !directoryEntry) {
             directoryLink = item.is_symlink(entryError);
             directoryEntry = !entryError && item.is_directory(entryError);
         }
@@ -115,7 +123,7 @@ bool readDirectory(const fs::path& directory,
             if (!directoryLink) readDirectory(item.path(), entry.relative, result, entry.children);
             ++result.directoryCount;
             directories.push_back(std::move(entry));
-        } else if (!name.empty() && !entryError && item.is_regular_file(entryError)) {
+        } else if (!name.empty() && !entryError && (regularEntry || item.is_regular_file(entryError))) {
             Entry entry;
             entry.name = name;
             entry.relative = joinRelative(relative, name);

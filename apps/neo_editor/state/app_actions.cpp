@@ -814,8 +814,8 @@ void refreshVault(AppState& state, bool resetScroll) {
         return;
     }
 
-    // 用户显式动作（新建/重命名/删除/打开/换根）要求列表立刻反映结果：这里同步扫一次
-    // 并发布进共享缓存；切页那条路径走 adoptVaultScan，不再同步扫描。
+    // 新建/重命名/删除等文件操作要求列表立刻反映结果：同步扫一次并发布进共享缓存。
+    // 选目录、地址栏换根与切页使用 prepareVault/adoptVaultScan。
     tracelog::Span span("vault-scan");
     vaultcache::requestScanSync(state.vaultRoot);
     span.note("root=" + std::to_string(state.vaultRoot.size()));
@@ -875,8 +875,25 @@ void chooseVaultDirectory(AppState& state) {
     settings::current().mode = static_cast<int>(state.mode);
     settings::flush();
 
-    refreshVault(state, true);
+    prepareVault(state, true);
     persistDocumentSession(state);
+}
+
+void navigateToVaultParent(AppState& state) {
+    if (state.vaultRoot.empty()) {
+        return;
+    }
+    const std::filesystem::path current = textfile::pathFromUtf8(state.vaultRoot).lexically_normal();
+    const std::filesystem::path parent = current.parent_path();
+    if (parent.empty() || parent == current) {
+        return;
+    }
+    state.vaultRoot = textfile::pathToUtf8(parent);
+    state.vaultAddress = state.vaultRoot;
+    state.vaultScan.reset();
+    state.vaultRowsGeneration = 0;
+    state.expanded.clear();
+    prepareVault(state, true);
 }
 
 void toggleFolder(AppState& state, const std::string& relative) {
@@ -966,7 +983,7 @@ void navigateToVaultPath(AppState& state, std::string text) {
     state.expanded.clear();
     state.filter.clear();
     state.mode = EditorMode::Vault;
-    refreshVault(state, true);
+    prepareVault(state, true);
     if (file) {
         requestOpenPath(state, textfile::pathToUtf8(target));
     }

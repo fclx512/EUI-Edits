@@ -14,8 +14,8 @@ on:
       - 'tests/**'
       - 'CMakeLists.txt'
       - 'cmake/**'
-      - 'scripts/check-neoeditor.ps1'
-      - 'scripts/package-neoeditor.ps1'
+      - 'scripts/*.ps1'
+      - 'tests/tools/test_release_scripts.ps1'
       - '.github/workflows/neoeditor-ci.yml'
       - '.github/workflows/neoeditor-release.yml'
   pull_request:
@@ -30,11 +30,15 @@ on:
       - 'tests/**'
       - 'CMakeLists.txt'
       - 'cmake/**'
-      - 'scripts/check-neoeditor.ps1'
-      - 'scripts/package-neoeditor.ps1'
+      - 'scripts/*.ps1'
+      - 'tests/tools/test_release_scripts.ps1'
       - '.github/workflows/neoeditor-ci.yml'
       - '.github/workflows/neoeditor-release.yml'
   workflow_dispatch:
+
+concurrency:
+  group: euiedits-check-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -48,12 +52,30 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - name: Check translations and Win32/Direct2D correctness
+      - name: Check release preparation guards
         shell: pwsh
-        run: ./scripts/check-neoeditor.ps1 -BuildDirectory "$env:GITHUB_WORKSPACE/build-neoeditor-check"
-      - name: Build and verify the standalone executable
+        run: ./tests/tools/test_release_scripts.ps1 -Python (Get-Command python).Source
+      - name: Prepare frozen candidate with bounded builds
         shell: pwsh
-        run: ./scripts/package-neoeditor.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE/out/neoeditor-ci"
+        run: |
+          $source = Get-Content cmake/NeoEditorVersion.cmake -Raw
+          if ($source -notmatch 'set\(NEO_EDITOR_VERSION "([^"]+)"') { throw 'Cannot read product version.' }
+          ./scripts/prepare-neoeditor-release.ps1 -Version $Matches[1] -Parallel 2 `
+            -RunDirectory "$env:GITHUB_WORKSPACE/out/ci-release-prep" `
+            -OutputDirectory "$env:GITHUB_WORKSPACE/out/neoeditor-ci"
+      - name: Retain preparation diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: EUI-Edits-check-evidence-${{ github.run_id }}
+          path: |
+            out/ci-release-prep/*.json
+            out/ci-release-prep/*.log
+            out/ci-release-prep/*-evidence/*
+            out/ci-release-prep/msbuild-diagnostics/**
+            out/release-script-tests-*/**/*.json
+            out/release-script-tests-*/**/*.log
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v6
         with:
           name: EUI-Edits-windows-x64-candidate

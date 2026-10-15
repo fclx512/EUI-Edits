@@ -29,10 +29,10 @@ bool exactRow(const Decoration& a, const Decoration& b) {
     // every field whose legacy equality intentionally allows a subpixel delta.
     return a == b && a.fontSize == b.fontSize && a.lineHeight == b.lineHeight &&
         a.contentIndent == b.contentIndent && a.textShiftY == b.textShiftY &&
-        a.spaceBefore == b.spaceBefore && a.imageWidth == b.imageWidth &&
-        a.imageHeight == b.imageHeight && a.cellPadding == b.cellPadding &&
-        a.glyph.advance == b.glyph.advance && a.gutterGlyph.advance == b.gutterGlyph.advance &&
-        a.box.backgroundRadius == b.box.backgroundRadius && a.box.barWidth == b.box.barWidth;
+        a.spaceBefore == b.spaceBefore && a.rare().imageWidth == b.rare().imageWidth &&
+        a.rare().imageHeight == b.rare().imageHeight && a.cellPadding == b.cellPadding &&
+        a.glyph.advance == b.glyph.advance && a.rare().gutterGlyph.advance == b.rare().gutterGlyph.advance &&
+        a.rare().box.backgroundRadius == b.rare().box.backgroundRadius && a.rare().box.barWidth == b.rare().box.barWidth;
 }
 
 std::vector<Decoration> uniformRows(std::size_t count) {
@@ -73,16 +73,16 @@ void testQuarterPageThreshold() {
     for (std::size_t page = pageCount / 4; page < pageCount; ++page) {
         for (std::size_t offset = 0; offset < Table::pageSize; ++offset) {
             Decoration& row = rows[page * Table::pageSize + offset];
-            row.fontFamily = "dense-" + std::to_string(page) + "-" + std::to_string(offset);
+            row.editRare().fontFamily = "dense-" + std::to_string(page) + "-" + std::to_string(offset);
         }
     }
     const Table table(std::move(rows));
     check(table.contiguousRows() == nullptr,
           "exactly one quarter uniform pages is enough to select page storage");
-    check(table[0].fontFamily.empty() && table[Table::pageSize / 2].fontFamily.empty(),
+    check(table[0].rare().fontFamily.empty() && table[Table::pageSize / 2].rare().fontFamily.empty(),
           "uniform pages survive threshold packing");
-    check(table[pageCount / 4 * Table::pageSize].fontFamily == "dense-16-0" &&
-          table[count - 1].fontFamily == "dense-63-63",
+    check(table[pageCount / 4 * Table::pageSize].rare().fontFamily == "dense-16-0" &&
+          table[count - 1].rare().fontFamily == "dense-63-63",
           "nonuniform pages retain per-row unique values");
 }
 
@@ -98,14 +98,14 @@ void testSparsePayloadPreservation() {
     LineRun run;
     run.beg = static_cast<int>(runsRow * 3 + 5);
     run.end = run.beg + 4;
-    run.style.weight = 700;
-    run.style.fontFamily = "Mono Sparse";
+    run.style.edit().weight = 700;
+    run.style.edit().fontFamily = "Mono Sparse";
     rows[runsRow].runs.push_back(run);
     rows[cellsRow].tableId = 41;
     rows[cellsRow].cells = {{static_cast<int>(cellsRow * 3), static_cast<int>(cellsRow * 3 + 5), 1}};
-    rows[imageRow].imagePath = "images/sparse.png";
-    rows[imageRow].imageWidth = 42.5f;
-    rows[imageRow].imageHeight = 24.25f;
+    rows[imageRow].editRare().imagePath = "images/sparse.png";
+    rows[imageRow].editRare().imageWidth = 42.5f;
+    rows[imageRow].editRare().imageHeight = 24.25f;
     rows[foldedRow].hidden = true;
     rows[foldedRow].hiddenByFold = true;
 
@@ -115,9 +115,9 @@ void testSparsePayloadPreservation() {
     check(table[runsRow].runs == rows[runsRow].runs, "runs survive in their nonuniform page");
     check(table[cellsRow].cells == rows[cellsRow].cells && table[cellsRow].tableId == 41,
           "table cells and identity survive a nonuniform page");
-    check(table[imageRow].imagePath == rows[imageRow].imagePath &&
-          table[imageRow].imageWidth == rows[imageRow].imageWidth &&
-          table[imageRow].imageHeight == rows[imageRow].imageHeight,
+    check(table[imageRow].rare().imagePath == rows[imageRow].rare().imagePath &&
+          table[imageRow].rare().imageWidth == rows[imageRow].rare().imageWidth &&
+          table[imageRow].rare().imageHeight == rows[imageRow].rare().imageHeight,
           "image metadata survives in its nonuniform page");
     check(table[foldedRow].hidden && table[foldedRow].hiddenByFold,
           "fold-hidden metadata survives in its nonuniform page");
@@ -134,13 +134,13 @@ void testExactGeometryEquality() {
         {"contentIndent", {[](Decoration& d) { d.contentIndent = 0.0005f; }, [](const Decoration& d) { return d.contentIndent; }}},
         {"textShiftY", {[](Decoration& d) { d.textShiftY = 0.0005f; }, [](const Decoration& d) { return d.textShiftY; }}},
         {"spaceBefore", {[](Decoration& d) { d.spaceBefore = 0.0005f; }, [](const Decoration& d) { return d.spaceBefore; }}},
-        {"imageWidth", {[](Decoration& d) { d.imageWidth = 0.0005f; }, [](const Decoration& d) { return d.imageWidth; }}},
-        {"imageHeight", {[](Decoration& d) { d.imageHeight = 0.0005f; }, [](const Decoration& d) { return d.imageHeight; }}},
+        {"imageWidth", {[](Decoration& d) { d.editRare().imageWidth = 0.0005f; }, [](const Decoration& d) { return d.rare().imageWidth; }}},
+        {"imageHeight", {[](Decoration& d) { d.editRare().imageHeight = 0.0005f; }, [](const Decoration& d) { return d.rare().imageHeight; }}},
         {"cellPadding", {[](Decoration& d) { d.cellPadding = 0.0005f; }, [](const Decoration& d) { return d.cellPadding; }}},
         {"glyph.advance", {[](Decoration& d) { d.glyph.advance = 0.0005f; }, [](const Decoration& d) { return d.glyph.advance; }}},
-        {"gutterGlyph.advance", {[](Decoration& d) { d.gutterGlyph.advance = 0.0005f; }, [](const Decoration& d) { return d.gutterGlyph.advance; }}},
-        {"box.backgroundRadius", {[](Decoration& d) { d.box.backgroundRadius = 0.0005f; }, [](const Decoration& d) { return d.box.backgroundRadius; }}},
-        {"box.barWidth", {[](Decoration& d) { d.box.barWidth = 0.0005f; }, [](const Decoration& d) { return d.box.barWidth; }}},
+        {"gutterGlyph.advance", {[](Decoration& d) { d.editRare().gutterGlyph.advance = 0.0005f; }, [](const Decoration& d) { return d.rare().gutterGlyph.advance; }}},
+        {"box.backgroundRadius", {[](Decoration& d) { d.editRare().box.backgroundRadius = 0.0005f; }, [](const Decoration& d) { return d.rare().box.backgroundRadius; }}},
+        {"box.barWidth", {[](Decoration& d) { d.editRare().box.barWidth = 0.0005f; }, [](const Decoration& d) { return d.rare().box.barWidth; }}},
     };
     constexpr std::size_t count = Table::pageSize * 64;
     for (const auto& field : geometricFields) {
@@ -217,24 +217,64 @@ void testDenseUniqueKeepsBase() {
     rows.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         Decoration row;
-        row.fontFamily = "unique-font-" + std::to_string(i);
-        row.imagePath = "unique-image-" + std::to_string(i);
+        row.editRare().fontFamily = "unique-font-" + std::to_string(i);
+        row.editRare().imagePath = "unique-image-" + std::to_string(i);
         rows.push_back(std::move(row));
     }
     const Table table(rows);
     check(table.contiguousRows() != nullptr,
           "dense all-unique table retains the original contiguous base representation");
-    check(table.residentCapacityBytes() < count * (sizeof(Decoration) + 256u),
+    check(table.residentCapacityBytes() < count * (sizeof(Decoration) + sizeof(LineDecorationRare) + 2 * sizeof(void*) + 256u),
           "dense unique table does not allocate a second page copy of every row");
-    check(table[0].fontFamily == "unique-font-0" &&
-          table[count / 2].fontFamily == "unique-font-" + std::to_string(count / 2) &&
-          table[count - 1].imagePath == "unique-image-" + std::to_string(count - 1),
+    check(table[0].rare().fontFamily == "unique-font-0" &&
+          table[count / 2].rare().fontFamily == "unique-font-" + std::to_string(count / 2) &&
+          table[count - 1].rare().imagePath == "unique-image-" + std::to_string(count - 1),
           "base-backed dense table retains unique payloads");
 }
 
 } // namespace
 
+void testCompactValueIsolation() {
+    LineRunStyle original;
+    original.weight = 700;
+    original.fontFamily = "exact-style";
+    original.color = {0.2f, 0.3f, 0.4f, 1.0f};
+    LineStyleHandle first(original), same(original);
+    check(first.identity() == same.identity(), "exact style values share one record");
+    LineRunStyle nearby = original;
+    nearby.color.r += 0.00001f;
+    LineStyleHandle distinct(nearby);
+    check(distinct.identity() != first.identity() && distinct.get().color.r == nearby.color.r,
+          "interner never rounds close but distinct colors");
+    auto edited = first;
+    edited.edit().weight = 400;
+    edited.edit().fontFamily = "changed";
+    check(first.get().weight == 700 && same.get().fontFamily == "exact-style",
+          "editing a copied run preserves retained style values");
+    Decoration rich;
+    rich.editRare().imagePath = "kept-image";
+    rich.editRare().box.backgroundRadius = 8;
+    LineRun run;run.beg = 1;run.end = 5;run.style = first;rich.runs.push_back(run);
+    const auto table = std::make_shared<const Table>(std::vector<Decoration>{rich, rich});
+    auto replacement = (*table)[0];
+    replacement.editRare().imagePath = "new-image";
+    replacement.runs[0].style.edit().color.r = 0.9f;
+    auto next = table->replacing({0}, {replacement});
+    check(next && (*table)[0].rare().imagePath == "kept-image" &&
+          (*next)[1].rare().imagePath == "kept-image" &&
+          (*table)[0].runs[0].style.get().color.r == 0.2f &&
+          (*next)[1].runs[0].style.get().color.r == 0.2f,
+          "page patches detach rich metadata and style without mutating old or sibling rows");
+    std::vector<LineStyleHandle> retained;
+    for (int i = 0; i < 300; ++i) {
+        LineRunStyle value;value.weight = 1000 + i;retained.emplace_back(value);
+    }
+    check(retained.front().get().weight == 1000 && retained.back().get().weight == 1299,
+          "bounded dictionary eviction never invalidates live styles");
+}
+
 int main() {
+    testCompactValueIsolation();
     testUniformCompressionAndAccess();
     testQuarterPageThreshold();
     testSparsePayloadPreservation();

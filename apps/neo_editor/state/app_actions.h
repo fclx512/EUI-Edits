@@ -102,6 +102,8 @@ void pasteImageAsAttachment(AppState& state);
 void importImageFromPicker(AppState& state);
 
 void chooseVaultDirectory(AppState& state);
+// 父目录按钮：切换浏览根并异步准备共享扫描快照。
+void navigateToVaultParent(AppState& state);
 // 地址栏回车：解析这段文本并跳过去（目录=进入并展开，文件=展开到它并打开）。
 void navigateToVaultPath(AppState& state, std::string text);
 void refreshVault(AppState& state, bool resetScroll);

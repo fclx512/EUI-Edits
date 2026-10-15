@@ -855,17 +855,17 @@ public:
                     int blockStart = -1;
                     for (int index = scanBeg; index <= scanEnd + 1; ++index) {
                         const bool inside = index <= scanEnd && !blockLines[index].hidden &&
-                            blockLines[index].box.background.a > 0.0f;
+                            blockLines[index].rare().box.background.a > 0.0f;
                         if (inside && blockStart < 0) {
                             blockStart = index;
                         }
-                        if (blockStart >= 0 && (!inside || blockLines[index].box.backgroundBlockLast)) {
+                        if (blockStart >= 0 && (!inside || blockLines[index].rare().box.backgroundBlockLast)) {
                             const int blockLast = inside ? index : index - 1;
                             const float blockTop = textY + lineTopAt(blockStart) - state.verticalScroll;
                             const float blockBottom = textY + lineBottomAt(blockLast) - state.verticalScroll;
                             if (blockBottom > 0.0f && blockTop < height_) {
-                                const float radius = blockLines[blockStart].box.backgroundRadius > 0.0f
-                                    ? blockLines[blockStart].box.backgroundRadius
+                                const float radius = blockLines[blockStart].rare().box.backgroundRadius > 0.0f
+                                    ? blockLines[blockStart].rare().box.backgroundRadius
                                     : std::max(2.0f, textLineHeight * 0.18f);
                                 // 表格行的底色带收进表格自身宽度（与网格线对齐）；
                                 // 代码块/引用等仍横跨整个内容列。
@@ -884,7 +884,7 @@ public:
                                     // 底色从文本原点起（不横跨行号列）：行号区保持编辑器底色，
                                     // 与代码块底色区分开。横跨的设计已按 2026-09-25 反馈废除。
                                     .size(bandWidth, blockBottom - blockTop)
-                                    .color(blockLines[blockStart].box.background)
+                                    .color(blockLines[blockStart].rare().box.background)
                                     .radius(radius)
                                     .build();
                             }
@@ -896,7 +896,7 @@ public:
                     // C1：barCount >= 2 画多条（嵌套引用），从单条的位置往左排开 ——
                     // 文字位置不随条数变（竖条本来就不占文字位置），gap=0 约束不碰。
                     for (int index = blockFirstVisible; index <= blockLastVisible; ++index) {
-                        const input_detail::LineBoxStyle& box = blockLines[index].box;
+                        const input_detail::LineBoxStyle& box = blockLines[index].rare().box;
                         if (box.barColor.a <= 0.0f || box.barWidth <= 0.0f || blockLines[index].hidden) {
                             continue;
                         }
@@ -928,7 +928,7 @@ public:
                         constexpr float kGridLineWidth = 1.0f;
                         for (int index = gridScanBeg; index <= gridScanEnd; ++index) {
                             const input_detail::InputModel::TextLine& row = blockLines[static_cast<std::size_t>(index)];
-                            if (row.tableId < 0 || row.hidden || row.box.gridColor.a <= 0.0f) {
+                            if (row.tableId < 0 || row.hidden || row.rare().box.gridColor.a <= 0.0f) {
                                 continue;
                             }
                             const input_detail::InputModel::TableColumns* table =
@@ -951,14 +951,14 @@ public:
                                 ui_.rect(id_ + ".grid.v." + std::to_string(index) + "." + std::to_string(c))
                                     .position(inset + boundary, rowTop)
                                     .size(kGridLineWidth, rowBottom - rowTop)
-                                    .color(row.box.gridColor)
+                                    .color(row.rare().box.gridColor)
                                     .build();
                             }
                             const auto drawGridHLine = [&](float y, const char* suffix) {
                                 ui_.rect(id_ + ".grid.h." + std::to_string(index) + suffix)
                                     .position(inset + table->x[0] - table->padding, y)
                                     .size(table->total + table->padding * 2.0f, kGridLineWidth)
-                                    .color(row.box.gridColor)
+                                    .color(row.rare().box.gridColor)
                                     .build();
                             };
                             const bool prevSameTable = index > 0 &&
@@ -1029,25 +1029,25 @@ public:
                         // 约半个 cap 高 —— 合计 ≈ 0.55em，随行字号走。
                         // 锚点（带顶）与选区背景走同一个纯几何 helper：行号槽、文字、
                         // 选区三者因此不会各猜一个 textShiftY 偏移。
-                        const auto numberBand = input_detail::lineTextBand(y, linePixelHeight, line.textShiftY, line.textBandHeight);
+                        const auto numberBand = input_detail::lineTextBand(y, linePixelHeight, line.textShiftY, line.rare().textBandHeight);
                         const float textCenterY = textY + numberBand.top + numberBand.height * 0.5f;
                         const float slotHeight = alignFontSize * 1.2f;
                         const float slotY = textCenterY - slotHeight * 0.5f;
                         const bool hoverOnThisLine = state.pointerHoverValid && index == state.pointerHoverLine;
                         const float gutterX = inset - gutterWidth;
-                        if (line.gutterGlyph.codepoint != 0 && hoverOnThisLine) {
-                            const auto glyphColor = line.gutterGlyph.color.a > 0.0f
-                                ? line.gutterGlyph.color : lineNumberColor_;
+                        if (line.rare().gutterGlyph.codepoint != 0 && hoverOnThisLine) {
+                            const auto glyphColor = line.rare().gutterGlyph.color.a > 0.0f
+                                ? line.rare().gutterGlyph.color : lineNumberColor_;
                             const float iconSize = std::max(6.0f, slotHeight * 0.42f);
                             const float iconX = gutterX + std::max(0.0f, gutterWidth - 8.0f - iconSize);
                             const float iconY = slotY + (slotHeight - iconSize) * 0.5f;
-                            if (line.gutterGlyph.codepoint == 0xF054) {
+                            if (line.rare().gutterGlyph.codepoint == 0xF054) {
                                 vector_icon::drawChevronRight(
                                     ui_, id_ + ".gutterglyph." + std::to_string(index),
                                     iconX, iconY, iconSize, glyphColor);
                                 continue;
                             }
-                            if (line.gutterGlyph.codepoint == 0xF078) {
+                            if (line.rare().gutterGlyph.codepoint == 0xF078) {
                                 vector_icon::drawChevronDown(
                                     ui_, id_ + ".gutterglyph." + std::to_string(index),
                                     iconX, iconY, iconSize, glyphColor);
@@ -1058,7 +1058,7 @@ public:
                                 .position(gutterX, slotY)
                                 .size(std::max(1.0f, gutterWidth - 8.0f), slotHeight)
                                 .dirtyKey(textDirtyKey + "|G" + std::to_string(index))
-                                .icon(static_cast<unsigned int>(line.gutterGlyph.codepoint))
+                                .icon(static_cast<unsigned int>(line.rare().gutterGlyph.codepoint))
                                 .fontSize(std::max(9.0f, alignFontSize * 0.62f))
                                 .color(glyphColor)
                                 .horizontalAlign(core::HorizontalAlign::Right)
@@ -1139,21 +1139,21 @@ public:
                                 // 由上层表达——对那几行不返回 holes，组件本身不做这个判断。
                                 // 行级文字色（标题/代码块）与行内样式段都由上层给，组件只照着画。
                                 const core::Color lineColor =
-                                    line.color.a > 0.0f ? line.color : style_.text;
+                                    line.presentation().color.a > 0.0f ? line.presentation().color : style_.text;
                                 const float lineFontSize = line.fontSize > 0.0f ? line.fontSize : fontSize;
                                 // Center the nominal em box inside the shared selection band.
                                 // Styled runs share an origin and baseline; checkboxes and the
                                 // caret center independently within that same band.
                                 const input_detail::LineTextBand textBand =
-                                    input_detail::lineTextBand(y, linePixelHeight, line.textShiftY, line.textBandHeight);
+                                    input_detail::lineTextBand(y, linePixelHeight, line.textShiftY, line.rare().textBandHeight);
                                 const float textOrigin = input_detail::lineTextOrigin(textBand, lineFontSize);
-                                if (line.box.horizontalRuleThickness > 0 && line.box.gridColor.a > 0.0f) {
+                                if (line.rare().box.horizontalRuleThickness > 0 && line.rare().box.gridColor.a > 0.0f) {
                                     const float thickness =
-                                        std::min(static_cast<float>(line.box.horizontalRuleThickness), linePixelHeight);
+                                        std::min(static_cast<float>(line.rare().box.horizontalRuleThickness), linePixelHeight);
                                     ui_.rect(id_ + ".hr." + std::to_string(index))
                                         .position(0.0f, y + (linePixelHeight - thickness) * 0.5f)
                                         .size(textWidth, thickness)
-                                        .color(line.box.gridColor)
+                                        .color(line.rare().box.gridColor)
                                         .build();
                                 }
                                 // 行首图元（任务复选框 / C1 列表 marker）。文字已经按
@@ -1165,47 +1165,47 @@ public:
                                 // advance 平移，不重复画 marker；在 advance 框内右对齐，
                                 // 序号比源码前缀宽/窄时正文列不动。codepoint != 0 走
                                 // 图标路（任务复选框，沿用既有行为在每段画）。
-                                if (line.glyph.codepoint != 0 || !line.glyph.text.empty()) {
-                                    if (!line.glyph.text.empty()) {
-                                        if (line.lineStart && line.glyph.text == "•") {
+                                if (line.presentation().glyph.codepoint != 0 || !line.presentation().glyph.text.empty()) {
+                                    if (!line.presentation().glyph.text.empty()) {
+                                        if (line.lineStart && line.presentation().glyph.text == "•") {
                                             // A native dot has no font bearings or glyph clip box.
                                             const float dot = std::max(3.0f, lineFontSize * 0.28f);
                                             const float gap = lineFontSize * 0.30f;
                                             ui_.rect(id_ + ".listmarker." + std::to_string(index))
                                                 .position(line.contentIndent + std::max(0.0f,
-                                                    line.glyph.advance - gap - dot),
+                                                    line.presentation().glyph.advance - gap - dot),
                                                     textBand.top + (textBand.height - dot) * 0.5f)
                                                 .size(dot, dot).radius(dot * 0.5f)
-                                                .color(line.glyph.color.a > 0.0f ? line.glyph.color : lineColor)
+                                                .color(line.presentation().glyph.color.a > 0.0f ? line.presentation().glyph.color : lineColor)
                                                 .build();
                                         } else if (line.lineStart) {
                                             ui_.text(id_ + ".listmarker." + std::to_string(index))
                                                 .position(line.contentIndent, textOrigin)
-                                                .size(std::max(1.0f, line.glyph.advance -
-                                                    (line.glyph.text == "•" ? 0.0f : lineFontSize * 0.28f)), linePixelHeight)
+                                                .size(std::max(1.0f, line.presentation().glyph.advance -
+                                                    (line.presentation().glyph.text == "•" ? 0.0f : lineFontSize * 0.28f)), linePixelHeight)
                                                 .dirtyKey(textDirtyKey + "|lm" + std::to_string(index))
-                                                .text(line.glyph.text)
+                                                .text(line.presentation().glyph.text)
                                                 .fontSize(lineFontSize)
-                                                .fontFamily(line.fontFamily.empty() ? fontFamily_ : line.fontFamily)
+                                                .fontFamily(line.rare().fontFamily.empty() ? fontFamily_ : line.rare().fontFamily)
                                                 .lineHeight(textBand.height)
-                                                .color(line.glyph.color.a > 0.0f ? line.glyph.color : lineColor)
+                                                .color(line.presentation().glyph.color.a > 0.0f ? line.presentation().glyph.color : lineColor)
                                                 .horizontalAlign(core::HorizontalAlign::Right)
                                                 .verticalAlign(core::VerticalAlign::Top)
                                                 .wrap(false)
                                                 .build();
                                         }
-                                    } else if (line.lineStart && line.glyph.checkbox) {
+                                    } else if (line.lineStart && line.presentation().glyph.checkbox) {
                                         const float side = lineFontSize;
                                         const float checkboxY = textBand.top + (textBand.height - side) * 0.5f;
-                                        const auto checkboxColor = line.glyph.color.a > 0.0f ? line.glyph.color : lineColor;
+                                        const auto checkboxColor = line.presentation().glyph.color.a > 0.0f ? line.presentation().glyph.color : lineColor;
                                         ui_.rect(id_ + ".checkbox." + std::to_string(index))
                                             .position(line.contentIndent, checkboxY)
                                             .size(side, side)
                                             .radius(std::max(2.0f, side * 0.2f))
-                                            .border(line.glyph.checked ? 0.0f : 1.0f, checkboxColor)
-                                            .color(line.glyph.checked ? checkboxColor : core::Color{0, 0, 0, 0})
+                                            .border(line.presentation().glyph.checked ? 0.0f : 1.0f, checkboxColor)
+                                            .color(line.presentation().glyph.checked ? checkboxColor : core::Color{0, 0, 0, 0})
                                             .build();
-                                        if (line.glyph.checked) {
+                                        if (line.presentation().glyph.checked) {
                                             vector_icon::drawCheckmark(
                                                 ui_, id_ + ".checkbox.check." + std::to_string(index),
                                                 line.contentIndent, checkboxY, side, style_.background);
@@ -1213,11 +1213,11 @@ public:
                                     } else if (line.lineStart) {
                                         ui_.text(id_ + ".glyph." + std::to_string(index))
                                             .position(line.contentIndent, textBand.top)
-                                            .size(std::max(1.0f, line.glyph.advance), textBand.height)
+                                            .size(std::max(1.0f, line.presentation().glyph.advance), textBand.height)
                                             .dirtyKey(textDirtyKey + "|g" + std::to_string(index))
-                                            .icon(static_cast<unsigned int>(line.glyph.codepoint))
+                                            .icon(static_cast<unsigned int>(line.presentation().glyph.codepoint))
                                             .fontSize(lineFontSize)
-                                            .color(line.glyph.color.a > 0.0f ? line.glyph.color : lineColor)
+                                            .color(line.presentation().glyph.color.a > 0.0f ? line.presentation().glyph.color : lineColor)
                                             .horizontalAlign(core::HorizontalAlign::Left)
                                             .verticalAlign(core::VerticalAlign::Center)
                                             .build();
@@ -1227,26 +1227,26 @@ public:
                                 // 平移过（见 InputModel::applyLineGlyph / applyLineIndent），
                                 // 但**没有样式段的行**是硬编码画在 x = 0 的，所以这里也要
                                 // 补上同一个偏移。文本 marker 的 advance 已在 applyLineGlyph
-                                // 解析进 line.glyph.advance（图元占位对文本路与图标路一视同仁）。
+                                // 解析进 line.presentation().glyph.advance（图元占位对文本路与图标路一视同仁）。
                                 const float lineTextOffset =
-                                    (!line.glyph.text.empty() || line.glyph.codepoint != 0
-                                         ? line.glyph.advance
+                                    (!line.presentation().glyph.text.empty() || line.presentation().glyph.codepoint != 0
+                                         ? line.presentation().glyph.advance
                                          : 0.0f) +
                                     line.contentIndent;
                                 // 代码块起始围栏行的语言标签（Obsidian LP 在底色条右上角画
                                 // 一个弱化的语言名）。右对齐、比代码小一档、颜色取代码文字色
                                 // 的 75% —— Obsidian 用的是 --text-muted（暗色 #b3b3b3，参考图里
                                 // 标签最亮像素 179），本组件没有这一档 token，用淡化近似。
-                                if (!line.languageLabel.empty()) {
+                                if (!line.rare().languageLabel.empty()) {
                                     const float labelInset = std::max(8.0f, lineFontSize);
                                     ui_.text(id_ + ".lang." + std::to_string(index))
                                         .position(labelInset, textBand.top)
                                         .size(std::max(1.0f, layout.visibleTextWidth - labelInset * 2.0f),
                                               linePixelHeight)
                                         .dirtyKey(textDirtyKey + "|lang" + std::to_string(index))
-                                        .text(line.languageLabel)
+                                        .text(line.rare().languageLabel)
                                         .fontSize(std::max(9.0f, lineFontSize * 0.85f))
-                                        .fontFamily(line.fontFamily.empty() ? fontFamily_ : line.fontFamily)
+                                        .fontFamily(line.rare().fontFamily.empty() ? fontFamily_ : line.rare().fontFamily)
                                         .lineHeight(linePixelHeight)
                                         .color(theme::withOpacity(lineColor, 0.75f))
                                         .horizontalAlign(core::HorizontalAlign::Right)
@@ -1254,14 +1254,14 @@ public:
                                         .wrap(false)
                                         .build();
                                 }
-                                if (line.runs.empty()) {
+                                if (line.presentation().runs.empty()) {
                                     ui_.text(id_ + ".text." + std::to_string(index))
                                         .position(lineTextOffset, textOrigin)
                                         .size(layout.visibleTextWidth, textBand.height)
                                         .dirtyKey(textDirtyKey + "|" + std::to_string(index))
-                                        .text(input_detail::projectText(display.text, line.start, line.end, line.holes))
+                                        .text(input_detail::projectText(display.text, line.start, line.end, line.presentation().holes))
                                         .fontSize(lineFontSize)
-                                        .fontFamily(line.fontFamily.empty() ? fontFamily_ : line.fontFamily)
+                                        .fontFamily(line.rare().fontFamily.empty() ? fontFamily_ : line.rare().fontFamily)
                                         .lineHeight(textBand.height)
                                         .color(lineColor)
                                         .wrap(false)
@@ -1277,21 +1277,21 @@ public:
                                     const float runMargin = std::max(32.0f, lineFontSize * 2.0f);
                                     const float runViewportLeft = layout.scroll - runMargin;
                                     const float runViewportRight = layout.scroll + textWidth + runMargin;
-                                    for (std::size_t runIndex = 0; runIndex < line.runs.size(); ++runIndex) {
-                                        const input_detail::TextRun& run = line.runs[runIndex];
+                                    for (std::size_t runIndex = 0; runIndex < line.presentation().runs.size(); ++runIndex) {
+                                        const input_detail::TextRun& run = line.presentation().runs[runIndex];
                                         if (run.x + run.width < runViewportLeft || run.x > runViewportRight) {
                                             continue;
                                         }
                                         const std::string runId = id_ + ".text." + std::to_string(index) + "r" +
                                             std::to_string(runIndex);
                                         const std::string runText = input_detail::projectText(
-                                            display.text, run.beg, run.end, line.holes);
+                                            display.text, run.beg, run.end, line.presentation().holes);
                                         if (runText.empty()) {
                                             continue;
                                         }
                                         const core::Color runColor =
-                                            run.style.color.a > 0.0f ? run.style.color : lineColor;
-                                        if (run.style.link) {
+                                            run.style.get().color.a > 0.0f ? run.style.get().color : lineColor;
+                                        if (run.style.get().link) {
                                             const bool hoveredLink = state.pointerHoverLinkBeg == run.beg &&
                                                 state.pointerHoverLinkEnd == run.end;
                                             ui_.rect(runId + ".linkhover")
@@ -1303,14 +1303,14 @@ public:
                                                 .animate(core::AnimProperty::Color)
                                                 .build();
                                         }
-                                        if (run.style.background.a > 0.0f) {
+                                        if (run.style.get().background.a > 0.0f) {
                                             // The chip follows the centered text origin, preserving
                                             // its padding and baseline beside the other runs.
                                             const float chipPad = std::max(1.0f, lineFontSize * 0.10f);
                                             ui_.rect(runId + ".bg")
                                                 .position(run.x - chipPad, textOrigin + lineFontSize * 0.06f)
                                                 .size(run.width + chipPad * 2.0f, lineFontSize * 0.80f)
-                                                .color(run.style.background)
+                                                .color(run.style.get().background)
                                                 .radius(std::max(2.0f, lineFontSize * 0.18f))
                                                 .build();
                                         }
@@ -1322,16 +1322,16 @@ public:
                                             .text(runText)
                                             .fontSize(lineFontSize)
                                             // 段没有自带字体（语法 token 着色段）→ 行级字体（代码块等宽）→ 控件字体。
-                                            .fontFamily(!run.style.fontFamily.empty() ? run.style.fontFamily
-                                                         : (!line.fontFamily.empty() ? line.fontFamily
+                                            .fontFamily(!run.style.get().fontFamily.empty() ? run.style.get().fontFamily
+                                                         : (!line.rare().fontFamily.empty() ? line.rare().fontFamily
                                                                                      : fontFamily_))
-                                            .fontWeight(run.style.weight > 0 ? run.style.weight : 400)
+                                            .fontWeight(run.style.get().weight > 0 ? run.style.get().weight : 400)
                                             .lineHeight(textBand.height)
                                             .color(runColor)
                                             .wrap(false)
                                             .verticalAlign(core::VerticalAlign::Top)
                                             .build();
-                                        if (run.style.strike) {
+                                        if (run.style.get().strike) {
                                             // 删除线落在字面中部（同底色块，按字号定位而不是按行高）。
                                             ui_.rect(runId + ".strike")
                                                 .position(run.x, textOrigin + lineFontSize * 0.46f)
@@ -1339,7 +1339,7 @@ public:
                                                 .color(runColor)
                                                 .build();
                                         }
-                                        if (run.style.underline) {
+                                        if (run.style.get().underline) {
                                             ui_.rect(runId + ".underline")
                                                 .position(run.x, textOrigin + lineFontSize * 0.88f)
                                                 .size(std::max(1.0f, run.width), std::max(1.0f, lineFontSize * 0.06f))
@@ -1352,15 +1352,15 @@ public:
                                 // 文字已在装饰层整行藏进洞里；图的宽高也是装饰层按文件头
                                 // 算好的，这里只按几何表给的行框原位画（行高 = 图高 + 留白，
                                 // 垂直居中）。只画 lineStart 段：软换行的续行不重复画。
-                                if (line.lineStart && !line.imagePath.empty() &&
-                                    line.imageWidth > 0.0f && line.imageHeight > 0.0f) {
-                                    const float imageY = y + (linePixelHeight - line.imageHeight) * 0.5f;
+                                if (line.lineStart && !line.rare().imagePath.empty() &&
+                                    line.rare().imageWidth > 0.0f && line.rare().imageHeight > 0.0f) {
+                                    const float imageY = y + (linePixelHeight - line.rare().imageHeight) * 0.5f;
                                     const std::string imageId = id_ + ".img." + std::to_string(index);
                                     ui_.image(imageId)
                                         .position(0.0f, imageY)
-                                        .size(line.imageWidth, line.imageHeight)
+                                        .size(line.rare().imageWidth, line.rare().imageHeight)
                                         .dirtyKey(textDirtyKey + "|I" + std::to_string(index))
-                                        .source(line.imagePath)
+                                        .source(line.rare().imagePath)
                                         .radius(12.0f)
                                         .contain()
                                         .build();
@@ -1368,7 +1368,7 @@ public:
                                     // 画在图之后：1px 边线压在图的最外圈上。
                                     ui_.rect(imageId + ".frame")
                                         .position(0.0f, imageY)
-                                        .size(line.imageWidth, line.imageHeight)
+                                        .size(line.rare().imageWidth, line.rare().imageHeight)
                                         .color(core::Color{0.0f, 0.0f, 0.0f, 0.0f})
                                         .border(1.0f, style_.border)
                                         .radius(12.0f)
@@ -1379,25 +1379,25 @@ public:
                                 // 失败态的盒子（rounded-xl + 1px 边框 + 微底色），图标在
                                 // 上半部居中、路径文字在下部。不设 onImage 短路 —— 点占位盒
                                 // 会把光标放进行里、活动块显示源码，方便改路径。
-                                if (line.lineStart && line.imageFailed &&
-                                    line.imageWidth > 0.0f && line.imageHeight > 0.0f) {
-                                    const float boxY = y + (linePixelHeight - line.imageHeight) * 0.5f;
+                                if (line.lineStart && line.rare().imageFailed &&
+                                    line.rare().imageWidth > 0.0f && line.rare().imageHeight > 0.0f) {
+                                    const float boxY = y + (linePixelHeight - line.rare().imageHeight) * 0.5f;
                                     const std::string boxId = id_ + ".imgfail." + std::to_string(index);
                                     ui_.rect(boxId)
                                         .position(0.0f, boxY)
-                                        .size(line.imageWidth, line.imageHeight)
+                                        .size(line.rare().imageWidth, line.rare().imageHeight)
                                         .color(style_.focused)
                                         .border(1.0f, style_.border)
                                         .radius(12.0f)
                                         .build();
                                     vector_icon::drawImage(
-                                        ui_, boxId + ".icon", 0.0f, boxY, line.imageWidth,
-                                        line.imageHeight * 0.62f, style_.placeholder);
+                                        ui_, boxId + ".icon", 0.0f, boxY, line.rare().imageWidth,
+                                        line.rare().imageHeight * 0.62f, style_.placeholder);
                                     ui_.text(boxId + ".path")
-                                        .position(12.0f, boxY + line.imageHeight * 0.62f)
-                                        .size(line.imageWidth - 24.0f, line.imageHeight * 0.30f)
+                                        .position(12.0f, boxY + line.rare().imageHeight * 0.62f)
+                                        .size(line.rare().imageWidth - 24.0f, line.rare().imageHeight * 0.30f)
                                         .dirtyKey(textDirtyKey + "|G" + std::to_string(index))
-                                        .text(line.imageFailText)
+                                        .text(line.rare().imageFailText)
                                         .fontSize(std::max(9.0f, lineFontSize * 0.8f))
                                         .color(style_.placeholder)
                                         .horizontalAlign(core::HorizontalAlign::Center)

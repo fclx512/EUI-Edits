@@ -41,9 +41,9 @@ Markdown covers common writing syntax and some extensions; full Obsidian compati
 
 ## Getting started
 
-Download `EUI-Edits-0.1.3-windows-x64.exe` from the [0.1.3 release page](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.3), put it where you plan to keep it, and run it directly. No resource folder needs unpacking. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing. The [release process](docs/发版流程.md) defines candidate freezing, gates, packaging, and acceptance before publication.
+Download `EUI-Edits-0.1.4-windows-x64.exe` from the [0.1.4 release page](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.4), put it where you plan to keep it, and run it directly. No resource folder needs unpacking. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing. The [release process](docs/发版流程.md) defines candidate freezing, gates, packaging, and acceptance before publication.
 
-**Changes in 0.1.3:** Fixed table selections, IME position updates, and viewport wheel synchronization; added read-only inline mindmap previews; reduced repeated work in wrapped Markdown layout, document copies, line counting, multiple tabs, and library filtering; and reduced uploads of unused glyph-atlas regions. See the [release notes](apps/neo_editor/RELEASE-NOTES.md) for changes and validation limits.
+**Changes in 0.1.4:** Building on the 0.1.3 table-selection, IME/viewport synchronization, and read-only mindmap work, this release further reduces duplicated residency in the text model and source decorations, improves background vault-root and parent navigation, and unifies a traceable release entry point and measurement probes.
 
 ### Common actions
 
@@ -98,18 +98,18 @@ The status bar shows file location, syntax mode, encoding, line endings, line co
 
 The UI redraws on demand. Tab switches reuse layout and highlighting where possible, with less-used derived data released when cache budgets are exceeded. The library scans metadata without loading every document. Disabling interaction animations removes hover and press transition frames.
 
-These are **idle memory measurements of the released 0.1.0 EXE on 2026-10-05**, in MiB: Windows 11, default Win32 / Direct2D software rendering, light theme, 125% system scaling, word wrap and readable width enabled. Each scenario starts three times in separate profiles, idles for 10 seconds after loading, then collects 20 samples per run. Entries are the median of the per-run medians.
+These are **idle memory measurements of a 0.1.4 candidate development build from the current source on 2026-10-15**, in MiB: Windows 11, default Win32 / Direct2D software rendering, light theme, 125% system scaling, word wrap and readable width enabled. The 1280 × 800 window remains visible in the background and is not minimized. The measurement fixture gives its owned window a non-activation flag to avoid taking focus during normal computer use. Each scenario starts three times in separate profiles, idles for 10 seconds after loading, then collects 20 samples at 0.5-second intervals per run. Entries are the median of the per-run medians.
 
 | Scenario | Total working set | Private working set | Private commit |
 | --- | ---: | ---: | ---: |
-| Empty document, one tab | 48.6 | 16.8 | 22.0 |
-| Three small Markdown tabs, 2,580 bytes total, idle after visiting each | 57.8 | 23.4 | 32.2 |
-| 9 MiB plain text, 73,728 file lines | 184.5 | 152.6 | 194.4 |
-| 9 MiB Markdown, same line count, with a list item, emphasis, and inline code on every line | 306.6 | 274.5 | 322.1 |
+| Empty document, one tab | 46.0 | 15.9 | 21.7 |
+| Three small Markdown tabs, 2,580 bytes total, idle after loading each | 55.9 | 21.9 | 28.3 |
+| 9 MiB plain text, 73,728 file lines | 118.0 | 87.8 | 101.9 |
+| 9 MiB Markdown, same line count, with a list item, emphasis, and inline code on every line | 216.6 | 186.2 | 207.0 |
 
-Total working set counts process pages currently in RAM; private working set is its non-shareable part. Private commit need not all be resident in RAM. These columns cannot be added together or used interchangeably; 1 MiB = 1,048,576 bytes. The conditions above, the EXE hash, and the raw data are kept in the maintainer's local records and are not distributed with the repository.
+Total working set counts process pages currently in RAM; private working set is its non-shareable part. Private commit need not all be resident in RAM. These columns cannot be added together or used interchangeably; 1 MiB = 1,048,576 bytes. This round is recorded in `out/acceptance/readme-memory-20261015-0.1.4-candidate/report.json` and bound to candidate EXE SHA-256 `4d0fb494db239ef0abafb5e0c7749318948b7576d735a021b4a5ae88a07ea639`.
 
-Line count, Markdown structure, undo history, tab caches, and decoded images also affect memory. These results exclude editing and saving and are neither interaction peaks nor fixed ceilings. Large files need not have the footprint of small documents.
+Line count, Markdown structure, undo history, tab caches, and decoded images also affect memory. These results exclude editing and saving and are neither interaction peaks nor fixed ceilings. Large files need not have the footprint of small documents. Fixtures match the old 0.1.0 measurement, but the old windows were foreground and these are background windows, so this is not a controlled comparison of version gains. The [background measurement method](docs/性能测试方法.md#readme-闲置内存) (Chinese) leaves the mouse and keyboard available for normal use.
 
 ## Current scope
 
@@ -133,10 +133,10 @@ Run from PowerShell at the repository root:
 .\scripts\check-neoeditor.ps1
 
 # Build Release x64 and produce a single EXE (the maintainer verifies its hash before and after publication)
-.\scripts\package-neoeditor.ps1 -Version 0.1.3
+.\scripts\package-neoeditor.ps1 -Version 0.1.4
 ```
 
-The output is `out/euiedits-0.1.3-single-exe/EUI-Edits-0.1.3-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
+The output is `out/euiedits-0.1.4-single-exe/EUI-Edits-0.1.4-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
 
 Scripts locate tools automatically; override with `-CMake` or `-Generator`, plus `-Python` for checks or `-Dumpbin` for packaging. For another build, select a fresh package output with `-OutputDirectory`; existing release files are never overwritten. After moving the source tree, use a fresh build directory rather than a CMake cache containing old paths. The packaging script contains Chinese comments; run it with PowerShell 7 (`pwsh`) — Windows PowerShell 5.1 reads the BOM-less script as ANSI and reports a parse error.
 

@@ -193,8 +193,23 @@ void testCopiesDoNotCloneLongLineMetrics() {
     oracleState.followCaret = false;
     oracleState.wordWrap = false;
     Layout oracle = makeOracle(oracleState);
-    check(!oracle.lineList().empty() && oracle.lineList().front().metrics.caretX.size() > 64000,
+    check(!oracle.lineList().empty() && oracle.lineList().front().metrics.caretX().size() > 64000,
           "the fixture must contain full metrics for one very long physical line");
+    check(oracle.metrics.byteIndices.empty() && oracle.metrics.caretX.empty(),
+          "multiline callback layout must not own a second copy of cursor row arrays");
+    check(oracle.metrics.width == oracle.lineList().front().metrics.width,
+          "multiline layout retains the exact cursor row width");
+
+    // With layout and row data already warm, rebuilding the callback layout
+    // must not allocate a full long-line caret snapshot. This measures build(),
+    // separately from the existing closure-copy check below.
+    allocation_probe::begin();
+    Layout rebuilt = makeOracle(oracleState);
+    allocation_probe::end();
+    check(allocation_probe::bytes.load(std::memory_order_relaxed) < 64 * 1024,
+          "warm multiline layout build must avoid full cursor array allocations");
+    check(rebuilt.cursorPixel == oracle.cursorPixel && rebuilt.cursorY == oracle.cursorY,
+          "warm multiline layout retains exact caret geometry");
 
     CallbackSet callbacks;
     const auto started = std::chrono::steady_clock::now();
@@ -319,10 +334,28 @@ void testMultilineUtf8Oracle() {
               "multiline Chinese/emoji callbacks must match InputLayout byte-boundary oracle");
     }
 }
+
+void testSingleLineMetricsRemainOwned() {
+    State state;
+    Model::loadDocument(state, "A中🙂Z");
+    state.cursor = static_cast<int>(std::string("A中🙂").size());
+    state.selectionStart = state.selectionEnd = state.cursor;
+    Layout layout = Layout::build(state, kTextWidth, kTextHeight, kWidth,
+        kInset, kInset, kTextTop, kLineHeight, kFont, kFontSize, false);
+    check(!layout.metrics.byteIndices.empty() && !layout.metrics.caretX.empty(),
+          "single-line layout still owns detailed caret metrics");
+    check(layout.metrics.byteIndices == state.cachedMetrics.byteIndices &&
+          layout.metrics.caretX == state.cachedMetrics.caretX &&
+          layout.metrics.width == state.cachedMetrics.width,
+          "single-line layout keeps all cached shaping metrics");
+    check(layout.cursorPixel == Model::caretX(state.cachedMetrics, state.cursor),
+          "single-line UTF8 caret still uses its owned metrics");
+}
 }  // namespace
 
 int main() {
     testCopiesDoNotCloneLongLineMetrics();
     testMultilineUtf8Oracle();
+    testSingleLineMetricsRemainOwned();
     return failures ? 1 : 0;
 }

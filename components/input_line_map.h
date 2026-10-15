@@ -228,8 +228,19 @@ inline std::string projectText(const std::string& text, int beg, int end,
 
 // ── 光标 ────────────────────────────────────────────────────────────────────
 
+// Borrow only the caret arrays. Exact width stays in the visual row even when
+// its offscreen arrays have been released; this view never owns/copies them.
+struct CaretMetricsView {
+    const std::vector<int>& byteIndices;
+    const std::vector<float>& caretX;
+    CaretMetricsView(const core::TextPrimitive::TextMetrics& metrics)
+        : byteIndices(metrics.byteIndices), caretX(metrics.caretX) {}
+    CaretMetricsView(const std::vector<int>& bytes, const std::vector<float>& positions)
+        : byteIndices(bytes), caretX(positions) {}
+};
+
 // 投影偏移 → x。语义与原来的 caretX() 一致（lower_bound 定位插槽）。
-inline float caretXInMetrics(const core::TextPrimitive::TextMetrics& metrics, int projectedOffset) {
+inline float caretXInMetrics(CaretMetricsView metrics, int projectedOffset) {
     if (metrics.byteIndices.empty() || metrics.caretX.empty()) {
         return 0.0f;
     }
@@ -241,7 +252,7 @@ inline float caretXInMetrics(const core::TextPrimitive::TextMetrics& metrics, in
 }
 
 // 文档偏移 → x。落在隐藏区间内的偏移会被投影吸附，所以光标永远不会出现在隐藏文本的中间。
-inline float caretXForDocOffset(const core::TextPrimitive::TextMetrics& metrics,
+inline float caretXForDocOffset(CaretMetricsView metrics,
                                 const std::vector<LineHole>& holes,
                                 int anchor,
                                 int docOffset) {
@@ -249,7 +260,7 @@ inline float caretXForDocOffset(const core::TextPrimitive::TextMetrics& metrics,
 }
 
 // 投影偏移 → 前一个 caret 插槽（跨字符/连字都按 metrics 的合法位置走）。
-inline int projectedPreviousCaret(const core::TextPrimitive::TextMetrics& metrics, int projectedOffset) {
+inline int projectedPreviousCaret(CaretMetricsView metrics, int projectedOffset) {
     if (metrics.byteIndices.empty()) {
         return 0;
     }
@@ -261,7 +272,7 @@ inline int projectedPreviousCaret(const core::TextPrimitive::TextMetrics& metric
 }
 
 // 投影偏移 → 后一个 caret 插槽。
-inline int projectedNextCaret(const core::TextPrimitive::TextMetrics& metrics, int projectedOffset) {
+inline int projectedNextCaret(CaretMetricsView metrics, int projectedOffset) {
     if (metrics.byteIndices.empty()) {
         return 0;
     }
@@ -273,7 +284,7 @@ inline int projectedNextCaret(const core::TextPrimitive::TextMetrics& metrics, i
 }
 
 // 目标 x → 最近的可见文档偏移（命中测试）。
-inline int docOffsetForX(const core::TextPrimitive::TextMetrics& metrics,
+inline int docOffsetForX(CaretMetricsView metrics,
                          const std::vector<LineHole>& holes,
                          int anchor,
                          float targetX) {
@@ -294,7 +305,7 @@ inline int docOffsetForX(const core::TextPrimitive::TextMetrics& metrics,
 }
 
 // 文档偏移 → 前一个可见光标位置（左移 / Backspace 用）。
-inline int previousVisibleCaret(const core::TextPrimitive::TextMetrics& metrics,
+inline int previousVisibleCaret(CaretMetricsView metrics,
                                 const std::vector<LineHole>& holes,
                                 int anchor,
                                 int docOffset) {
@@ -303,7 +314,7 @@ inline int previousVisibleCaret(const core::TextPrimitive::TextMetrics& metrics,
 }
 
 // 文档偏移 → 后一个可见光标位置（右移 / Delete 用）。会整段跨过隐藏区间。
-inline int nextVisibleCaret(const core::TextPrimitive::TextMetrics& metrics,
+inline int nextVisibleCaret(CaretMetricsView metrics,
                             const std::vector<LineHole>& holes,
                             int anchor,
                             int docOffset) {

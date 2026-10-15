@@ -297,18 +297,18 @@ void testInputLayout() {
 
     // ── ① 隐藏区间本身合法，且光标恒不落在其中 ──
     for (const auto& line : lines) {
-        for (const LineHole& hole : line.holes) {
+        for (const LineHole& hole : line.presentation().holes) {
             check(hole.beg >= line.start && hole.end <= line.end,
                   "隐藏区间必须落在本行内");
             check(!hole.empty(), "隐藏区间非空");
         }
         for (int offset = line.start; offset <= line.end; ++offset) {
             // 光标吸附后再读 x，绝不该读到"洞里的字节"。
-            const int snapped = detail::snapVisible(line.holes, offset);
-            check(!detail::insideHole(line.holes, snapped), "吸附后的光标必须可见");
+            const int snapped = detail::snapVisible(line.presentation().holes, offset);
+            check(!detail::insideHole(line.presentation().holes, snapped), "吸附后的光标必须可见");
         }
-        for (const LineHole& hole : line.holes) {
-            check(detail::snapVisible(line.holes, hole.beg + (hole.end - hole.beg) / 2) == hole.beg,
+        for (const LineHole& hole : line.presentation().holes) {
+            check(detail::snapVisible(line.presentation().holes, hole.beg + (hole.end - hole.beg) / 2) == hole.beg,
                   "洞内任意位置都吸附到洞之前");
         }
     }
@@ -317,23 +317,23 @@ void testInputLayout() {
     for (int step = -40; step <= 200; ++step) {
         const float targetX = static_cast<float>(step) * 3.0f;
         for (const auto& line : lines) {
-            const int offset = detail::docOffsetForX(line.metrics, line.holes, line.start, targetX);
-            check(!detail::insideHole(line.holes, offset), "命中结果不在隐藏区间内");
+            const int offset = detail::docOffsetForX(line.metrics, line.presentation().holes, line.start, targetX);
+            check(!detail::insideHole(line.presentation().holes, offset), "命中结果不在隐藏区间内");
             check(offset >= line.start && offset <= line.end, "命中结果落在本行内");
         }
     }
 
     // ── ② 命中 ↔ 光标往返一致 ──
     for (const auto& line : lines) {
-        for (int projected : line.metrics.byteIndices) {
-            const int offset = detail::unprojectVisible(line.holes, line.start, projected);
-            if (detail::insideHole(line.holes, offset)) {
+        for (int projected : line.metrics.byteIndices()) {
+            const int offset = detail::unprojectVisible(line.presentation().holes, line.start, projected);
+            if (detail::insideHole(line.presentation().holes, offset)) {
                 continue;
             }
             const float x = Model::caretXInLine(line, offset);
             check(near(x, detail::caretXInMetrics(line.metrics, projected), 0.01f),
                   "光标 x 与投影偏移一致 @" + std::to_string(offset));
-            const int back = detail::docOffsetForX(line.metrics, line.holes, line.start, x);
+            const int back = detail::docOffsetForX(line.metrics, line.presentation().holes, line.start, x);
             check(back == offset,
                   "命中↔光标往返一致：offset=" + std::to_string(offset) +
                       " 命中回 " + std::to_string(back));
@@ -354,7 +354,7 @@ void testInputLayout() {
                 }
                 state.cursor = next;
                 const int landed = Model::lineIndexFor(lines, state.cursor);
-                check(!detail::insideHole(lines[static_cast<std::size_t>(landed)].holes, state.cursor),
+                check(!detail::insideHole(lines[static_cast<std::size_t>(landed)].presentation().holes, state.cursor),
                       "右移不得停在隐藏区间内 @" + std::to_string(state.cursor));
             }
         }
@@ -367,7 +367,7 @@ void testInputLayout() {
                 }
                 state.cursor = previous;
                 const int landed = Model::lineIndexFor(lines, state.cursor);
-                check(!detail::insideHole(lines[static_cast<std::size_t>(landed)].holes, state.cursor),
+                check(!detail::insideHole(lines[static_cast<std::size_t>(landed)].presentation().holes, state.cursor),
                       "左移不得停在隐藏区间内 @" + std::to_string(state.cursor));
             }
         }
@@ -383,7 +383,7 @@ void testInputLayout() {
         Model::moveCursorVertical(state, -1, false, "monospace", fontSize, viewport, height);
         check(state.hasPreferredCursorX, "垂直移动应记录 preferredCursorX");
         check(near(state.preferredCursorX, originX), "preferredCursorX 取自出发行的 x");
-        check(!detail::insideHole(lines[0].holes, state.cursor), "上行落点不得在隐藏区间内");
+        check(!detail::insideHole(lines[0].presentation().holes, state.cursor), "上行落点不得在隐藏区间内");
 
         Model::moveCursorVertical(state, 1, false, "monospace", fontSize, viewport, height);
         const int backLine = Model::lineIndexFor(lines, state.cursor);
@@ -463,10 +463,10 @@ void testDecoratedSoftWrap() {
     for (const auto& line : lines) {
         check(line.metrics.width <= state.cachedViewportWidth + 0.5f,
               "每段的投影宽度不超过视口");
-        for (const LineHole& hole : line.holes) {
+        for (const LineHole& hole : line.presentation().holes) {
             check(hole.beg >= line.start && hole.end <= line.end, "段的隐藏区间落在段内");
         }
-        joined += detail::projectText(text, line.start, line.end, line.holes);
+        joined += detail::projectText(text, line.start, line.end, line.presentation().holes);
     }
     for (std::size_t i = 1; i < lines.size(); ++i) {
         check(lines[i].start >= lines[i - 1].end, "段之间不重叠");
@@ -498,12 +498,12 @@ void testStyledRuns() {
     LineRun strong;
     strong.beg = static_cast<int>(boldBeg);
     strong.end = static_cast<int>(boldEnd);
-    strong.style.weight = 700;
+    strong.style.edit().weight = 700;
     LineRun code;
     code.beg = static_cast<int>(codeBeg);
     code.end = static_cast<int>(codeEnd);
-    code.style.fontFamily = "monospace";
-    code.style.background = core::Color(0.1f, 0.1f, 0.12f, 1.0f);
+    code.style.edit().fontFamily = "monospace";
+    code.style.edit().background = core::Color(0.1f, 0.1f, 0.12f, 1.0f);
 
     const float inset = 10.0f;
     const float width = 900.0f;   // 足够宽：本用例不折行
@@ -533,42 +533,42 @@ void testStyledRuns() {
         return;
     }
     const auto& line = lines.front();
-    check(!line.runs.empty(), "有样式段的行必须产出可渲染的段");
+    check(!line.presentation().runs.empty(), "有样式段的行必须产出可渲染的段");
 
     // ① 段首尾相接、覆盖整行可见文本、x 单调
     std::string joined;
     float previousRight = -1.0f;
-    for (const auto& run : line.runs) {
+    for (const auto& run : line.presentation().runs) {
         check(near(run.x, previousRight < 0.0f ? 0.0f : previousRight, 0.5f),
               "段之间不留缝也不重叠（x 应接上一段的右缘）");
         check(run.width > 0.0f, "每段都应当有正宽度");
-        joined += detail::projectText(text, run.beg, run.end, line.holes);
+        joined += detail::projectText(text, run.beg, run.end, line.presentation().holes);
         previousRight = run.x + run.width;
     }
     check(joined == text, "各段文字拼起来 = 本行可见文本（实际=\"" + joined + "\"）");
     check(near(previousRight, line.metrics.width, 0.5f), "最后一段的右缘 = 整行宽度");
 
     // ② caret 表：偏移升序、首位 0/0、末位 = 可见长度
-    check(!line.metrics.byteIndices.empty(), "caret 表不应为空");
-    check(line.metrics.byteIndices.front() == 0 && near(line.metrics.caretX.front(), 0.0f),
+    check(!line.metrics.byteIndices().empty(), "caret 表不应为空");
+    check(line.metrics.byteIndices().front() == 0 && near(line.metrics.caretX().front(), 0.0f),
           "caret 表从 0 偏移 / x=0 开始");
-    check(line.metrics.byteIndices.back() == static_cast<int>(text.size()),
+    check(line.metrics.byteIndices().back() == static_cast<int>(text.size()),
           "caret 表覆盖到整行末尾");
-    check(near(line.metrics.caretX.back(), line.metrics.width, 0.01f), "末位 caret x = 整行宽度");
-    for (std::size_t i = 1; i < line.metrics.byteIndices.size(); ++i) {
-        check(line.metrics.byteIndices[i] > line.metrics.byteIndices[i - 1], "caret 偏移严格递增");
+    check(near(line.metrics.caretX().back(), line.metrics.width, 0.01f), "末位 caret x = 整行宽度");
+    for (std::size_t i = 1; i < line.metrics.byteIndices().size(); ++i) {
+        check(line.metrics.byteIndices()[i] > line.metrics.byteIndices()[i - 1], "caret 偏移严格递增");
     }
 
     // ③ 段的 x 必须与 caret 表一致（视图按段 x 画、光标按 caret 表画，两者必须重合）
-    for (const auto& run : line.runs) {
+    for (const auto& run : line.presentation().runs) {
         check(near(detail::caretXInMetrics(line.metrics, run.beg - line.start), run.x, 0.5f),
               "段起点 x 与 caret 表一致 @" + std::to_string(run.beg));
     }
 
     // ④ 命中 ↔ 光标往返一致（遍历全部可见偏移）
     for (int offset = 0; offset <= static_cast<int>(text.size()); ++offset) {
-        const float x = detail::caretXForDocOffset(line.metrics, line.holes, line.start, offset);
-        const int hit = detail::docOffsetForX(line.metrics, line.holes, line.start, x);
+        const float x = detail::caretXForDocOffset(line.metrics, line.presentation().holes, line.start, offset);
+        const int hit = detail::docOffsetForX(line.metrics, line.presentation().holes, line.start, x);
         check(hit == offset, "样式段场景下命中往返一致 @" + std::to_string(offset) +
                                  "（得到 " + std::to_string(hit) + "）");
     }
@@ -595,7 +595,7 @@ void testStyledRunsSoftWrap() {
     LineRun strong;
     strong.beg = static_cast<int>(runBeg);
     strong.end = static_cast<int>(runEnd);
-    strong.style.weight = 700;
+    strong.style.edit().weight = 700;
 
     const float inset = 10.0f;
     const float width = 240.0f;
@@ -628,18 +628,18 @@ void testStyledRunsSoftWrap() {
         check(line.metrics.width <= state.cachedViewportWidth + 0.5f, "折行后每段宽度不超过视口");
         std::string lineText;
         float previousRight = -1.0f;
-        for (const auto& run : line.runs) {
+        for (const auto& run : line.presentation().runs) {
             check(run.beg >= line.start && run.end <= line.end, "样式段落在本段内");
             check(near(run.x, previousRight < 0.0f ? 0.0f : previousRight, 0.5f), "段之间不留缝");
             previousRight = run.x + run.width;
-            const std::string piece = detail::projectText(text, run.beg, run.end, line.holes);
+            const std::string piece = detail::projectText(text, run.beg, run.end, line.presentation().holes);
             lineText += piece;
-            if (run.style.weight >= 700) {
+            if (run.style.get().weight >= 700) {
                 coveredBold += static_cast<float>(piece.size());
             }
         }
         check(near(previousRight, line.metrics.width, 0.5f), "段的右缘 = 本段宽度");
-        joined += detail::projectText(text, line.start, line.end, line.holes);
+        joined += detail::projectText(text, line.start, line.end, line.presentation().holes);
     }
     check(joined == text, "折行后各段文字拼起来仍等于整行");
     check(near(coveredBold, static_cast<float>(runEnd - runBeg), 0.5f),
@@ -654,32 +654,32 @@ void testLineGlyph() {
     line.fontSize = 16.0f;
     line.lineHeight = 28.0f;
     line.metrics.width = 100.0f;
-    line.metrics.byteIndices = {0, 3, 6};
-    line.metrics.caretX = {0.0f, 25.0f, 50.0f};
+    line.metrics.editDetails().byteIndices = {0, 3, 6};
+    line.metrics.editDetails().caretX = {0.0f, 25.0f, 50.0f};
     detail::TextRun run;
     run.beg = 0;
     run.end = 6;
     run.x = 0.0f;
     run.width = 50.0f;
-    line.runs.push_back(run);
+    line.editPresentation().runs.push_back(run);
 
     detail::LineGlyph glyph;
     glyph.codepoint = 0xF0C8;
     Model::applyLineGlyph(line, glyph);
 
-    const float advance = line.glyph.advance;
+    const float advance = line.presentation().glyph.advance;
     check(advance > 15.0f && advance < 30.0f,
           "默认占位宽度应约 1.45 em（字号 16 → 23 上下），实际 " + std::to_string(advance));
     check(near(line.metrics.width, 100.0f + advance), "图元应把整行宽度加一个 advance");
-    check(line.metrics.caretX.size() == 3 && near(line.metrics.caretX[0], advance) &&
-              near(line.metrics.caretX[1], 25.0f + advance) &&
-              near(line.metrics.caretX[2], 50.0f + advance),
+    check(line.metrics.caretX().size() == 3 && near(line.metrics.caretX()[0], advance) &&
+              near(line.metrics.caretX()[1], 25.0f + advance) &&
+              near(line.metrics.caretX()[2], 50.0f + advance),
           "每个 caret 位置都应右移一个 advance");
-    check(line.metrics.byteIndices.size() == 3 && line.metrics.byteIndices[0] == 0 &&
-              line.metrics.byteIndices[1] == 3 && line.metrics.byteIndices[2] == 6,
+    check(line.metrics.byteIndices().size() == 3 && line.metrics.byteIndices()[0] == 0 &&
+              line.metrics.byteIndices()[1] == 3 && line.metrics.byteIndices()[2] == 6,
           "字节索引不应因图元改变（图元不对应文档里的任何字节）");
-    check(line.runs.size() == 1 && near(line.runs[0].x, advance), "行内样式段也应右移");
-    check(line.glyph.codepoint == 0xF0C8, "图元应被记到该行上");
+    check(line.presentation().runs.size() == 1 && near(line.presentation().runs[0].x, advance), "行内样式段也应右移");
+    check(line.presentation().glyph.codepoint == 0xF0C8, "图元应被记到该行上");
 
     // 显式指定 advance 时按指定值走（给"图标比默认更宽/更窄"留口子）。
     Model::InputLayout::Line explicitLine;
@@ -689,7 +689,7 @@ void testLineGlyph() {
     explicitGlyph.codepoint = 0xF14A;
     explicitGlyph.advance = 30.0f;
     Model::applyLineGlyph(explicitLine, explicitGlyph);
-    check(near(explicitLine.glyph.advance, 30.0f) && near(explicitLine.metrics.width, 40.0f),
+    check(near(explicitLine.presentation().glyph.advance, 30.0f) && near(explicitLine.metrics.width, 40.0f),
           "显式 advance 应原样生效");
 }
 
@@ -737,10 +737,10 @@ void testGutterLineUsable() {
     decorations[1].tableSeparator = true;
     decorations[1].lineHeight = 3.0f;
     decorations[1].holes = {{sepBeg, sepEnd}};
-    decorations[1].box.background = core::Color{0.4f, 0.4f, 0.4f, 1.0f};  // 分隔条底色（app 侧同款）
-    decorations[2].imagePath = "C:/nowhere/pic.png";
-    decorations[2].imageWidth = 100.0f;
-    decorations[2].imageHeight = 120.0f;
+    decorations[1].editRare().box.background = core::Color{0.4f, 0.4f, 0.4f, 1.0f};  // 分隔条底色（app 侧同款）
+    decorations[2].editRare().imagePath = "C:/nowhere/pic.png";
+    decorations[2].editRare().imageWidth = 100.0f;
+    decorations[2].editRare().imageHeight = 120.0f;
     decorations[2].lineHeight = 120.0f;
     decorations[2].holes = {{imgBeg, imgEnd}};
 
@@ -830,9 +830,9 @@ void testGlyphAdvanceWrapWidth() {
             const Model::InputLayout::Line& expected = reference[i];
             check(line.start == expected.start && line.end == expected.end,
                   label + "：第 " + std::to_string(i) + " 段切点一致（测量侧扣了 indent+advance）");
-            check(near(line.glyph.advance, advance),
+            check(near(line.presentation().glyph.advance, advance),
                   label + "：第 " + std::to_string(i) + " 段平移侧 advance = " +
-                      std::to_string(advance) + "，实际 " + std::to_string(line.glyph.advance));
+                      std::to_string(advance) + "，实际 " + std::to_string(line.presentation().glyph.advance));
             check(near(line.contentIndent, indent), label + "：contentIndent 落到行上");
             check(line.metrics.width <= viewport + 0.01f,
                   label + "：满行段宽 " + std::to_string(line.metrics.width) +
@@ -885,7 +885,7 @@ void testIncrementalLayoutWithDecorations() {
                 LineRun run;
                 run.beg = lineBeg;
                 run.end = lineEnd;
-                run.style.weight = 700;
+                run.style.edit().weight = 700;
                 decoration.runs.push_back(run);
             }
             decorations.push_back(decoration);
@@ -929,13 +929,13 @@ void testIncrementalLayoutWithDecorations() {
         const Model::TextLine& b = reference[i];
         const bool same = a.start == b.start && a.end == b.end &&
                           a.lineNumber == b.lineNumber && a.hardBreakAfter == b.hardBreakAfter &&
-                          a.holes == b.holes && a.metrics.caretX == b.metrics.caretX &&
-                          a.metrics.byteIndices == b.metrics.byteIndices &&
-                          a.runs.size() == b.runs.size();
-        bool runsSame = a.runs.size() == b.runs.size();
-        for (std::size_t r = 0; runsSame && r < a.runs.size(); ++r) {
-            runsSame = a.runs[r].beg == b.runs[r].beg && a.runs[r].end == b.runs[r].end &&
-                       a.runs[r].x == b.runs[r].x && a.runs[r].style == b.runs[r].style;
+                          a.presentation().holes == b.presentation().holes && a.metrics.caretX() == b.metrics.caretX() &&
+                          a.metrics.byteIndices() == b.metrics.byteIndices() &&
+                          a.presentation().runs.size() == b.presentation().runs.size();
+        bool runsSame = a.presentation().runs.size() == b.presentation().runs.size();
+        for (std::size_t r = 0; runsSame && r < a.presentation().runs.size(); ++r) {
+            runsSame = a.presentation().runs[r].beg == b.presentation().runs[r].beg && a.presentation().runs[r].end == b.presentation().runs[r].end &&
+                       a.presentation().runs[r].x == b.presentation().runs[r].x && a.presentation().runs[r].style == b.presentation().runs[r].style;
         }
         if (!same || !runsSame) {
             ++drift;
@@ -946,7 +946,7 @@ void testIncrementalLayoutWithDecorations() {
     // 平移口径：编辑点之前的第 0 行偏移不动，编辑点之后的行整体右移插入字节数。
     if (state.cachedLines.size() >= 3 && reference.size() >= 3) {
         const int delta = static_cast<int>(state.text.size()) - static_cast<int>(oldText.size());
-        check(state.cachedLines[0].start == 0 && state.cachedLines[0].holes[0].beg == 0,
+        check(state.cachedLines[0].start == 0 && state.cachedLines[0].presentation().holes[0].beg == 0,
               "编辑点之前的行不应被平移");
         check(state.cachedLines[2].start == reference[2].start &&
                   reference[2].start == oldText.find("第三行") + delta,
@@ -994,7 +994,7 @@ void testIncrementalLayoutWithSoftWrappedDecorations() {
                 LineRun run;
                 run.beg = lineBeg + 4;
                 run.end = lineEnd;
-                run.style.weight = 700;
+                run.style.edit().weight = 700;
                 decoration.runs.push_back(run);
             }
             decorations.push_back(std::move(decoration));
@@ -1056,14 +1056,14 @@ void testIncrementalLayoutWithSoftWrappedDecorations() {
         const Model::TextLine& b = reference[i];
         bool same = a.start == b.start && a.end == b.end && a.lineNumber == b.lineNumber &&
                     a.lineStart == b.lineStart && a.hardBreakAfter == b.hardBreakAfter &&
-                    a.holes == b.holes && a.runs.size() == b.runs.size() &&
+                    a.presentation().holes == b.presentation().holes && a.presentation().runs.size() == b.presentation().runs.size() &&
                     near(a.fontSize, b.fontSize) && near(a.lineHeight, b.lineHeight) &&
-                    a.metrics.caretX == b.metrics.caretX &&
-                    a.metrics.byteIndices == b.metrics.byteIndices;
-        for (std::size_t r = 0; same && r < a.runs.size(); ++r) {
-            same = a.runs[r].beg == b.runs[r].beg && a.runs[r].end == b.runs[r].end &&
-                   near(a.runs[r].x, b.runs[r].x) && near(a.runs[r].width, b.runs[r].width) &&
-                   a.runs[r].style == b.runs[r].style;
+                    a.metrics.caretX() == b.metrics.caretX() &&
+                    a.metrics.byteIndices() == b.metrics.byteIndices();
+        for (std::size_t r = 0; same && r < a.presentation().runs.size(); ++r) {
+            same = a.presentation().runs[r].beg == b.presentation().runs[r].beg && a.presentation().runs[r].end == b.presentation().runs[r].end &&
+                   near(a.presentation().runs[r].x, b.presentation().runs[r].x) && near(a.presentation().runs[r].width, b.presentation().runs[r].width) &&
+                   a.presentation().runs[r].style == b.presentation().runs[r].style;
         }
         if (!same) {
             if (firstDiff.empty()) {

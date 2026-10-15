@@ -799,16 +799,19 @@ if(EUI_BUILD_TEST_FIXTURES)
         endif()
         add_executable(${probe_name} "${probe_source}")
         target_link_libraries(${probe_name} PRIVATE eui::neo)
-        if(probe_name STREQUAL "vault_filter_benchmark")
-            # B7 instrumentation: exercise the real application vault scan and
-            # full-tree filter over small-document fixtures without registering
-            # an interactive performance harness as an automatic CTest probe.
+        if(probe_name STREQUAL "vault_filter_benchmark" OR probe_name STREQUAL "vault_scan_benchmark")
+            # Parameterised scan/filter measurements exercise the real model;
+            # they require a fixture root and are not automatic CTest probes.
             target_sources(${probe_name} PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/vault.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/text_file.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/atomic_write.cpp")
             target_include_directories(${probe_name} PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+        endif()
+        if(probe_name STREQUAL "input_memory_breakdown")
+            target_include_directories(${probe_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+            set_target_properties(${probe_name} PROPERTIES FOLDER "performance")
         endif()
         eui_apply_compile_options(${probe_name})
         eui_neo_copy_assets(${probe_name})
@@ -819,14 +822,15 @@ if(EUI_BUILD_TEST_FIXTURES)
             target_link_options(${probe_name} PRIVATE -mconsole)
         endif()
         target_compile_definitions(${probe_name} PRIVATE EUI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-        if(NOT probe_name STREQUAL "vault_filter_benchmark")
+        if(NOT probe_name STREQUAL "vault_filter_benchmark" AND NOT probe_name STREQUAL "vault_scan_benchmark"
+           AND NOT probe_name STREQUAL "input_memory_breakdown")
             add_test(NAME ${probe_name} COMMAND ${probe_name} --frames 3)
             set_tests_properties(${probe_name} PROPERTIES LABELS "probe")
         endif()
         if(probe_name STREQUAL "input_compose_benchmark")
             set_tests_properties(${probe_name} PROPERTIES LABELS "probe;performance")
         endif()
-        if(probe_name STREQUAL "vault_filter_benchmark")
+        if(probe_name STREQUAL "vault_filter_benchmark" OR probe_name STREQUAL "vault_scan_benchmark")
             set_target_properties(${probe_name} PROPERTIES FOLDER "performance")
         endif()
         if(probe_name STREQUAL "gpu_image_probe")

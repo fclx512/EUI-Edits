@@ -277,16 +277,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                                     .preserveFocusOnPress().disabled(!canGoParent);
                                 if (canGoParent) {
                                     hit.cursor(eui::CursorShape::Hand).onClick([&state] {
-                                        const std::filesystem::path current =
-                                            textfile::pathFromUtf8(state.vaultRoot).lexically_normal();
-                                        const std::filesystem::path parent = current.parent_path();
-                                        if (parent.empty() || parent == current) return;
-                                        state.vaultRoot = textfile::pathToUtf8(parent);
-                                        state.vaultAddress = state.vaultRoot;
-                                        state.vaultScan.reset();
-                                        state.vaultRowsGeneration = 0;
-                                        state.expanded.clear();
-                                        refreshVault(state, true);
+                                        navigateToVaultParent(state);
                                         app::requestUpdate();
                                     });
                                 }

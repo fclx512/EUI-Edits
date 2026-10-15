@@ -49,13 +49,13 @@ void run(const char* name, const std::string& left, const std::string& right,
         const auto& line = lines[i];
         const auto band = components::input_detail::lineTextBand(
             layout.geometryTable().top(static_cast<int>(i)),
-            layout.geometryTable().height(static_cast<int>(i)), line.textShiftY, line.textBandHeight);
+            layout.geometryTable().height(static_cast<int>(i)), line.textShiftY, line.rare().textBandHeight);
         std::cout << "{\"index\":" << i << ",\"height\":" << line.lineHeight
                   << ",\"shift\":" << line.textShiftY << ",\"band_top\":" << band.top
                   << ",\"band_height\":" << band.height << ",\"stops\":[";
-        for (size_t s = 0; s < line.tableDocCaretStops.size(); ++s) {
+        for (size_t s = 0; s < line.rare().tableDocCaretStops.size(); ++s) {
             if (s) std::cout << ',';
-            const auto& stop = line.tableDocCaretStops[s];
+            const auto& stop = line.rare().tableDocCaretStops[s];
             std::cout << '[' << stop.column << ',' << stop.byteIndex << ',' << stop.x << ']';
         }
         std::cout << "]}";

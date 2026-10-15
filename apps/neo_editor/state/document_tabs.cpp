@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <unordered_set>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -84,30 +85,59 @@ std::uint64_t lpPlanBytes(const LpPlan& plan) {
     return bytes;
 }
 
-std::uint64_t textLineBytes(const components::input_detail::InputModel::TextLine& line) {
+std::uint64_t textLineBytes(const components::input_detail::InputModel::TextLine& line,
+                            std::unordered_set<const void*>& styles) {
     // TextLine objects are included once by cachedLines.capacity() below.
     std::uint64_t bytes = 0;
-    bytes += line.imagePath.capacity() + line.imageFailText.capacity() +
-             line.fontFamily.capacity() + line.languageLabel.capacity() +
-             line.glyph.text.capacity() + line.gutterGlyph.text.capacity();
-    bytes += static_cast<std::uint64_t>(line.holes.capacity()) * sizeof(components::input_detail::LineHole);
-    bytes += static_cast<std::uint64_t>(line.runs.capacity()) * sizeof(components::input_detail::TextRun);
-    for (const auto& run : line.runs) bytes += run.style.fontFamily.capacity();
+    const auto heapString = [](const std::string& value) -> std::uint64_t {
+        return value.capacity() > 15 ? value.capacity() + 1 : 0;
+    };
+    bytes += heapString(line.presentation().glyph.text);
+    if (line.hasPresentation())
+        bytes += sizeof(components::input_detail::InputModel::TextLinePresentation);
+    if (line.hasRare()) {
+        // Conservative per-row charge: copied rows may share this record. The
+        // cache budget must never undercharge a later detached copy; it is not
+        // a unique-allocation process-memory measurement.
+        const auto& rare = line.rare();
+        bytes += sizeof(components::input_detail::InputModel::TextLineRare) + 2 * sizeof(void*);
+        bytes += heapString(rare.imagePath) + heapString(rare.imageFailText) +
+                 heapString(rare.fontFamily) + heapString(rare.languageLabel) +
+                 heapString(rare.gutterGlyph.text);
+        bytes += rare.tableCellRanges.capacity() * sizeof(components::input_detail::LineCell) +
+                 rare.tableDocCaretStops.capacity() * sizeof(components::input_detail::InputModel::TableDocCaretStop);
+    }
+    bytes += static_cast<std::uint64_t>(line.presentation().holes.capacity()) * sizeof(components::input_detail::LineHole);
+    bytes += static_cast<std::uint64_t>(line.presentation().runs.capacity()) * sizeof(components::input_detail::TextRun);
+    for (const auto& run : line.presentation().runs)
+        if (run.style.identity() && styles.insert(run.style.identity()).second)
+            bytes += run.style.residentCapacityBytes();
     // 逐字度量（byteIndices/caretX）是排版缓存里最大的一块，绝不能漏计。
-    bytes += static_cast<std::uint64_t>(line.metrics.byteIndices.capacity()) * sizeof(int);
-    bytes += static_cast<std::uint64_t>(line.metrics.caretX.capacity()) * sizeof(float);
+    if (line.metrics.hasDetails())
+        bytes += sizeof(components::input_detail::InputModel::TextLineMetrics::Details);
+    bytes += static_cast<std::uint64_t>(line.metrics.byteIndices().capacity()) * sizeof(int);
+    bytes += static_cast<std::uint64_t>(line.metrics.caretX().capacity()) * sizeof(float);
     return bytes;
 }
 
 std::uint64_t decorationRowDynamicBytes(const components::input_detail::LineDecoration& row) {
-    std::uint64_t bytes = row.fontFamily.capacity() + row.imagePath.capacity() +
-                          row.imageFailText.capacity() + row.languageLabel.capacity() +
-                          row.glyph.text.capacity() + row.gutterGlyph.text.capacity();
+    const auto heapString = [](const std::string& value) -> std::uint64_t {
+        return value.capacity() > 15 ? value.capacity() + 1 : 0;
+    };
+    std::uint64_t bytes = heapString(row.glyph.text);
+    if (row.hasRare()) {
+        bytes += sizeof(components::input_detail::LineDecorationRare) + 2 * sizeof(void*);
+        const auto& rare = row.rare();
+        bytes += heapString(rare.fontFamily) + heapString(rare.imagePath) +
+                 heapString(rare.imageFailText) + heapString(rare.languageLabel) + heapString(rare.gutterGlyph.text);
+    }
     bytes += static_cast<std::uint64_t>(row.holes.capacity()) * sizeof(components::input_detail::LineHole);
     bytes += static_cast<std::uint64_t>(row.runs.capacity()) * sizeof(components::input_detail::LineRun);
     bytes += static_cast<std::uint64_t>(row.cells.capacity()) * sizeof(components::input_detail::LineCell);
     for (const components::input_detail::LineRun& run : row.runs) {
-        bytes += run.style.fontFamily.capacity();
+        // Conservative charge for a legacy vector provider; snapshots deduplicate
+        // style identities across their actual owned pages.
+        bytes += run.style.residentCapacityBytes();
     }
     return bytes;
 }
@@ -122,13 +152,11 @@ std::uint64_t decorationTableBytes(const components::input_detail::LineDecoratio
 }
 
 std::uint64_t sourceCacheBytes(const source::Cache& cache) {
-    // cache.bytes is the indexed source-text length, not an owned allocation. Count
-    // the actual row strings below instead of charging the same text length again.
+    // Rows retain lengths and relative tokens, never a copy of source text.
     std::uint64_t bytes = sizeof(source::Cache);
     bytes += static_cast<std::uint64_t>(cache.starts.capacity()) * sizeof(int);
     bytes += static_cast<std::uint64_t>(cache.rows.capacity()) * sizeof(source::Row);
     for (const source::Row& row : cache.rows) {
-        bytes += row.text.capacity();
         bytes += static_cast<std::uint64_t>(row.tokens.capacity()) * sizeof(lp::SyntaxToken);
     }
     return bytes;
@@ -176,8 +204,9 @@ std::uint64_t estimateDerivedBytes(const DocumentSession& page) {
 std::uint64_t estimateInputBytes(const components::input_detail::InputModel::InputState& input,
                                  const lp::DecorationCache* sharedDecoration) {
     std::uint64_t bytes = sizeof(input);
+    std::unordered_set<const void*> styles;
     for (const auto& line : input.cachedLines) {
-        bytes += textLineBytes(line);
+        bytes += textLineBytes(line, styles);
     }
     bytes += static_cast<std::uint64_t>(input.cachedLines.capacity()) * sizeof(components::input_detail::InputModel::TextLine);
     bytes += static_cast<std::uint64_t>(input.cachedTables.capacity()) * sizeof(components::input_detail::InputModel::TableColumns);
@@ -267,8 +296,7 @@ void releaseDerivedCaches(DocumentSession& page) {
         auto& input = *page.editorMemory;
         // 先逐行释放逐字度量，再 swap 掉行容器（顺序反了就只能释放外层）。
         for (auto& line : input.cachedLines) {
-            std::vector<int>{}.swap(line.metrics.byteIndices);
-            std::vector<float>{}.swap(line.metrics.caretX);
+            line.metrics.releaseDetails();
         }
         std::vector<components::input_detail::InputModel::TextLine>{}.swap(input.cachedLines);
         std::vector<components::input_detail::InputModel::TableColumns>{}.swap(input.cachedTables);
