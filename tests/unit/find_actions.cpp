@@ -444,8 +444,11 @@ int main() {
               "model-only revision change invalidates scope before a cached action");
     }
 
-    for (float font : {14.0f, 18.0f}) {
-        for (float width : {280.0f, 550.0f}) {
+    const std::string previousLanguage = neo::i18n::preference();
+    for (const char* language : {"zh-CN", "en"}) {
+      neo::i18n::setPreference(language);
+      for (float font : {12.0f, 13.0f, 14.0f, 15.0f, 16.0f, 17.0f, 18.0f}) {
+        for (float width : {280.0f, 320.0f, 360.0f, 550.0f}) {
           for (int scopeMode : {0, 1, 2}) {
             eui::Ui compact;
             neo::AppState view;
@@ -464,15 +467,40 @@ int main() {
             const auto* panel = compact.find("find.bar");
             const auto* query = compact.find("find.query");
             const auto* all = compact.find("find.replace.all");
+            const auto* replacement = compact.find("find.replacement");
+            const auto* replace = compact.find("find.replace");
+            const auto* replaceLabel = compact.find("find.replace.text");
+            const auto* allLabel = compact.find("find.replace.all.text");
             const auto* close = compact.find("find.close");
             check(panel && query && all && close, "compact find controls are present");
             if (panel && query && all && close) {
-                check(all->frame.x+all->frame.width <= panel->frame.x+panel->frame.width &&
+                const bool fits = all->frame.x+all->frame.width <= panel->frame.x+panel->frame.width &&
                       close->frame.x+close->frame.width <= panel->frame.x+panel->frame.width &&
                       query->frame.width >= 24 &&
-                      all->frame.y+all->frame.height <= panel->frame.y+panel->frame.height,
-                      "compact find controls fit at narrow widths and large fonts");
+                      all->frame.y+all->frame.height <= panel->frame.y+panel->frame.height;
+                if (!fits) {
+                    std::cerr << "find layout: language=" << language << " font=" << font
+                              << " width=" << width << " scope=" << scopeMode
+                              << " panelRight=" << panel->frame.x+panel->frame.width
+                              << " replaceAllRight=" << all->frame.x+all->frame.width
+                              << " closeRight=" << close->frame.x+close->frame.width
+                              << " queryWidth=" << query->frame.width << '\n';
+                }
+                check(fits, "compact find controls fit at narrow widths and large fonts");
                 check(panel->frame.height <= 96, "find panel stays compact without explanatory rows");
+            }
+            check(replacement && replace && replaceLabel && allLabel, "replacement row and text labels are present");
+            if (panel && replacement && replace && all && replaceLabel && allLabel) {
+                check(replacement->frame.width >= 24 &&
+                      replace->frame.x >= replacement->frame.x+replacement->frame.width+8 &&
+                      all->frame.x >= replace->frame.x+replace->frame.width+8 &&
+                      all->frame.x+all->frame.width <= panel->frame.x+panel->frame.width-8,
+                      "replacement row preserves minimum input, button gaps and right inset");
+                check(replaceLabel->frame.width >= core::TextPrimitive::measureTextWidth(
+                          neo::i18n::tr("find.replace"), neo::uiFontFamily(view), font) &&
+                      allLabel->frame.width >= core::TextPrimitive::measureTextWidth(
+                          neo::i18n::tr("find.replace_all"), neo::uiFontFamily(view), font),
+                      "localized replacement labels fit without truncation or smaller type");
             }
             check(!compact.find("find.hint") && !compact.find("find.title"), "search omits redundant explanatory text");
             const auto* menu = compact.find("find.options.menu.level.0");
@@ -495,6 +523,8 @@ int main() {
             }
           }
         }
+      }
     }
+    neo::i18n::setPreference(previousLanguage);
     return failures ? 1 : 0;
 }

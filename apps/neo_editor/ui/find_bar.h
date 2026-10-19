@@ -541,9 +541,17 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
         iconButton(ui, "find.close", UiIcon::Close, navX + fieldHeight*3, top, fieldHeight, true,
                    [&state] { closeFindBar(state); });
         if (state.findReplaceOpen) {
-            const float replaceWidth = core::TextPrimitive::measureTextWidth(i18n::tr("find.replace"), uiFontFamily(state), fontSize) + 24;
-            const float allWidth = core::TextPrimitive::measureTextWidth(i18n::tr("find.replace_all"), uiFontFamily(state), fontSize) + 24;
-            const float replaceField = std::max(24.0f, width-fieldX-replaceWidth-allWidth-24);
+            const float replaceText = core::TextPrimitive::measureTextWidth(i18n::tr("find.replace"), uiFontFamily(state), fontSize);
+            const float allText = core::TextPrimitive::measureTextWidth(i18n::tr("find.replace_all"), uiFontFamily(state), fontSize);
+            // Reserve the input's minimum width, two 8px gaps and the right inset
+            // before assigning button padding. English labels at 18px otherwise
+            // overflow a 280px panel when the input is clamped to its minimum.
+            constexpr float minimumFieldWidth = 24.0f;
+            constexpr float replacementSpacing = 24.0f;
+            const float buttonPadding = std::clamp((width-fieldX-minimumFieldWidth-replacementSpacing-replaceText-allText)*.5f, 8.0f, 24.0f);
+            const float replaceWidth = replaceText + buttonPadding;
+            const float allWidth = allText + buttonPadding;
+            const float replaceField = std::max(minimumFieldWidth, width-fieldX-replaceWidth-allWidth-replacementSpacing);
             components::input(ui, "find.replacement").position(fieldX, replacementTop)
                 .size(replaceField, fieldHeight).value(state.findReplacement).placeholder(i18n::tr("find.replace"))
                 .fontSize(fontSize).fontFamily(uiFontFamily(state)).inset(10).style(inputStyle)
