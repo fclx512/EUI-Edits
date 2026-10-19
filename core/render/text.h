@@ -42,6 +42,7 @@ public:
         float u1 = 0.0f;
         float v1 = 0.0f;
         bool colored = false;
+        bool italicFace = false; // actual fallback face, not the requested family
         // 图集重置纪元。图集满时会整页作废重来，此时所有已缓存的 UV 全部失效；
         // 图元发现自己缓存里的 epoch 落后于全局值就重新栅格化（见 text.cpp）。
         std::uint64_t atlasEpoch = 0;
@@ -80,6 +81,7 @@ public:
     void setFontFamily(const std::string& fontFamily);
     void setFontSize(float fontSize);
     void setFontWeight(int fontWeight);
+    void setFontItalic(bool value);
     void setColor(const Color& color);
     void setMaxWidth(float maxWidth);
     void setWrap(bool wrap);
@@ -103,6 +105,9 @@ public:
                                           float fontSize = 16.0f,
                                           int fontWeight = 400);
     static Vec2 measureTextSize(const TextStyle& style);
+    // Single unwrapped line: ink top/bottom relative to a Top-aligned text origin,
+    // in logical pixels, using the same hinted fallback glyphs as rendering.
+    static Vec2 measureSingleLineInk(const TextStyle& style);
     static TextAtlasDebugStats debugAtlasStats();
 
     // Reuse font-file resolution only during one synchronous layout operation.
@@ -144,7 +149,7 @@ public:
     static void setDefaultFontFiles(const std::string& textFontFile, const std::string& iconFontFile);
     // 斜体字面解析（S3d 降级版）：给常规字面找同族斜体文件（X.ttf → Xi.ttf / X-Italic.ttf /
     // Regular→Italic …），并用 FreeType 校验候选确实是斜体。找不到返回**空串**，调用方据此
-    // 回落常规字面 —— 本框架不做合成斜体（与 resolveBoldFontPath 同理：合成要改渲染管线）。
+    // 保留常规字面；fontItalic 可为缺少斜体字面的字形合成倾斜，保持原 advance。
     static std::string resolveItalicFontPath(const std::string& fontFamily);
 
     void prepare();

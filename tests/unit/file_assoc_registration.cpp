@@ -31,6 +31,16 @@ int main() {
           std::find_if(neo::filetypes::associationTypes().begin(),neo::filetypes::associationTypes().end(),[](const auto& t){return std::string(t.extension)=="bat";})!=neo::filetypes::associationTypes().end(),
           "central association type list includes recognized scripts");
     check(!isRegistered() && !hasRegistrationEntries(), "empty hive must report unregistered");
+    const auto recommended = neo::filetypes::recommendedAssociations();
+    const std::vector<std::string> excluded = {"html","htm","sh","bash","bat","cmd","ps1"};
+    for (const auto& type : neo::filetypes::associationTypes()) {
+        const bool expected = std::find(excluded.begin(), excluded.end(), type.extension) == excluded.end();
+        check((std::find(recommended.begin(), recommended.end(), type.extension) != recommended.end()) == expected,
+              "recommendations exclude browser and executable shell formats only");
+    }
+    check(std::find(recommended.begin(), recommended.end(), "txt") != recommended.end() &&
+          std::find(recommended.begin(), recommended.end(), "md") != recommended.end(), "TXT/MD remain recommended");
+    check(!isRegistered() && !hasRegistrationEntries(), "computing recommendations must not register anything");
     const auto exe = currentExePath();
     check(writeApplicationCapabilities(exe), "one operation must register commands, capabilities and icons");
     check(isRegistered() && hasRegistrationEntries(), "complete registration must be ready");

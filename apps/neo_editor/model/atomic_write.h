@@ -20,6 +20,12 @@ namespace neo::atomicwrite {
 bool writeFile(const std::filesystem::path& target, std::string_view content,
                const std::function<bool()>& beforeReplace = {});
 
+// 只在目标尚不存在时发布完整内容。目标若在写临时文件期间被其他进程创建，
+// 发布失败且保留对方的字节；不以预先 exists 检查代替发布时的原子判定。
+// beforePublish 在临时文件写完后、发布前调用，供调用方检查或测试注入竞争。
+bool writeFileCreateOnly(const std::filesystem::path& target, std::string_view content,
+                         const std::function<bool()>& beforePublish = {});
+
 namespace testing {
 // 故障注入：置 true 后，writeFile 会在"临时文件已写完、替换之前"失败，
 // 用于验证替换失败时旧文件逐字节完好、临时文件被清理。仅测试代码调用。

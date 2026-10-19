@@ -83,6 +83,7 @@ struct TextInstance {
     std::string fontFamily;
     float fontSize = 16.0f;
     int fontWeight = 400;
+    bool fontItalic = false;
     float maxWidth = 0.0f;
     bool wrap = false;
     HorizontalAlign horizontalAlign = HorizontalAlign::Left;

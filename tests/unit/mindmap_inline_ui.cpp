@@ -4,9 +4,10 @@
 #include <iostream>
 
 namespace app { void requestUpdate() {} }
+namespace { float testWindowScale = 1.0f; }
 namespace neo {
 void showToast(AppState&, std::string, std::string) {}
-float effectiveWindowScale() { return 1.0f; }
+float effectiveWindowScale() { return testWindowScale; }
 }
 
 namespace {
@@ -159,9 +160,40 @@ int main() {
                                       Rect{10.0f, 20.0f, 920.0f, kInlinePanelHeight}); });
     check(state.mindmapPreview.open && !state.mindmapPreview.viewport.focusPending,
           "Post-resize draw must not request focus from the inline viewer again");
+
+    // Exercise the inline helper's real style-key wiring, beyond model key comparisons.
+    const auto parsedGeneration = state.derivedMindmap->generation;
+    const float originalFontSize = state.editorFontSize;
+    testWindowScale = 1.5f;
+    state.editorFontSize = originalFontSize + 2.0f;
+    build([&] { check(prepareInlineMindmap(ui, state, 920.0f),
+                      "DPI and font-size changes must rebuild the inline layout"); });
+    check(state.derivedMindmap->key.effectiveScale == testWindowScale &&
+          state.derivedMindmap->key.fontSize == state.editorFontSize &&
+          state.derivedMindmap->generation == parsedGeneration &&
+          !state.mindmapPreview.viewport.focusPending,
+          "Style rebuild must refresh DPI/font keys without reparsing or stealing focus");
+    testWindowScale = 1.0f;
+    state.editorFontSize = originalFontSize;
+    build([&] { check(prepareInlineMindmap(ui, state, 900.0f),
+                      "Restoring the original DPI and font must rebuild successfully"); });
     input.cursor = originalCursor;
     input.selectionStart = originalSelectionStart;
     input.selectionEnd = originalSelectionEnd;
+
+    // The same source and revisions cannot authorize an old document identity.
+    state.path = "another-document.md";
+    build([&] { check(!prepareInlineMindmap(ui, state, 900.0f),
+                      "Changing document identity must close an existing inline preview"); });
+    check(!state.mindmapPreview.open && !state.mindmapPreview.inlineMode &&
+          input.text == originalText && input.cursor == originalCursor &&
+          input.selectionStart == originalSelectionStart && input.selectionEnd == originalSelectionEnd,
+          "Identity invalidation must preserve source bytes and selection");
+    state.path.clear();
+    check(openInlineMindmap(ui, state, firstBeg) == mindmap::RejectReason::None,
+          "Original document must reopen after identity invalidation");
+    build([&] { check(prepareInlineMindmap(ui, state, 900.0f),
+                      "Reopened original document must prepare successfully"); });
 
     // A same-revision external rewrite is caught by the source anchor and closes before draw.
     std::string rewritten = state.doc.text;

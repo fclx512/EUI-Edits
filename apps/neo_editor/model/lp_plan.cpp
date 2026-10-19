@@ -1,6 +1,9 @@
 #include "model/lp_plan.h"
 
 #include <algorithm>
+#if defined(EUI_LP_STAGE_PROFILE)
+#include <chrono>
+#endif
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -16,6 +19,44 @@
 
 namespace neo {
 namespace {
+
+#if defined(EUI_LP_STAGE_PROFILE)
+enum class PlanStage { IndexRawLines, SkeletonPassA, CarryCompare, Md4c, Finish };
+
+// A stage ends exactly where the next begins. The destructor also records a
+// partially completed stage when an incremental proof rejects early.
+class PlanStageTimer {
+public:
+    explicit PlanStageTimer(PlanStage stage) : stage_(stage), since_(Clock::now()) {}
+    ~PlanStageTimer() { record(); }
+
+    void advance(PlanStage next) {
+        record();
+        stage_ = next;
+        since_ = Clock::now();
+    }
+
+private:
+    using Clock = std::chrono::steady_clock;
+
+    void record() {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            Clock::now() - since_).count();
+        auto& profile = lpPlanStageProfile();
+        const auto ns = static_cast<std::uint64_t>(elapsed);
+        switch (stage_) {
+        case PlanStage::IndexRawLines: profile.indexRawLinesNs += ns; break;
+        case PlanStage::SkeletonPassA: profile.skeletonPassANs += ns; break;
+        case PlanStage::CarryCompare: profile.carryCompareNs += ns; break;
+        case PlanStage::Md4c: profile.md4cNs += ns; break;
+        case PlanStage::Finish: profile.finishNs += ns; break;
+        }
+    }
+
+    PlanStage stage_;
+    Clock::time_point since_;
+};
+#endif
 
 // ---------------------------------------------------------------------------
 // 小工具
@@ -361,6 +402,9 @@ struct RawLine {
 };
 
 std::vector<RawLine> indexRawLines(const std::string& text) {
+#if defined(EUI_LP_STAGE_PROFILE)
+    PlanStageTimer stageTimer(PlanStage::IndexRawLines);
+#endif
     std::vector<RawLine> lines;
     int start = 0;
     const int size = static_cast<int>(text.size());
@@ -1242,6 +1286,9 @@ bool buildLpPlanImpl(LpPlan& plan,
                      int deltaBytes,
                      int deltaLines,
                      std::string* reject) {
+#if defined(EUI_LP_STAGE_PROFILE)
+    PlanStageTimer stageTimer(PlanStage::SkeletonPassA);
+#endif
     initPlanLines(raw, plan);
     // 局部入口已证明上一代无风险、区间外字节未变、完整局部行也无风险。
     // 直接沿用这个证明的结果；全量仍按整篇文本计算同样的两个标记。
@@ -1259,6 +1306,10 @@ bool buildLpPlanImpl(LpPlan& plan,
 
     // ── Pass A：全篇重跑（全量与局部同一趟；落点都是 plan.lines）──────────────
     runPassA(text, raw, plan.lines, plan.stats);
+
+#if defined(EUI_LP_STAGE_PROFILE)
+    stageTimer.advance(PlanStage::CarryCompare);
+#endif
 
     // 【局部】区间外逐行核对，成功后同一趟搬 md4c 派生字段与字节偏移。
     //    扫描器不读 spans/cells/block*，因此不必在扫描前单独遍历整张行表搬运。
@@ -1367,6 +1418,9 @@ bool buildLpPlanImpl(LpPlan& plan,
     }
 
     // ---- md4c：叶子块（校正内容起点 + 块区间）与行内 span（Pass B） ----
+#if defined(EUI_LP_STAGE_PROFILE)
+    stageTimer.advance(PlanStage::Md4c);
+#endif
 #if defined(EUI_HAS_MD4C)
     MdParseResult md;
     if (parseWithMd4c(mdInput, &md)) {
@@ -1574,6 +1628,9 @@ bool buildLpPlanImpl(LpPlan& plan,
 #endif
 
     // ---- 收尾：规范化隐藏区间、块分组 ----
+#if defined(EUI_LP_STAGE_PROFILE)
+    stageTimer.advance(PlanStage::Finish);
+#endif
     for (LpLine& line : plan.lines) {
         normalizeConceal(text, line, &plan.stats);
         std::sort(line.spans.begin(), line.spans.end(),
@@ -1863,6 +1920,13 @@ std::string planFieldDiff(const LpPlan& a, const LpPlan& b) {
 // ---------------------------------------------------------------------------
 // 对外接口
 // ---------------------------------------------------------------------------
+
+#if defined(EUI_LP_STAGE_PROFILE)
+LpPlanStageProfile& lpPlanStageProfile() {
+    static thread_local LpPlanStageProfile profile;
+    return profile;
+}
+#endif
 
 LpPlan buildLpPlan(const std::string& text) {
     ++planDebugStats().full;

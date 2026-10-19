@@ -76,9 +76,9 @@ inline LinkTarget linkTargetUnderCursor(const AppState& state, eui::Ui& ui) {
     return linkTargetAt(lp::cachedPlan(state.doc.text), state.doc.text, inputState.contextLinkByte);
 }
 
-inline bool editorHasSelection(eui::Ui& ui) {
+inline bool editorHasSelection(const AppState& state, eui::Ui& ui) {
     using InputModel = components::input_detail::InputModel;
-    const InputModel::InputState& inputState = ui.state<InputModel::InputState>(editorInputId(neo::state()));
+    const InputModel::InputState& inputState = ui.state<InputModel::InputState>(editorInputId(state));
     return inputState.selectionStart != inputState.selectionEnd;
 }
 
@@ -94,6 +94,15 @@ inline int currentHeadingLevel(const AppState& state, eui::Ui& ui) {
     return plan.lines[static_cast<std::size_t>(line)].headingLevel;
 }
 
+// Retain the last open menu's presentation while its closing transition runs.
+// A closed overlay must still call ContextMenuBuilder::build to clear cascades,
+// but it need not replace the editor's preedit LP cache with committed text.
+struct EditorMenuPresentation {
+    bool onLink = false;
+    bool hasSelection = false;
+    int headingLevel = 0;
+};
+
 inline void dispatchEditorContextItem(AppState& state, const std::vector<int>& path,
                                       bool onLink, eui::Ui& ui) {
     if (path.empty()) {
@@ -108,7 +117,7 @@ inline void dispatchEditorContextItem(AppState& state, const std::vector<int>& p
                 if (!state.path.empty()) {
                     docDir = textfile::pathToUtf8(textfile::pathFromUtf8(state.path).parent_path());
                 }
-                openLinkTarget(state, link.url, docDir);
+                openLinkTarget(state, link.navigationUrl, docDir);
             }
             return;
         }
@@ -186,7 +195,16 @@ inline void editorContextMenuOverlay(eui::Ui& ui, AppState& state, const eui::Sc
 
     // 光标落在链接上时菜单多出"打开链接/编辑链接"两项（2026-09-26）。选区内右键
     // 保持插入点不动，是否加链接项严格依据 InputState 保存的实际右键命中位置。
-    const bool onLink = context_menu_detail::linkTargetUnderCursor(state, ui).valid;
+    // 关闭时沿用最后一次打开的内容，保留关闭动画中的行和勾选态；不再查询
+    // cachedPlan(state.doc.text)，以免 IME 合成态计划缓存被每帧替换。
+    auto& presentation = ui.state<context_menu_detail::EditorMenuPresentation>(
+        "editor.contextmenu.presentation");
+    if (state.contextMenuOpen) {
+        presentation.onLink = context_menu_detail::linkTargetUnderCursor(state, ui).valid;
+        presentation.hasSelection = context_menu_detail::editorHasSelection(state, ui);
+        presentation.headingLevel = context_menu_detail::currentHeadingLevel(state, ui);
+    }
+    const bool onLink = presentation.onLink;
 
     components::contextMenu(ui, "editor.contextmenu")
         .open(state.contextMenuOpen)
@@ -194,8 +212,7 @@ inline void editorContextMenuOverlay(eui::Ui& ui, AppState& state, const eui::Sc
         .position(state.contextMenuX, state.contextMenuY)
         .size(metrics.menuWidth, metrics.menuItemHeight)
         .items(context_menu_detail::editorContextMenuItems(
-            onLink, context_menu_detail::editorHasSelection(ui),
-            context_menu_detail::currentHeadingLevel(state, ui)))
+            onLink, presentation.hasSelection, presentation.headingLevel))
         .theme(menuTokens)
         .transition(animationsEnabled(state) ? quickTransition() : core::Transition::none())
         .skipClosedContent()

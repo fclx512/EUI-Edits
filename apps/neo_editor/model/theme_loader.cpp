@@ -1,6 +1,8 @@
 #include "model/i18n.h"
 #include "model/theme_loader.h"
 #include "model/obsidian_theme.h"
+#include "model/theme_workbench.h"
+#include "model/theme_auto_palette.h"
 
 #include "model/text_file.h"  // pathFromUtf8（UTF-8 → 原生路径的唯一入口）
 
@@ -14,6 +16,7 @@
 #include <iomanip>
 #include <iterator>
 #include <sstream>
+#include <set>
 #include <system_error>
 
 namespace neo::themeloader {
@@ -369,6 +372,66 @@ bool parse(const std::string& json, ThemeFileData& out, std::string& error) {
     }
 
     if (out.version == kSchemaVersion2) {
+        const auto workbench = root.get("workbench");
+        if (workbench.valid()) {
+            ++recognized;
+            ThemeVariant lightBaseline, darkBaseline;
+            if (workbench.type() != eui::json::Type::Object ||
+                !workbench.get("source").string(out.importSource) ||
+                !parseVariant(workbench.get("lightBaseline"), lightBaseline, error) ||
+                !parseVariant(workbench.get("darkBaseline"), darkBaseline, error)) {
+                if (error.empty()) error = "主题工作台恢复基准格式无效。";
+                return false;
+            }
+            out.importLightBaseline = std::move(lightBaseline);
+            out.importDarkBaseline = std::move(darkBaseline);
+            for (const bool lightSide : {true, false}) {
+                const auto locks = workbench.get(lightSide ? "lightLocks" : "darkLocks");
+                if (!locks.valid()) continue;
+                auto& target = lightSide ? out.lightLocks : out.darkLocks;
+                if (locks.type() != eui::json::Type::Array || locks.size() > 26) {
+                    error = "主题工作台固定颜色格式无效。"; return false;
+                }
+                for (std::size_t i = 0; i < locks.size(); ++i) {
+                    std::string name;
+                    if (!locks.at(i).string(name) || !themeworkbench::editableField(name) || !target.insert(name).second) {
+                        error = "主题工作台固定颜色包含无效字段。"; return false;
+                    }
+                }
+            }
+            const auto recipeValue = workbench.get("autoRecipe");
+            if (recipeValue.valid()) {
+                ThemeAutoRecipe recipe;
+                double round = 0;
+                if (recipeValue.type() != eui::json::Type::Object ||
+                    !recipeValue.get("seed").string(recipe.seed) || !recipeValue.get("variant").string(recipe.variant) ||
+                    !recipeValue.get("round").number(round) || !std::isfinite(round) || round < 0 || round > 1000000 || std::floor(round) != round) {
+                    error = "主题工作台自动配色记录无效。"; return false;
+                }
+                recipe.round = static_cast<int>(round);
+                if (!themeauto::validRecipe(recipe)) { error = "主题工作台自动配色记录无效。"; return false; }
+                out.autoRecipe = std::move(recipe);
+            }
+            const auto report = workbench.get("report");
+            if (report.type() != eui::json::Type::Array || report.size() > 52) {
+                error = "主题工作台导入报告格式无效。";
+                return false;
+            }
+            std::set<std::pair<bool, std::string>> seen;
+            for (std::size_t i = 0; i < report.size(); ++i) {
+                const auto row = report.at(i);
+                ThemeImportEntry entry;
+                if (!row.get("light").boolean(entry.light) || !row.get("field").string(entry.field) ||
+                    !findThemeColorField(entry.field) || entry.field.rfind("icon", 0) == 0 ||
+                    !seen.insert({entry.light, entry.field}).second ||
+                    !row.get("source").string(entry.source) || !row.get("reason").string(entry.reason) ||
+                    !row.get("imported").boolean(entry.imported)) {
+                    error = "主题工作台导入报告包含无效字段。";
+                    return false;
+                }
+                out.importReport.push_back(std::move(entry));
+            }
+        }
         int sides = 0;
         const eui::json::Value light = root.get("light");
         const eui::json::Value dark = root.get("dark");
@@ -430,7 +493,7 @@ bool parse(const std::string& json, ThemeFileData& out, std::string& error) {
     return true;
 }
 
-bool load(const std::string& utf8Path, std::string& error) {
+bool read(const std::string& utf8Path, ThemeFileData& out, std::string& error) {
     error.clear();
     if (utf8Path.empty()) {
         error = i18n::tr("theme.empty_path");
@@ -525,6 +588,34 @@ bool load(const std::string& utf8Path, std::string& error) {
         error = i18n::format("theme.file_error", {{"path", utf8Path}, {"error", error}});
         return false;
     }
+    {
+        for (const bool light : {true, false}) {
+            const auto* palette = data.version >= 2 ? &(light ? data.light.colors : data.dark.colors)
+                : data.baseLight == light ? &data.colors : nullptr;
+            for (const auto& field : themeworkbench::fields()) {
+                const auto prior = std::find_if(data.importReport.begin(), data.importReport.end(), [&](const auto& entry) {
+                    return entry.light == light && entry.field == field.name;
+                });
+                if (prior != data.importReport.end()) continue;
+                if (data.importLightBaseline || data.importDarkBaseline) {
+                    data.importReport.push_back({light, field.name, "", "未记录该项的导入来源", false});
+                    continue;
+                }
+                const bool found = palette && palette->count(field.name);
+                data.importReport.push_back({light, field.name,
+                    found ? std::string(data.version >= 2 ? light ? "light.colors." : "dark.colors." : "colors.") + field.name : "",
+                    found ? "读取成功" : "主题未提供此颜色，使用本侧内置默认值", found});
+            }
+        }
+    }
+    data.path = utf8Path;
+    out = std::move(data);
+    return true;
+}
+
+bool load(const std::string& utf8Path, std::string& error) {
+    ThemeFileData data;
+    if (!read(utf8Path, data, error)) return false;
     activate(data, utf8Path);
     return true;
 }
@@ -572,6 +663,42 @@ std::string serializeDual(const std::string& name,
     out << ",\n  \"dark\": ";
     writeVariant(out, dark, darkTypography, "  ");
     out << "\n}\n";
+    return out.str();
+}
+
+std::string serializeWorkbench(const ThemeFileData& current, const ThemeFileData& baseline,
+                               const std::string& sourcePath) {
+    auto result = serializeDual(current.name, themeworkbench::palette(current, true), current.light.typography,
+                                themeworkbench::palette(current, false), current.dark.typography);
+    result.erase(result.find_last_of('}'));
+    std::ostringstream out;
+    out << result << ",\n  \"workbench\": {\n    \"source\": " << jsonString(sourcePath)
+        << ",\n    \"lightBaseline\": ";
+    writeVariant(out, themeworkbench::palette(baseline, true), baseline.light.typography, "    ");
+    out << ",\n    \"darkBaseline\": ";
+    writeVariant(out, themeworkbench::palette(baseline, false), baseline.dark.typography, "    ");
+    out << ",\n    \"report\": [";
+    for (std::size_t i = 0; i < current.importReport.size(); ++i) {
+        const auto& entry = current.importReport[i];
+        out << (i ? "," : "") << "\n      {\"light\":" << (entry.light ? "true" : "false")
+            << ",\"field\":" << jsonString(entry.field) << ",\"source\":" << jsonString(entry.source)
+            << ",\"reason\":" << jsonString(entry.reason) << ",\"imported\":" << (entry.imported ? "true" : "false") << "}";
+    }
+    out << "\n    ]";
+    for (bool light : {true, false}) {
+        out << ",\n    \"" << (light ? "lightLocks" : "darkLocks") << "\": [";
+        bool first = true;
+        for (const auto& name : (light ? current.lightLocks : current.darkLocks)) {
+            out << (first ? "" : ",") << jsonString(name); first = false;
+        }
+        out << "]";
+    }
+    if (current.autoRecipe) {
+        const auto& recipe = *current.autoRecipe;
+        out << ",\n    \"autoRecipe\": {\"seed\":" << jsonString(recipe.seed)
+            << ",\"variant\":" << jsonString(recipe.variant) << ",\"round\":" << recipe.round << "}";
+    }
+    out << "\n  }\n}\n";
     return out.str();
 }
 

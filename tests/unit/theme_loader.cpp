@@ -497,9 +497,11 @@ void testDualAndObsidianImport(const fs::path& root) {
         neo::ThemeFileData golden;
         if (!parseOk(readBytes(goldenPath), golden)) continue;
         const auto& actual = light ? imported.light.colors : imported.dark.colors;
-        check(actual.size() == golden.colors.size(),
+        const auto legacyIconCount = std::count_if(golden.colors.begin(), golden.colors.end(), [](const auto& v) { return v.first.rfind("icon", 0) == 0; });
+        check(actual.size() - actual.count("selectionBackground") == golden.colors.size() - legacyIconCount,
               std::string(light ? "light" : "dark") + " app.css coverage should match bridge");
         for (const auto& entry : golden.colors) {
+            if (entry.first.rfind("icon", 0) == 0) continue; // Icons are intentionally no longer imported from CSS.
             const auto found = actual.find(entry.first);
             check(found != actual.end() && hexOf(found->second) == hexOf(entry.second),
                   std::string(light ? "light " : "dark ") + entry.first +

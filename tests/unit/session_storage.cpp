@@ -4,6 +4,7 @@
 #include "model/text_file.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -272,7 +273,7 @@ int main() {
               "migrated v2 session restores with identical body bytes");
     }
 
-    // v2 读取侧故障：body 尺寸与清单 bytes 不符 / 同尺寸篡改 / 非法 UTF-8。
+    // v2 正文损坏：读取和复用写入都拒绝，原清单与损坏证据保持原样。
     {
         neo::textfile::Document authentic;
         authentic.text = "authentic body text";
@@ -292,24 +293,55 @@ int main() {
         check(!bodyName.empty(), "locate v2 content-addressed body name");
         const fs::path bodyPath = directory / bodyName;
 
+        error.clear();
+        fs::last_write_time(bodyPath, fs::file_time_type::clock::now() - std::chrono::hours(24), error);
+        check(!error, "mark a valid body with an older write time");
+        error.clear();
+        const auto originalBodyTime = fs::last_write_time(bodyPath, error);
+        check(!error, "read the valid body write time");
+        check(neo::sessionstorage::write(source, 91), "unchanged valid body can be reused");
+        error.clear();
+        check(fs::last_write_time(bodyPath, error) == originalBodyTime && !error &&
+                  readBytes(bodyPath) == authentic.text,
+              "metadata-only reuse leaves the unchanged body file unwritten");
+
         // (a) 截断成 0 字节：清单 bytes 说 N，body 为空 → 拒绝，不能恢复成空草稿。
         check(writeBytes(bodyPath, ""), "truncate body fixture");
         restored.clear(); active = 999;
         check(!neo::sessionstorage::read(restored, active) && restored.empty() && active == 0,
               "body truncated below the declared size fails closed instead of yielding an empty draft");
+        check(!neo::sessionstorage::write(source, 91), "reject reuse of a truncated body");
+        check(readBytes(manifest) == authenticManifest && readBytes(bodyPath).empty() &&
+                  bodyFiles(directory).size() == 1,
+              "truncated body and previous manifest survive failed reuse");
 
-        // (b) 同尺寸但内容不同：当前实现不重算内容哈希，原样返回文件字节（缺口，见节点报告）。
+        // (b) 同尺寸外部改写在恢复时检测，普通提交不重复全文读盘。
         const std::string sameSize(authentic.text.size(), 'x');
         check(writeBytes(bodyPath, sameSize), "rewrite body with same-size different content");
-        restored.clear(); active = 0;
-        const bool sameSizeRead = neo::sessionstorage::read(restored, active);
-        check(sameSizeRead && restored.size() == 1 && active == 91 &&
-                  restored[0].document.text.size() == authentic.text.size(),
-              "same-size body tamper does not crash and keeps the declared byte count");
-        if (sameSizeRead && restored.size() == 1) {
-            check(restored[0].document.text == sameSize,
-                  "same-size body content is returned verbatim (content hash is not re-verified; documented gap)");
-        }
+        restored.push_back({}); active = 999;
+        check(!neo::sessionstorage::read(restored, active) && restored.empty() && active == 0,
+              "same-size valid UTF-8 tamper fails content ID verification");
+        check(neo::sessionstorage::write(source, 91), "normal reuse checks metadata, not all body bytes");
+        restored.clear(); active = 999;
+        check(!neo::sessionstorage::read(restored, active) && restored.empty() && active == 0,
+              "restore still rejects a changed body after metadata-only reuse");
+        check(readBytes(bodyPath) == sameSize &&
+                  bodyFiles(directory).size() == 1,
+              "normal reuse does not overwrite externally changed bytes");
+
+        check(writeBytes(bodyPath, ""), "truncate body before candidate rollback test");
+        const auto beforeFailedCandidate = readBytes(manifest);
+
+        neo::textfile::Document fresh;
+        fresh.text = "fresh candidate before corrupted reuse";
+        const std::vector<neo::sessionstorage::WriteRecord> withFreshBody = {
+            {92, "fresh.md", "", "markdown", -1, true, &fresh}, source[0],
+        };
+        check(!neo::sessionstorage::write(withFreshBody, 91),
+              "a later corrupted reuse rejects the whole candidate snapshot");
+        check(readBytes(manifest) == beforeFailedCandidate && readBytes(bodyPath).empty() &&
+                  bodyFiles(directory).size() == 1,
+              "failed candidate removes its new body without deleting corrupt evidence");
 
         // (c) 同尺寸但非法 UTF-8：严格 UTF-8 校验拒绝。
         std::string invalid(authentic.text.size(), 'a');

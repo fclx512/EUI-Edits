@@ -118,5 +118,120 @@ int main() {
     M::moveCursorVertical(edge, 1, true, "monospace", 16, 200, 40);
     if (edge.cursor != static_cast<int>(edge.text.size()) || edge.selectionStart != 13 ||
         edge.selectionEnd != static_cast<int>(edge.text.size())) return 29;  // Shift+↓ 扩选到行尾
-    std::cout << "Navigation: document edges, viewport paging, selection, UTF-8, wrapping, folding and IME passed\n";
+
+    // A soft wrap gives the previous row's end and the next row's start the
+    // same source offset. Left must pass that shared stop, while Right must
+    // return to it; both directions must use projected UTF-8 caret boundaries.
+    auto checkSoftWrap = [&](bool markdown) {
+        M::InputState wrapped;
+        wrapped.text = markdown ? "**中文测试😀中文测试 alpha beta gamma**"
+                                : "中文测试😀中文测试 alpha beta gamma";
+        std::vector<components::input_detail::LineDecoration> rows;
+        if (markdown) {
+            rows.resize(1);
+            rows[0].holes = {{0, 2}, {static_cast<int>(wrapped.text.size()) - 2,
+                                         static_cast<int>(wrapped.text.size())}};
+        }
+        constexpr float width = 45.f;
+        M::ensureLayoutCache(wrapped, "monospace", 16.f, width, true,
+                             markdown ? &rows : nullptr);
+        int boundary = -1;
+        int previous = -1;
+        for (std::size_t i = 1; i < wrapped.cachedLines.size(); ++i) {
+            const auto& prior = wrapped.cachedLines[i - 1];
+            const auto& next = wrapped.cachedLines[i];
+            if (prior.hardBreakAfter || prior.end != next.start) continue;
+            const int candidate = components::input_detail::previousVisibleCaret(
+                prior.metrics, prior.presentation().holes, prior.start, prior.end);
+            if (candidate < prior.end && prior.end - candidate > 1) {
+                boundary = prior.end;
+                previous = candidate;
+                break;
+            }
+        }
+        if (boundary < 0 || M::lineIndexFor(wrapped.cachedLines, boundary) == 0) return false;
+        wrapped.cursor = boundary;
+        M::moveCursor(wrapped, -1, false, "monospace", 16.f, true, width);
+        if (wrapped.cursor != previous || M::clampUtf8Boundary(wrapped.text, wrapped.cursor) != wrapped.cursor)
+            return false;
+        M::moveCursor(wrapped, 1, false, "monospace", 16.f, true, width);
+        if (wrapped.cursor != boundary || M::hasTextSelection(wrapped)) return false;
+        M::moveCursor(wrapped, -1, true, "monospace", 16.f, true, width);
+        if (wrapped.cursor != previous || wrapped.selectionStart != boundary ||
+            wrapped.selectionEnd != previous) return false;
+        M::moveCursor(wrapped, 1, true, "monospace", 16.f, true, width);
+        if (wrapped.cursor != boundary || wrapped.selectionStart != boundary ||
+            wrapped.selectionEnd != boundary || M::hasTextSelection(wrapped)) return false;
+        return true;
+    };
+    if (!checkSoftWrap(false)) return 30;
+    if (!checkSoftWrap(true)) return 31;
+
+    // The byte after a hard newline has a distinct stop before the newline.
+    M::InputState hardBreak;
+    hardBreak.text = "ab\n中";
+    hardBreak.cursor = 3;
+    M::moveCursor(hardBreak, -1, false, "monospace", 16.f, true, 45.f);
+    if (hardBreak.cursor != 2) return 32;
+    M::moveCursor(hardBreak, 1, false, "monospace", 16.f, true, 45.f);
+    if (hardBreak.cursor != 3) return 33;
+
+    // Inline backgrounds occupy layout space without inserting source bytes.
+    // Exercise hidden markers, adjacent punctuation/chips and split UTF-8 runs.
+    for (float scale : {1.0f, 1.25f, 1.5f}) {
+        core::TextPrimitive::setLayoutPixelScale(scale);
+        for (float width : {600.0f, 65.0f, 41.0f}) {
+            M::InputState chipped;
+            chipped.text = "`中文😀alpha`的`next`，tail";
+            const int close = static_cast<int>(chipped.text.find('`', 1));
+            const int second = static_cast<int>(chipped.text.find('`', close + 1));
+            const int secondEnd = static_cast<int>(chipped.text.find('`', second + 1));
+            std::vector<components::input_detail::LineDecoration> decorations(1);
+            decorations[0].holes = {{0, 1}, {close, close + 1}, {second, second + 1}, {secondEnd, secondEnd + 1}};
+            components::input_detail::LineRunStyle chip;
+            chip.background = core::Color{.9f, .9f, .9f, 1};
+            chip.borderWidth = 1;
+            chip.chipPadding = 3;
+            decorations[0].runs = {{1, close, chip}, {second + 1, secondEnd, chip}};
+            auto layout = M::InputLayout::build(chipped, width, 600, width, 0, 0, 0, 20,
+                                                "monospace", 16, true, &decorations);
+            for (int row = 0; row < static_cast<int>(chipped.cachedLines.size()); ++row) {
+                M::ensureLineDetails(chipped, row);
+                const auto& line = chipped.cachedLines[row];
+                if (line.metrics.width > width + .1f) {
+                    std::cerr << "chip wrap overflow " << line.metrics.width << "/" << width << '\n'; return 34;
+                }
+                float previousRight = 0;
+                for (const auto& run : line.presentation().runs) {
+                    const float pad = components::input_detail::inlineChipPadding(run.style.get(), 16);
+                    const float left = run.x - pad;
+                    const float right = run.x + run.width + pad;
+                    if (left < previousRight - .05f || right > line.metrics.width + .05f) return 35;
+                    previousRight = right;
+                    // Padding hit testing must resolve to a valid source boundary.
+                    for (float x : {left, run.x, right}) {
+                        const int hit = layout.closestCaret(row, x);
+                        if (hit < line.start || hit > line.end || M::clampUtf8Boundary(chipped.text, hit) != hit) return 36;
+                    }
+                }
+                const auto& stops = line.metrics.caretX();
+                if (!std::is_sorted(stops.begin(), stops.end())) return 37;
+                if (row > 0) {
+                    chipped.cursor = line.start;
+                    M::moveCursor(chipped, -1, false, "monospace", 16, true, width);
+                    if (chipped.cursor >= line.start) return 38;
+                    M::moveCursor(chipped, 1, false, "monospace", 16, true, width);
+                    if (chipped.cursor != line.start) return 39;
+                }
+            }
+            if (chipped.text != "`中文😀alpha`的`next`，tail") return 40;
+            // Coarse and detailed no-wrap paths must reserve identical spacing.
+            const auto exact = M::measureLines(chipped.text, "monospace", 16, 0, &decorations);
+            const auto coarse = M::measureLines(chipped.text, "monospace", 16, 0, &decorations,
+                                                nullptr, nullptr, nullptr, nullptr, true);
+            if (std::fabs(exact[0].metrics.width - coarse[0].metrics.width) > .05f) return 41;
+        }
+    }
+    core::TextPrimitive::setLayoutPixelScale(1);
+    std::cout << "Navigation: document edges, viewport paging, selection, UTF-8, soft/hard wrapping, chip spacing, folding and IME passed\n";
 }

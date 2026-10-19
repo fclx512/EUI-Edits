@@ -21,6 +21,8 @@
 //      → 真实文件变更触发 changeCount/回调（证明监视线程真的复活）；
 //   E. stop() → 立刻同 root watch() 循环 → 不死锁，且启停后真实监听仍可用；
 //   F. 无间隔 watch(A)→watch(B) 高频切换（+ 并发灌事件）→ 不死锁。
+//   G. Windows 浅监听：直属既有文件变化先确认监听就绪；排空余波后，改写子目录
+//      既有文件在有限观察期内不通知；随后直属变化仍通知（全程不用合成事件）。
 //
 // 构建：随主工程 EUI_BUILD_TEST_FIXTURES=ON 一起编（CMakeLists.txt 给这个目标
 // 额外挂了 apps/neo_editor/platform/vault_watcher.cpp、model/text_file.cpp、
@@ -469,6 +471,132 @@ void scenarioRapidWatchSwitch() {
     check(watcher.changeCount() > 0, "F: changeCount 有增长");
 }
 
+// G：只监视直属条目。先建好整个夹具，避免把「创建子目录」这个根直属事件
+// 误认为递归监听。真实文件系统通知没有同步屏障：正例确认活性，静默窗口排空
+// 已收到正例的余波，负例仅声明下面这段受控观察期，不声称永久不会产生事件。
+void scenarioShallowWatchScope() {
+#if !defined(_WIN32)
+    std::printf("  [skip] G: 非 Windows 分支无监视线程，跳过浅监听范围断言\n");
+    return;
+#else
+    using Clock = std::chrono::steady_clock;
+    using namespace std::chrono;
+    TempDir root("neo_vault_watcher_shallow_" +
+                 std::to_string(Clock::now().time_since_epoch().count()));
+    check(!root.path.empty(), "G: 拿到独立临时目录");
+    if (root.path.empty()) return;
+    const auto nestedDirectory = root.path / "existing-child";
+    const auto directFile = root.path / "direct.md";
+    const auto nestedFile = nestedDirectory / "nested.md";
+    std::error_code error;
+    std::filesystem::create_directory(nestedDirectory, error);
+    check(!error, "G: 监听前预建子目录");
+    if (error) return;
+    const auto createFixtureFile = [](const std::filesystem::path& path) {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << "seed\n";
+        file.close();
+        return bool(file);
+    };
+    const auto appendExisting = [](const std::filesystem::path& path) {
+        // No create/rename/delete in either observation: close each append so
+        // LAST_WRITE and SIZE notifications are eligible for delivery.
+        // in|out also prevents an absent fixture from being silently created.
+        std::fstream file(path, std::ios::binary | std::ios::in | std::ios::out);
+        file.seekp(0, std::ios::end);
+        file.put('x');
+        file.close();
+        return bool(file);
+    };
+    const bool fixtureReady = createFixtureFile(directFile) && createFixtureFile(nestedFile);
+    check(fixtureReady, "G: 监听前预建两层文件并完成写入");
+    if (!fixtureReady) return;
+
+    std::mutex eventMutex;
+    std::condition_variable eventReady;
+    std::uint64_t callbacks = 0;
+    // Declared after callback state, so every exit joins the watcher before the
+    // mutex, condition variable or captured count can be destroyed.
+    neo::platform::VaultWatcher watcher;
+    watcher.onChange([&] {
+        {
+            std::lock_guard<std::mutex> lock(eventMutex);
+            ++callbacks;
+        }
+        eventReady.notify_all();
+    });
+    watcher.watch(neo::textfile::pathToUtf8(root.path));
+
+    const auto callbackCount = [&] {
+        std::lock_guard<std::mutex> lock(eventMutex);
+        return callbacks;
+    };
+    const auto directChangeObserved = [&] {
+        const auto baseline = callbackCount();
+        const auto deadline = Clock::now() + seconds(10);
+        while (Clock::now() < deadline) {
+            if (!appendExisting(directFile)) return false;
+            std::unique_lock<std::mutex> lock(eventMutex);
+            if (eventReady.wait_for(lock, milliseconds(50), [&] { return callbacks > baseline; }))
+                return true;
+        }
+        return false;
+    };
+    const bool ready = directChangeObserved();
+    check(ready && watcher.changeCount() > 0, "G: 直属文件真实变化确认监听已就绪");
+    if (!ready) return; // A dead listener must never make the negative test pass.
+
+    const auto waitForQuiet = [&] {
+        const auto deadline = Clock::now() + seconds(5);
+        std::unique_lock<std::mutex> lock(eventMutex);
+        auto observed = callbacks;
+        while (Clock::now() < deadline) {
+            const auto remaining = duration_cast<milliseconds>(deadline - Clock::now());
+            if (remaining < milliseconds(500)) return false;
+            if (!eventReady.wait_for(lock, milliseconds(500), [&] { return callbacks != observed; }))
+                return true;
+            observed = callbacks;
+        }
+        return false;
+    };
+    const bool quiet = waitForQuiet();
+    check(quiet, "G: 直属正例通知排空后保持500ms静默");
+    if (!quiet) return; // Ambient/delayed root events cannot be attributed to the child.
+
+    const auto beforeNested = callbackCount();
+    const auto beforeNestedCount = watcher.changeCount();
+    const auto negativeStart = Clock::now();
+    bool nestedWritesOk = true;
+    bool nestedNotified = false;
+    for (int i = 0; i < 6 && !nestedNotified; ++i) {
+        nestedWritesOk = appendExisting(nestedFile) && nestedWritesOk;
+        std::unique_lock<std::mutex> lock(eventMutex);
+        nestedNotified = eventReady.wait_for(lock, milliseconds(100), [&] {
+            return callbacks != beforeNested;
+        });
+    }
+    if (!nestedNotified) {
+        std::unique_lock<std::mutex> lock(eventMutex);
+        nestedNotified = eventReady.wait_for(lock, milliseconds(500), [&] {
+            return callbacks != beforeNested;
+        });
+    }
+    const auto negativeMs = duration_cast<milliseconds>(Clock::now() - negativeStart).count();
+    check(nestedWritesOk, "G: 负例只改写预建子目录中的既有文件");
+    check(!nestedNotified && watcher.changeCount() == beforeNestedCount,
+          "G: 六次子目录既有文件改写及尾部观察期内无递归通知");
+    std::printf("  [observed] G: nested-only interval=%lldms; callbacks=%llu->%llu; changes=%llu->%llu\n",
+                static_cast<long long>(negativeMs), static_cast<unsigned long long>(beforeNested),
+                static_cast<unsigned long long>(callbackCount()),
+                static_cast<unsigned long long>(beforeNestedCount),
+                static_cast<unsigned long long>(watcher.changeCount()));
+
+    const bool stillReady = directChangeObserved();
+    check(stillReady, "G: 负例结束后直属文件变化仍触发真实通知");
+    watcher.stop();
+#endif
+}
+
 } // namespace
 
 int main() {
@@ -481,6 +609,7 @@ int main() {
                    std::chrono::seconds(60));
     runWithTimeout("E stop→watch", scenarioStopThenImmediateWatch, std::chrono::seconds(60));
     runWithTimeout("F 快速 watch(A)→watch(B)", scenarioRapidWatchSwitch, std::chrono::seconds(60));
+    runWithTimeout("G 浅监听正负对照", scenarioShallowWatchScope, std::chrono::seconds(35));
 
     std::printf("vault_watcher: checks=%d failures=%d\n", gChecks, gFailures);
     return gFailures == 0 ? 0 : 1;

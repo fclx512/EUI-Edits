@@ -41,6 +41,13 @@ bool checkSingleLine(float height, float fontSize, float layoutScale, const std:
     const auto* viewport = ui.find("field.textViewport");
     const auto* text = ui.find("field.text");
     const auto* hit = ui.find("field.hit");
+    const auto* surface = ui.find("field.surface");
+    if (!surface || surface->frame.x <= root->frame.x ||
+        surface->frame.x + surface->frame.width >= root->frame.x + root->frame.width ||
+        !near(hit->frame.width,260)) {
+        std::cerr << "surface must retain scissor clearance without shrinking pointer bounds\n";
+        return false;
+    }
     if (!root || !viewport || !text || !hit) {
         std::cerr << "single-line input tree is incomplete\n";
         return false;
@@ -97,6 +104,36 @@ bool multilineStillUsesTopAlignment(float fontSize, float layoutScale) {
     return true;
 }
 
+bool reservedContentKeepsScrollbarAtEdge(float width, float reserve, float scale) {
+    core::TextPrimitive::setLayoutPixelScale(scale);
+    core::dsl::Ui full, reference;
+    std::string text;
+    for (int i = 0; i < 60; ++i) text += "Long line for wrapping and scrollbar geometry 中文 0123456789\n";
+    const auto compose = [&](core::dsl::Ui& ui, float outer, float inset) {
+        ui.begin("reserved.content");
+        components::input(ui, "field").size(outer, 180).multiline().scrollbar()
+            .fontFamily("monospace").fontSize(16).lineNumbers()
+            .inset(12).contentRightInset(inset).maxTextWidth(700).value(text).build();
+        ui.end();
+        ui.layout(outer, 180);
+    };
+    compose(full, width, reserve);
+    compose(reference, width - reserve, 0);
+    const auto* bar = full.find("field.scrollbar.thumb");
+    const auto* viewport = full.find("field.textViewport");
+    const auto* oldViewport = reference.find("field.textViewport");
+    const auto* oldBar = reference.find("field.scrollbar.thumb");
+    if (!bar || !oldBar || !viewport || !oldViewport ||
+        !near(bar->frame.x + bar->frame.width, width) ||
+        !near(viewport->frame.x, oldViewport->frame.x) ||
+        !near(viewport->frame.width, oldViewport->frame.width) ||
+        !near(bar->frame.height, oldBar->frame.height)) {
+        std::cerr << "content clearance must preserve wrapping while the scrollbar stays at the outer edge\n";
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -106,6 +143,9 @@ int main() {
     constexpr std::array<const char*, 2> values{"", "Actual text 中文"};
 
     for (const float scale : scales) {
+        for (const float width : {320.0f, 640.0f, 1000.0f}) {
+            if (!reservedContentKeepsScrollbarAtEdge(width, 72.0f, scale)) return 3;
+        }
         for (const float height : heights) {
             for (const float fontSize : fontSizes) {
                 for (const char* value : values) {

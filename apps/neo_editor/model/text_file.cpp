@@ -628,7 +628,10 @@ LoadResult loadWithEncoding(const std::string& path, const ForcedEncoding& force
     return result;
 }
 
-bool save(const std::string& path, const Document& document, std::string& error, const std::function<bool()>& beforeReplace) {
+namespace {
+
+bool writeDocument(const std::string& path, const Document& document, std::string& error,
+                   const std::function<bool()>& beforePublish, bool createOnly) {
     const std::string body = expandNewlines(document.text, document.lineEnding);
 
     std::string payload;
@@ -664,11 +667,25 @@ bool save(const std::string& path, const Document& document, std::string& error,
     }
 
     // 编码全部在内存完成才落盘：任何编码失败都发生在动目标文件之前。
-    if (!atomicwrite::writeFile(pathFromUtf8(path), payload, beforeReplace)) {
+    const auto target = pathFromUtf8(path);
+    if (!(createOnly ? atomicwrite::writeFileCreateOnly(target, payload, beforePublish)
+                     : atomicwrite::writeFile(target, payload, beforePublish))) {
         error = i18n::tr("text.save_failed");
         return false;
     }
     return true;
+}
+
+} // namespace
+
+bool save(const std::string& path, const Document& document, std::string& error,
+          const std::function<bool()>& beforeReplace) {
+    return writeDocument(path, document, error, beforeReplace, false);
+}
+
+bool create(const std::string& path, const Document& document, std::string& error,
+            const std::function<bool()>& beforePublish) {
+    return writeDocument(path, document, error, beforePublish, true);
 }
 
 bool isMarkdown(const std::string& path) {

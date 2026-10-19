@@ -117,6 +117,58 @@ int main() {
         ok &= expect(matches("anything", "").empty(), "empty query has no matches");
     }
     {
+        const auto inside = matches("aaa", "aa", {}, 1, 3);
+        ok &= expect(inside.size() == 1 && inside[0].begin == 1 && inside[0].end == 3,
+                     "range search starts at its own non-overlapping match origin");
+        const auto repeated = matches("aaaaaaa", "aa", {}, 1, 6);
+        ok &= expect(repeated.size() == 2 && repeated[0].begin == 1 && repeated[1].begin == 3,
+                     "accepted matches do not overlap or extend beyond range end");
+        ok &= expect(matches("abc", "bc", {}, 0, 2).empty(),
+                     "a match crossing the end of the range is excluded");
+        ok &= expect(matches("abc", "a", {}, 3, 3).empty() &&
+                     matches("abc", "a", {}, 2, 1).empty() &&
+                     matches("abc", "a", {}, 100, 200).empty(),
+                     "empty reversed and out-of-document ranges have no matches");
+        const auto suffix = matches("abc", "bc", {}, 1, 100);
+        ok &= expect(suffix.size() == 1 && suffix[0].begin == 1 && suffix[0].end == 3,
+                     "range end beyond document is bounded by actual source size");
+    }
+    {
+        ok &= expect(matches("xabcy", "abc", Options{false, true}, 1, 4).empty(),
+                     "selection edges do not invent whole-word boundaries");
+        ok &= expect(matches("xabc)", "abc", Options{false, true}, 1, 4).empty() &&
+                     matches("(abcy", "abc", Options{false, true}, 1, 4).empty(),
+                     "whole-word range search checks both outside neighbors");
+        const auto punctuation = matches("(abc)", "abc", Options{false, true}, 1, 4);
+        ok &= expect(punctuation.size() == 1 && punctuation[0].begin == 1,
+                     "real punctuation outside the selection remains a word boundary");
+        const std::string cjk = "中abc文";
+        ok &= expect(matches(cjk, "abc", Options{false, true}, 3, 6).empty(),
+                     "multibyte word characters outside the selection remain significant");
+        const std::string enclosed = "（搜索）";
+        const auto cjkPunctuation = matches(enclosed, "搜索", Options{false, true}, 3, 9);
+        ok &= expect(cjkPunctuation.size() == 1 && cjkPunctuation[0].begin == 3 &&
+                     cjkPunctuation[0].end == 9,
+                     "multibyte punctuation outside range retains source-byte spans");
+    }
+    {
+        const std::string text = "前🙂 中文🙂 后";
+        const std::string query = "中文🙂";
+        const auto begin = text.find(query);
+        const auto end = begin + query.size();
+        const auto found = matches(text, query, {}, begin, end);
+        ok &= expect(found.size() == 1 && found[0].begin == static_cast<int>(begin) &&
+                     found[0].end == static_cast<int>(end),
+                     "Unicode range matching returns document byte offsets");
+        ok &= expect(matches(text, query, {}, begin + 1, end).empty() &&
+                     matches(text, query, {}, begin, end - 1).empty(),
+                     "range boundaries never permit a partial UTF-8 match");
+        const std::string sharpS = "\xE1\xBA\x9E"; // U+1E9E folds to U+00DF, with different byte length.
+        const auto folded = matches("[" + sharpS + "]", "\xC3\x9F", {}, 1, 4);
+        ok &= expect(folded.size() == 1 && folded[0].begin == 1 && folded[0].end == 4,
+                     "range case folding preserves original source byte width");
+    }
+    {
         constexpr std::size_t documentSize = 8u * 1024u * 1024u;
         const std::string document(documentSize, 'a');
         const std::string query = "zzzz-not-present";

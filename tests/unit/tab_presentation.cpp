@@ -445,17 +445,17 @@ bool registryOrdinalNotReusedAndPruned() {
 // ── 顶栏几何 / 关闭锚点 ───────────────────────────────────────────────────
 bool layoutFormula() {
     if (!closeEnough(layout::contentWidth(0), 0.0f) || !closeEnough(layout::contentWidth(1), 176.0f) ||
-        !closeEnough(layout::contentWidth(4), 716.0f)) {
+        !closeEnough(layout::contentWidth(4), 704.0f)) {
         std::cerr << "FAIL layoutFormula: contentWidth\n";
         return false;
     }
-    if (!closeEnough(layout::maxScroll(4, 300.0f), 416.0f) || !closeEnough(layout::maxScroll(2, 500.0f), 0.0f)) {
+    if (!closeEnough(layout::maxScroll(4, 300.0f), 404.0f) || !closeEnough(layout::maxScroll(2, 500.0f), 0.0f)) {
         std::cerr << "FAIL layoutFormula: maxScroll\n";
         return false;
     }
-    if (!closeEnough(layout::cardLeft(2, 10.0f, 0.0f), 350.0f) ||
-        !closeEnough(layout::closeCenterX(2, 10.0f, 0.0f), 512.0f) ||
-        !closeEnough(layout::cardLeft(2, 10.0f, 180.0f), 530.0f)) {
+    if (!closeEnough(layout::cardLeft(2, 10.0f, 0.0f), 342.0f) ||
+        !closeEnough(layout::closeCenterX(2, 10.0f, 0.0f), 504.0f) ||
+        !closeEnough(layout::cardLeft(2, 10.0f, 180.0f), 522.0f)) {
         std::cerr << "FAIL layoutFormula: cardLeft/closeCenterX\n";
         return false;
     }
@@ -518,7 +518,7 @@ bool closeChainMiddleAndTail() {
                 std::cerr << "FAIL closeChainMiddleAndTail: tail center drifted at step " << step << "\n";
                 return false;
             }
-            if (step == 0 && !closeEnough(plan.drawOffset, 180.0f)) {
+            if (step == 0 && !closeEnough(plan.drawOffset, layout::tabPitch)) {
                 std::cerr << "FAIL closeChainMiddleAndTail: tail offset should move left neighbour by one pitch\n";
                 return false;
             }

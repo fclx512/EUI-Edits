@@ -12,6 +12,7 @@
 #include "ui/icons.h"
 #include "ui/ui_language.h"
 #include "ui/about_page.h"
+#include "ui/theme_workbench.h"
 #include "model/version.h"
 #include "core/platform/bundled_resources.h"
 
@@ -66,7 +67,7 @@ inline void flatButton(eui::Ui& ui,
                        float height,
                        bool accent,
                        float fontSize,
-                       std::function<void()> onClick, bool danger = false) {
+                       std::function<void()> onClick, bool danger = false, bool disabled = false) {
     danger = danger || id == "settings.fontPicker.reset";
     eui::Color normal = transparentColor();
     eui::Color textColor = colors.text;
@@ -93,6 +94,7 @@ inline void flatButton(eui::Ui& ui,
         .shadow(0.0f, 0.0f, 0.0f, transparentColor())
         .border(0.0f, transparentColor())
         .preserveFocusOnPress()
+        .disabled(disabled)
         .onClick(std::move(onClick))
         .transition(quickTransition())
         .build();
@@ -103,6 +105,12 @@ inline void flatButton(eui::Ui& ui,
 // 本轮只允许改那个 .cpp 里**已有**的函数，新入口跟着行留在本文件。
 // 三步顺序固定：校验并生效 → 同步状态与清屏色 → 落盘 + 整屏失效。
 // 失败（文件不存在 / JSON 坏 / 版本不认识）只弹 toast 说明，**不动当前配色**。
+
+inline std::size_t editableThemeColorCount(const std::map<std::string, eui::Color>& values) {
+    std::size_t count = 0;
+    for (const auto& field : themeworkbench::fields()) if (values.find(field.name) != values.end()) ++count;
+    return count;
+}
 
 inline bool applyThemeFilePath(AppState& state, const std::string& path) {
     std::string error;
@@ -122,10 +130,12 @@ inline bool applyThemeFilePath(AppState& state, const std::string& path) {
     persistSettings(state);
     if (activeTheme().version >= themeloader::kSchemaVersion2) {
         const ThemeFileData& theme = activeTheme();
+        const auto lightCount = editableThemeColorCount(theme.light.colors);
+        const auto darkCount = editableThemeColorCount(theme.dark.colors);
         const std::string summary = i18n::format("settings.theme_counts",{
-            {"name",theme.name},{"light",std::to_string(theme.light.colors.size())},
-            {"dark",std::to_string(theme.dark.colors.size())},
-            {"unmapped",std::to_string(56-theme.light.colors.size()-theme.dark.colors.size())}});
+            {"name",theme.name},{"light",std::to_string(lightCount)},
+            {"dark",std::to_string(darkCount)},
+            {"unmapped",std::to_string(52-lightCount-darkCount)}});
         showToast(state, i18n::tr("settings.theme_loaded"), summary);
     }
     // 颜色烘在图元里：保留层的旧色必须整屏作废（与 applyTheme 同一套失效通知）。
@@ -168,7 +178,8 @@ inline bool chooseThemeFile(AppState& state) {
                   result.error.empty() ? i18n::tr("settings.dialog_no_file") : result.error);
         return false;
     }
-    return applyThemeFilePath(state, result.paths.front());
+    // 导入先审阅，再由工作台创建独立草稿；此处不触及当前生效主题。
+    return theme_workbench_ui::reviewFile(state, result.paths.front());
 }
 
 struct ThemeCatalogEntry {
@@ -420,18 +431,30 @@ inline std::vector<const filetypes::Type*> associationRows(const AppState& state
     }
     return rows;
 }
-inline float associationRowHeight(float width) { return width<500.0f?62.0f:54.0f; }
-// availableHeight = 扣除卡片上方内容后的剩余视口高度。按窗口余量换算，
-// 小窗口保底 2 行（保证列表可用），大窗口最多 9 行；页面滚动范围由 contentHeight 推出，会自动跟上。
-inline float associationViewportHeight(float width,float availableHeight,const AppState& state) {
-    const float rowH=associationRowHeight(width-36);
-    const float rows=static_cast<float>(associationRows(state).size());
-    const float fixed=(width-36<620?306.0f:264.0f)+18.0f; // 卡片头部(搜索/按钮) + 列表下沿留白
-    const float fit=std::floor(std::max(0.0f,availableHeight-fixed)/rowH);
-    return std::max(1.0f,std::min(rows,std::clamp(fit,2.0f,9.0f)))*rowH;
+struct AssociationGeometry {
+    float scale, rowHeight, listTop, viewport, footerHeight, height;
+    bool stackedManagement;
+};
+inline AssociationGeometry associationGeometry(const UiMetrics& metrics, float width,
+                                                float availableHeight, const AppState& state) {
+    AssociationGeometry g{};
+    g.scale = std::max(1.0f, metrics.panelFontSize / 14.0f);
+    g.rowHeight = (width - 36 < 500 ? 62.0f : 54.0f) * g.scale;
+    g.listTop = 226.0f * g.scale;
+    const float managementWidth = std::max(
+        core::TextPrimitive::measureTextWidth(i18n::tr("assoc.management"),uiFontFamily(state),metrics.panelFontSize),
+        core::TextPrimitive::measureTextWidth(i18n::tr("assoc.management_close"),uiFontFamily(state),metrics.panelFontSize)) + 28;
+    const float refreshWidth = core::TextPrimitive::measureTextWidth(i18n::tr("assoc.refresh"),uiFontFamily(state),metrics.panelFontSize) + 28;
+    g.stackedManagement = managementWidth + refreshWidth + 12 > width - 36;
+    g.footerHeight = (state.associationManagementOpen ? 312.0f : 266.0f) * g.scale + (g.stackedManagement ? 38*g.scale : 0);
+    const float fit = std::floor(std::max(0.0f, availableHeight-g.listTop-g.footerHeight)/g.rowHeight);
+    const float rows = static_cast<float>(associationRows(state).size());
+    g.viewport = std::max(4.0f, std::min(rows, std::clamp(fit, 4.0f, 9.0f))) * g.rowHeight;
+    g.height = g.listTop + g.viewport + g.footerHeight;
+    return g;
 }
-inline float fileAssocCardHeight(const UiMetrics&,float width,float availableHeight,const AppState& state) {
-    return (width-36<620?306.0f:264.0f)+associationViewportHeight(width,availableHeight,state)+18.0f;
+inline float fileAssocCardHeight(const UiMetrics& metrics,float width,float availableHeight,const AppState& state) {
+    return associationGeometry(metrics, width, availableHeight, state).height;
 }
 inline eui::Color associationColor(const EditorColors& colors, filetypes::Category category) {
     switch(category) {
@@ -446,7 +469,7 @@ inline void applyAssociationSelection(AppState& state) {
     const auto result=fileassoc::applySelection(state.associationSelected);
     showToast(state,result.ok?i18n::tr("settings.associations_updated"):i18n::tr("settings.associations_failed"),result.ok?i18n::tr("settings.associations_updated_hint"):result.error);
     refreshFileAssocState(state);
-    state.associationSelected=fileassoc::registeredExtensions();
+    if (result.ok) state.associationSelected=fileassoc::registeredExtensions();
     app::requestUpdate();
 }
 inline void fileAssocCard(eui::Ui& ui,AppState& state,const EditorColors& colors,const UiMetrics& metrics,const char* uiFont,float y,float width,float availableHeight) {
@@ -456,44 +479,72 @@ inline void fileAssocCard(eui::Ui& ui,AppState& state,const EditorColors& colors
         state.associationSelectionLoaded=true;
     }
     float& offset=ui.state<float>("settings.fileAssoc.offset");
-    const float inner=std::max(0.0f,width-36), height=fileAssocCardHeight(metrics,width,availableHeight,state);
-    const bool narrowButtons=inner<620;
-    const float listY=y+(narrowButtons?306.0f:264.0f);
-    const float rowH=associationRowHeight(inner), viewport=associationViewportHeight(width,availableHeight,state);
+    const float inner=std::max(0.0f,width-36);
+    const auto layout=associationGeometry(metrics,width,availableHeight,state);
+    const float scale=layout.scale, rowH=layout.rowHeight, viewport=layout.viewport;
+    const float listY=y+layout.listTop;
     const auto rows=associationRows(state);
-    ui.rect("settings.fileAssoc.card").position(0,y).size(width,height).radius(8).color(colors.editor).border(1,colors.border).build();
-    ui.text("settings.fileAssoc.label").position(18,y+16).size(inner,26).text(i18n::tr("assoc.title")).fontFamily(uiFont).fontSize(metrics.panelLabelFontSize).fontWeight(600).color(colors.text).verticalAlign(eui::VerticalAlign::Center).build();
-    ui.text("settings.fileAssoc.description").position(18,y+48).size(inner,60).text(i18n::tr("settings.assoc_description"))
-        .wrap(true).fontFamily(uiFont).fontSize(metrics.panelHintFontSize).color(colors.textMuted).verticalAlign(eui::VerticalAlign::Center).build();
-    segmentedAt(ui,colors,"settings.fileAssoc.category",18,y+120,inner,
-        {i18n::tr("assoc.all"),i18n::tr("assoc.text"),i18n::tr("assoc.data"),i18n::tr("assoc.code")},state.associationCategory,metrics.panelFontSize,[&state,&offset](int index){state.associationCategory=index;offset=0;app::requestUpdate();});
-    // 一键注册/解除的入口：把当前过滤结果整体选上或撤选，再配合"应用更改"一次落地。
-    const float selectW=92.0f;
-    bool allSelected=!rows.empty();
-    for(const auto* type:rows) if(std::find(state.associationSelected.begin(),state.associationSelected.end(),type->extension)==state.associationSelected.end()) {allSelected=false;break;}
-    flatButton(ui,colors,"settings.fileAssoc.selectAll",i18n::tr(allSelected?"assoc.deselect_all":"assoc.select_all"),18+inner-selectW,y+164,selectW,32,false,metrics.panelFontSize,[&state,rows,allSelected] {
-        auto& values=state.associationSelected;
-        for(const auto* type:rows) {
-            const auto found=std::find(values.begin(),values.end(),type->extension);
-            if(allSelected) {if(found!=values.end()) values.erase(found);}
-            else if(found==values.end()) values.push_back(type->extension);
-        }
+    const auto label=[&](const char* id, const std::string& text, float top, float h, bool title=false) {
+        ui.text(id).position(18,top).size(inner,h).text(text).wrap(true).fontFamily(uiFont)
+            .fontSize(title?metrics.panelLabelFontSize:metrics.panelHintFontSize)
+            .fontWeight(title?600:400).color(title?colors.text:colors.textMuted)
+            .verticalAlign(eui::VerticalAlign::Center).build();
+    };
+    const auto buttonWidth=[&](const char* text) {
+        return std::min(inner,core::TextPrimitive::measureTextWidth(text,uiFont,metrics.panelFontSize)+28.0f);
+    };
+    ui.rect("settings.fileAssoc.card").position(0,y).size(width,layout.height).radius(8).color(colors.editor).border(1,colors.border).build();
+    label("settings.fileAssoc.label",i18n::tr("assoc.title"),y+12*scale,28*scale,true);
+    label("settings.fileAssoc.description",i18n::tr("settings.assoc_description"),y+44*scale,44*scale);
+    const float selectW=buttonWidth(i18n::tr("assoc.select_recommended"));
+    flatButton(ui,colors,"settings.fileAssoc.recommended",i18n::tr("assoc.select_recommended"),18,y+96*scale,selectW,32*scale,false,metrics.panelFontSize,[&state] {
+        state.associationSelected=filetypes::recommendedAssociations();
         app::requestUpdate();
     });
-    components::input(ui,"settings.fileAssoc.search").position(18,y+164).size(std::max(120.0f,inner-selectW-8),32).value(state.associationSearch).placeholder(i18n::tr("assoc.search"))
+    ui.text("settings.fileAssoc.selected").position(26+selectW,y+96*scale).size(std::max(0.0f,inner-selectW-8),32*scale)
+        .text(i18n::format("assoc.selected_count",{{"count",std::to_string(state.associationSelected.size())}}))
+        .fontFamily(uiFont).fontSize(metrics.panelHintFontSize).color(colors.textMuted).verticalAlign(eui::VerticalAlign::Center).build();
+    segmentedAt(ui,colors,"settings.fileAssoc.category",18,y+140*scale,inner,
+        {i18n::tr("assoc.all"),i18n::tr("assoc.text"),i18n::tr("assoc.data"),i18n::tr("assoc.code")},state.associationCategory,metrics.panelFontSize,[&state,&offset](int index){state.associationCategory=index;offset=0;app::requestUpdate();});
+    components::input(ui,"settings.fileAssoc.search").position(18,y+182*scale).size(inner,32*scale).value(state.associationSearch).placeholder(i18n::tr("assoc.search"))
         .fontFamily(uiFont).fontSize(metrics.panelFontSize).inset(8).theme(colors.tokens).onChange([&state,&offset](const std::string& value){state.associationSearch=value;offset=0;app::requestUpdate();}).build();
-    const float buttonW=narrowButtons?(inner-8)/2:(inner-24)/4;
-    auto button=[&](const char* id,const char* label,int index,bool accent,bool danger,std::function<void()> action) {
-        flatButton(ui,colors,id,label,18+(index%(narrowButtons?2:4))*(buttonW+8),y+210+(index/(narrowButtons?2:4))*42,buttonW,34,accent,metrics.panelFontSize,std::move(action),danger);
-    };
-    button("settings.fileAssoc.register",i18n::tr(state.fileAssocEntriesPresent&&!state.fileAssocRegistered?"assoc.repair":"assoc.apply"),0,true,false,[&state] {
+
+    std::size_t adding=0,removing=0;
+    for(const auto& status:state.associationStatuses) {
+        const bool selected=std::find(state.associationSelected.begin(),state.associationSelected.end(),status.extension)!=state.associationSelected.end();
+        if(selected && !status.registered) ++adding;
+        if(!selected && (status.registered || status.defaultApp==fileassoc::DefaultApp::EUIEdits)) ++removing;
+    }
+    const bool repair=state.fileAssocEntriesPresent&&!state.fileAssocRegistered;
+    const float footer=listY+viewport;
+    label("settings.fileAssoc.changes",
+        i18n::format("assoc.changes",{{"add",std::to_string(adding)},{"remove",std::to_string(removing)}}) +
+            (repair ? std::string(" · ")+i18n::tr("assoc.repair_hint") : std::string{}),footer+8*scale,34*scale);
+    flatButton(ui,colors,"settings.fileAssoc.register",i18n::tr("assoc.apply"),18,footer+48*scale,buttonWidth(i18n::tr("assoc.apply")),34*scale,true,metrics.panelFontSize,[&state] {
         bool removing=false;for(const auto& t:state.associationStatuses) if((t.registered || t.defaultApp==fileassoc::DefaultApp::EUIEdits) && std::find(state.associationSelected.begin(),state.associationSelected.end(),t.extension)==state.associationSelected.end()) removing=true;
         if(removing) requestRisk(state,i18n::tr("assoc.remove_some_title"),i18n::tr("assoc.remove_some_hint"),i18n::tr("assoc.apply"),[&state]{applyAssociationSelection(state);});
         else applyAssociationSelection(state);
-    });
-    button("settings.fileAssoc.defaults.open",i18n::tr("assoc.defaults"),1,false,false,[&state]{if(!fileassoc::openDefaultAppsSettings()) showToast(state,i18n::tr("assoc.settings_failed"),i18n::tr("assoc.settings_failed_hint"));});
-    button("settings.fileAssoc.refresh",i18n::tr("assoc.refresh"),2,false,false,[&state]{refreshFileAssocState(state);state.associationSelected=fileassoc::registeredExtensions();app::requestUpdate();});
-    button("settings.fileAssoc.remove",i18n::tr("assoc.clear"),3,false,true,[&state]{requestRisk(state,i18n::tr("assoc.clear_title"),i18n::tr("assoc.clear_hint"),i18n::tr("assoc.clear_confirm"),[&state]{unregisterDefaultFileType(state);state.associationSelected=fileassoc::registeredExtensions();app::requestUpdate();});});
+    },false,!adding&&!removing&&!repair);
+    ui.rect("settings.fileAssoc.defaults.rule").position(18,footer+94*scale).size(inner,1).color(colors.border).build();
+    label("settings.fileAssoc.defaults.title",i18n::tr("assoc.defaults_step"),footer+104*scale,26*scale,true);
+    label("settings.fileAssoc.defaults.hint",i18n::tr("assoc.defaults_hint"),footer+132*scale,42*scale);
+    flatButton(ui,colors,"settings.fileAssoc.defaults.open",i18n::tr("assoc.defaults"),18,footer+180*scale,buttonWidth(i18n::tr("assoc.defaults")),34*scale,false,metrics.panelFontSize,[&state]{if(!fileassoc::openDefaultAppsSettings()) showToast(state,i18n::tr("assoc.settings_failed"),i18n::tr("assoc.settings_failed_hint"));});
+    const float managementW=std::max(buttonWidth(i18n::tr("assoc.management")),buttonWidth(i18n::tr("assoc.management_close")));
+    flatButton(ui,colors,"settings.fileAssoc.management",i18n::tr(state.associationManagementOpen?"assoc.management_close":"assoc.management"),18,footer+226*scale,managementW,30*scale,false,metrics.panelFontSize,[&state]{state.associationManagementOpen=!state.associationManagementOpen;app::requestUpdate();});
+    const float refreshW=buttonWidth(i18n::tr("assoc.refresh"));
+    const float managementExtra=layout.stackedManagement?38*scale:0;
+    flatButton(ui,colors,"settings.fileAssoc.refresh",i18n::tr("assoc.refresh"),layout.stackedManagement?18:18+inner-refreshW,footer+226*scale+managementExtra,refreshW,30*scale,false,metrics.panelFontSize,[&state]{refreshFileAssocState(state);app::requestUpdate();});
+    if(state.associationManagementOpen) {
+        flatButton(ui,colors,"settings.fileAssoc.remove",i18n::tr("assoc.clear"),18,footer+268*scale+managementExtra,buttonWidth(i18n::tr("assoc.clear")),34*scale,false,metrics.panelFontSize,[&state]{
+            requestRisk(state,i18n::tr("assoc.clear_title"),i18n::tr("assoc.clear_hint"),i18n::tr("assoc.clear_confirm"),[&state]{
+                const auto result=fileassoc::applySelection({});
+                refreshFileAssocState(state);
+                if(result.ok) state.associationSelected=fileassoc::registeredExtensions();
+                showToast(state,result.ok?i18n::tr("settings.associations_updated"):i18n::tr("settings.associations_failed"),result.ok?i18n::tr("settings.associations_updated_hint"):result.error);
+                app::requestUpdate();
+            });
+        },true,!state.fileAssocEntriesPresent);
+    }
     if(rows.empty()) {
         ui.text("settings.fileAssoc.empty").position(18,listY).size(inner,viewport).text(i18n::tr("assoc.empty"))
             .fontFamily(uiFont).fontSize(metrics.panelFontSize).color(colors.textMuted).verticalAlign(eui::VerticalAlign::Center).build();
@@ -603,6 +654,7 @@ inline void chooseFontFile(AppState& state, FontPickerTarget target) {
 inline void footerButtons(eui::Ui& ui,
                           const EditorColors& colors,
                           const UiMetrics& metrics,
+                          const char* fontFamily,
                           const PanelGeometry& geometry,
                           const std::string& leftId,
                           const std::string& leftLabel,
@@ -615,8 +667,10 @@ inline void footerButtons(eui::Ui& ui,
         .size(geometry.contentWidth, 1.0f)
         .color(colors.border)
         .build();
+    const float leftWidth = std::min(std::max(0.0f, geometry.contentWidth-kButtonWidth-12),
+        std::max(kButtonWidth, core::TextPrimitive::measureTextWidth(leftLabel,fontFamily,metrics.panelFontSize)+24));
     flatButton(ui, colors, leftId, leftLabel, kPadding, geometry.buttonY,
-               kButtonWidth, kButtonHeight, false, metrics.panelFontSize, std::move(onLeft));
+               leftWidth, kButtonHeight, false, metrics.panelFontSize, std::move(onLeft));
     flatButton(ui, colors, "settings.footer.primary", rightLabel,
                kPadding + geometry.contentWidth - kButtonWidth, geometry.buttonY,
                kButtonWidth, kButtonHeight, true, metrics.panelFontSize, std::move(onRight));
@@ -655,11 +709,10 @@ inline void fontPickerPage(eui::Ui& ui,
                     app::requestUpdate();
                 });
 
-    const std::string currentName = target == FontPickerTarget::Code && currentFile.empty()
-        ? std::string(i18n::tr("settings.font_mono_preset"))
-        : currentFile.empty() ? std::string(i18n::tr("settings.font_preset")) : fonts::displayNameFor(currentFile);
+    const std::string currentName = currentFile.empty() ? std::string(i18n::tr("settings.font_preset")) : fonts::displayNameFor(currentFile);
     const std::string currentNotes =
-        std::string(target == FontPickerTarget::Code ? i18n::tr("settings.font_mono_note") : "") +
+        std::string(currentFile.empty() ? (target == FontPickerTarget::Code ? i18n::tr("settings.font_default_mono_note") : i18n::tr("settings.font_default_body_note"))
+            : target == FontPickerTarget::Code ? i18n::tr("settings.font_mono_note") : "") +
         (!currentFile.empty() && textfile::extensionLower(currentFile) == "ttc"
              ? i18n::tr("settings.font_collection_note") : "");
     const float importButtonWidth = std::min(124.0f, geometry.contentWidth * 0.38f);
@@ -836,7 +889,7 @@ inline void fontPickerPage(eui::Ui& ui,
             .build();
     }
 
-    footerButtons(ui, colors, metrics, geometry,
+    footerButtons(ui, colors, metrics, uiFontFamily(state), geometry,
                   "settings.fontPicker.reset",
                   i18n::tr("settings.font_use_preset"),
                   [&state, target] {
@@ -859,6 +912,10 @@ inline void fontPickerPage(eui::Ui& ui,
 
 inline void themeListPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
                           const UiMetrics& metrics, const PanelGeometry& geometry) {
+    if (theme_workbench_ui::session().catalogRefreshNeeded) {
+        refreshThemeCatalog();
+        theme_workbench_ui::session().catalogRefreshNeeded = false;
+    }
     ui.text("settings.themeList.title")
         .x(kPadding).y(18.0f).size(geometry.contentWidth, 32.0f)
         .text(i18n::tr("settings.theme_library"))
@@ -875,7 +932,7 @@ inline void themeListPage(eui::Ui& ui, AppState& state, const EditorColors& colo
 
     const auto& entries = themeCatalog();
     const float listY = 96.0f;
-    const float listHeight = std::max(64.0f, geometry.footerRuleY - 12.0f - listY);
+    const float listHeight = std::max(64.0f, geometry.footerRuleY - 55.0f - listY);
     const float rowHeight = std::max(28.0f, std::round(metrics.panelFontSize * 1.9f));
     if (entries.empty() && state.themeFile.empty()) {
         ui.text("settings.themeList.empty")
@@ -916,6 +973,9 @@ inline void themeListPage(eui::Ui& ui, AppState& state, const EditorColors& colo
                                 // 内置配色与列表项一样点一下就生效；主题文件还在库里，随时可以点回来。
                                 resetThemeFile(state);
                                 state.themeListOpen = false;
+                            } else if (const auto path = textfile::pathFromUtf8(entry.path);
+                                       path.extension() == ".css" || path.filename() == "manifest.json") {
+                                theme_workbench_ui::reviewFile(state, entry.path);
                             } else if (applyThemeFilePath(state, entry.path)) {
                                 state.themeListOpen = false;
                             }
@@ -931,7 +991,10 @@ inline void themeListPage(eui::Ui& ui, AppState& state, const EditorColors& colo
                 }).build();
             }).build();
     }
-    footerButtons(ui, colors, metrics, geometry,
+    flatButton(ui, colors, "settings.themeList.workbench", i18n::tr("settings.theme_workbench"),
+               kPadding, geometry.footerRuleY - 40.0f, std::min(168.0f, geometry.contentWidth), 31.0f,
+               true, metrics.panelFontSize, [&state] { openThemeWorkbench(state); });
+    footerButtons(ui, colors, metrics, uiFontFamily(state), geometry,
                   "settings.themeList.file", i18n::tr("settings.pick_file"),
                   [&state] { chooseThemeFile(state); },
                   i18n::tr("settings.back"), [&state] { state.themeListOpen = false; app::requestUpdate(); });
@@ -946,6 +1009,14 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
     const UiMetrics metrics = uiMetrics(state);
     const char* uiFont = uiFontFamily(state);
 
+    bool foreground = true;
+#if defined(_WIN32)
+    const auto native = core::window::nativeWindowInfo(core::window::mainWindowHandle()).platformWindow;
+    foreground = native && GetForegroundWindow() == static_cast<HWND>(native);
+#endif
+    bool& wasForeground = ui.state<bool>("settings.wasForeground");
+    if (state.settingsOpen && foreground && !wasForeground && state.settingsOpenLast) refreshFileAssocState(state);
+    wasForeground = foreground;
     if (state.settingsOpen && !state.settingsOpenLast) {
         state.fontPicker = FontPickerTarget::None;
         state.themeListOpen = false;
@@ -1067,7 +1138,7 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                 const float sectionHeight = metrics.sectionTitleFontSize + 26.0f;
                 const float associationSpace = std::max(0.0f, scrollHeight-sectionHeight-rowHeight);
                 int rowCount = state.settingsCategory == SettingsCategory::Appearance ? 7
-                             : state.settingsCategory == SettingsCategory::Editor ? 4 : 1;
+                             : state.settingsCategory == SettingsCategory::Editor ? 5 : 0;
                 // 行数之外只剩"恢复默认值"一行，所以 +1。
                 const float contentHeight = sectionHeight + rowHeight * (rowCount+1) + 10.0f +
                     (state.settingsCategory == SettingsCategory::FileSystem
@@ -1195,8 +1266,8 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                          ? std::string(i18n::tr("settings.theme_builtin_hint"))
                          : elideToWidth(activeTheme().version >= themeloader::kSchemaVersion2
                                             ? i18n::format("settings.theme_counts_compact",{
-                                                {"name",activeTheme().name},{"light",std::to_string(activeTheme().light.colors.size())},
-                                                {"dark",std::to_string(activeTheme().dark.colors.size())}})
+                                                {"name",activeTheme().name},{"light",std::to_string(editableThemeColorCount(activeTheme().light.colors))},
+                                                {"dark",std::to_string(editableThemeColorCount(activeTheme().dark.colors))}})
                                             : textfile::fileName(state.themeFile),
                                         labelWidth, metrics.panelHintFontSize),
                      0.0f, rowY, labelWidth, geometry);
@@ -1220,7 +1291,7 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                         });
             rowY += geometry.rowHeight;
                                 }
-                                if (state.settingsCategory == SettingsCategory::FileSystem) {
+                                if (state.settingsCategory == SettingsCategory::Editor) {
             rowLabel(ui, colors, metrics, uiFont, "settings.mode", i18n::tr("settings.layout"), i18n::tr("settings.layout_hint"),
                      0.0f, rowY, labelWidth, geometry);
             segmentedAt(ui, colors, "settings.mode",

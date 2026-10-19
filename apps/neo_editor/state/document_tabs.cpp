@@ -783,9 +783,22 @@ void moveDocumentTab(AppState& state, std::uint64_t id, int direction) {
     if (documentModalOpen(state) || state.settingsOpen || direction == 0) return;
     auto found = std::find(state.tabOrder.begin(), state.tabOrder.end(), id);
     if (found == state.tabOrder.end()) return;
-    if (direction < 0 && found != state.tabOrder.begin()) std::iter_swap(found, found - 1);
-    if (direction > 0 && found + 1 != state.tabOrder.end()) std::iter_swap(found, found + 1);
+    const auto index = static_cast<std::size_t>(found - state.tabOrder.begin());
+    if (direction < 0 && index == 0) return;
+    if (direction > 0 && index + 1 == state.tabOrder.size()) return;
+    moveDocumentTabToIndex(state, id, direction < 0 ? index - 1 : index + 1);
+}
+bool moveDocumentTabToIndex(AppState& state, std::uint64_t id, std::size_t targetIndex) {
+    if (documentModalOpen(state) || state.settingsOpen) return false;
+    auto found = std::find(state.tabOrder.begin(), state.tabOrder.end(), id);
+    if (found == state.tabOrder.end() || targetIndex >= state.tabOrder.size()) return false;
+    const auto index = static_cast<std::size_t>(found - state.tabOrder.begin());
+    if (index == targetIndex) return false;
+    const auto value = *found;
+    state.tabOrder.erase(found);
+    state.tabOrder.insert(state.tabOrder.begin() + static_cast<std::ptrdiff_t>(targetIndex), value);
     persistDocumentSession(state); app::requestUpdate();
+    return true;
 }
 namespace {
 // 汇总一次完整的会话提交（所有标签的元数据 + 脏页正文指针）。协调器负责把它们转成

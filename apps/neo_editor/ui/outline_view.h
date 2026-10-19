@@ -7,6 +7,7 @@
 #include "ui/metrics.h"
 #include "ui/widgets.h"
 #include "ui/icons.h"
+#include "components/virtuallist.h"
 
 #include <algorithm>
 #include <cctype>
@@ -58,6 +59,15 @@ inline std::vector<OutlineEntry> outlineFromPlan(const std::string& text, const 
     return entries;
 }
 
+inline bool refreshVisibleOutline(AppState& state, const std::string& text,
+                                  const LpPlan& plan, unsigned long long version) {
+    if (!state.markdownOutlineOpen || state.markdownImmersive || !state.markdownCapable() ||
+        state.outlinePlanVersion == version || text != state.doc.text) return false;
+    state.outline = outlineFromPlan(text, plan);
+    state.outlinePlanVersion = version;
+    return true;
+}
+
 inline std::string vaultTabLabelForWidth(const std::string& text, float width,
                                          const char* fontFamily, float fontSize) {
     if (width <= 0.0f || text.empty()) return {};
@@ -81,173 +91,61 @@ inline std::string vaultTabLabelForWidth(const std::string& text, float width,
     return text;
 }
 
-inline void vaultTabsView(eui::Ui& ui, AppState& state, float inner, float fontSize) {
-    const float tabsHeight = fontSize + 20.0f;
-    const float half = std::max(0.0f, (inner - 6.0f) * 0.5f);
-    ui.stack("vault.tabs").size(inner, tabsHeight).content([&] {
-        ui.rect("vault.tabs.surface").fill().radius(7).color(core::mixColor(editorColors().panel, editorColors().border, .24f)).build();
-        for (int i = 0; i < 2; ++i) {
-            const bool active = state.vaultTab == (i == 0 ? VaultTab::Files : VaultTab::Outline);
-            const std::string id = i == 0 ? "vault.tab.files" : "vault.tab.outline";
-            const float x = 3.0f + i * half;
-            ui.rect(id + ".hit").position(x, 3).size(half, tabsHeight-6).radius(5)
-                .states(active ? editorColors().editor : transparentColor(), editorColors().rowHover,
-                        editorColors().pressed)
-                .border(active ? 1.0f : 0.0f, editorColors().border)
-                .preserveFocusOnPress().cursor(eui::CursorShape::Hand)
-                .onClick([&state, i] {
-                    state.vaultTab = i == 0 ? VaultTab::Files : VaultTab::Outline;
-                    app::requestUpdate();
-                }).build();
-            const std::string fullLabel = i == 0 ? i18n::tr("outline.files") : i18n::tr("outline.title");
-            const float maxLabelWidth = std::max(0.0f, half - 23.0f);
-            const std::string label = vaultTabLabelForWidth(fullLabel, maxLabelWidth, uiFontFamily(state), fontSize);
-            const float measuredLabelWidth = core::TextPrimitive::measureTextWidth(label, uiFontFamily(state), fontSize);
-            const float groupWidth = 16.0f + 7.0f + measuredLabelWidth;
-            const float groupX = x + (half - groupWidth) * 0.5f;
-            iconView(ui, id + ".icon", i == 0 ? UiIcon::Folder : UiIcon::Outline,
-                     groupX, (tabsHeight-16)*.5f, 16, active ? editorColors().accent : editorColors().textMuted);
-            ui.text(id + ".label").position(groupX + 23.0f, 0).size(measuredLabelWidth, tabsHeight)
-                .text(label).fontFamily(uiFontFamily(state)).fontSize(fontSize)
-                .color(active ? editorColors().text : editorColors().textMuted)
-                .horizontalAlign(eui::HorizontalAlign::Center)
-                .verticalAlign(eui::VerticalAlign::Center).build();
+// Right-hand document outline. Its rows reuse the editor plan and source offsets.
+inline void outlinePanelView(eui::Ui& ui, AppState& state, float width, float height, bool floating = false) {
+    const auto& c = editorColors();
+    const auto m = uiMetrics(state);
+    const float inner = std::max(0.0f, width-32);
+    const float cardHeight = std::min(std::max(0.0f,height-32),
+        std::max(150.0f,70.0f+static_cast<float>(state.outline.size())*36));
+    ui.stack("outline.panel").size(width, height).content([&] {
+        if (!floating) ui.rect("outline.paper").fill().color(c.editor).build();
+        ui.rect("outline.surface").position(8, 16).size(width-16, cardHeight)
+            .radius(10).color(c.editor).border(1,c.border)
+            .shadow(12,0,3,rgba(0,0,0,.06f)).build();
+        ui.text("outline.title").position(20, 22).size(inner-30, 32).text(i18n::tr("outline.title"))
+            .fontFamily(uiFontFamily(state)).fontSize(14).fontWeight(600).color(c.text)
+            .verticalAlign(eui::VerticalAlign::Center).build();
+        iconButton(ui, "outline.collapse", UiIcon::ChevronRight, width-48, 22, 28, true, [&state] {
+            state.markdownOutlineOpen=false; app::requestUpdate();
+        });
+        if (state.outline.empty()) {
+            ui.text("outline.empty").position(20, 65).size(inner, 70).text(i18n::tr("outline.no_headings"))
+                .fontFamily(uiFontFamily(state)).fontSize(13).color(c.textMuted).wrap(true).build();
+            return;
         }
+        components::virtualList(ui,"outline.list").position(16,60).size(inner,std::max(0.0f,cardHeight-54))
+            .theme(c.tokens).itemCount(static_cast<std::int64_t>(state.outline.size()))
+            .rowHeight(36).offset(state.outlineScroll).step(78).overscanViewports(.5f)
+            .onChange([&state](float v){state.outlineScroll=v;})
+            .row([&state,&c,&m,floating](eui::Ui& rowUi,const std::string& id,std::int64_t index,float w,float){
+                if (index<0 || static_cast<std::size_t>(index)>=state.outline.size()) return;
+                const auto entry=state.outline[static_cast<std::size_t>(index)];
+                const bool active=entry.byteOffset==state.outlineCurrentByte;
+                const float indent=10.0f+(entry.level-1)*12.0f;
+                rowUi.stack(id).size(w,36).content([&, floating]{
+                    rowUi.rect(id+".bg").position(0,2).size(w,32).radius(5)
+                        .states(active?core::mixColor(c.editor,c.accent,.10f):transparentColor(),c.rowHover,c.pressed)
+                        .preserveFocusOnPress().cursor(eui::CursorShape::Hand).onClick([&state,entry,floating]{
+                            state.cancelLinkAnchor();state.pendingOutlineJumpByte=entry.byteOffset;
+                            state.findEditorFocusPending=true;
+                            if(floating) state.markdownOutlineOpen=false;
+                            app::requestUpdate();
+                        }).build();
+                    rowUi.rect(id+".level.bg").position(indent,9).size(25,18).radius(4)
+                        .color(core::mixColor(c.editor,c.accent,active?.16f:.07f)).build();
+                    rowUi.text(id+".level").position(indent,9).size(25,18)
+                        .text("H"+std::to_string(entry.level)).fontSize(10).fontWeight(600)
+                        .color(active?c.accent:c.textMuted)
+                        .horizontalAlign(eui::HorizontalAlign::Center).verticalAlign(eui::VerticalAlign::Center).build();
+                    rowUi.text(id+".label").position(indent+32,0).size(std::max(0.0f,w-indent-40),36)
+                        .text(elideToWidth(entry.title,w-indent-40,m.vaultRowFontSize))
+                        .fontFamily(uiFontFamily(state)).fontSize(m.vaultRowFontSize)
+                        .fontWeight(active?600:400).color(active?c.accent:c.textMuted)
+                        .verticalAlign(eui::VerticalAlign::Center).build();
+                }).build();
+            }).build();
     }).build();
-}
-
-inline void outlinePanelView(eui::Ui& ui, AppState& state, float width, float height) {
-    const EditorColors& colors = editorColors();
-    const UiMetrics metrics = uiMetrics(state);
-    constexpr float padding = 10.0f;
-    constexpr float gap = 6.0f;
-    const float inner = std::max(0.0f, width - padding * 2.0f);
-    const float rowHeight = metrics.vaultRowHeight + 8.0f;
-    const float tabsHeight = metrics.vaultTitleFontSize + 20.0f;
-    const float listHeight = std::max(0.0f, height - 16.0f - tabsHeight - 45.0f - gap * 2.0f);
-
-    ui.stack("vault")
-        .size(width, height)
-        .content([&] {
-            ui.rect("vault.bg").fill().color(colors.panel).build();
-            ui.column("vault.content")
-                .fill()
-                .padding(padding, 8.0f)
-                .gap(gap)
-                .zIndex(1)
-                .content([&] {
-                    vaultTabsView(ui, state, inner, metrics.vaultTitleFontSize);
-                    ui.stack("outline.document.card").size(inner, 45).content([&] {
-                        ui.rect("outline.document.bg").fill().radius(6).color(colors.editor)
-                            .border(1, colors.border).build();
-                        iconView(ui, "outline.document.icon", UiIcon::MarkdownFile, 8, 13, 18, colors.iconMd);
-                        ui.text("outline.document").position(33, 3).size(std::max(0.0f, inner-41), 22)
-                            .text(elideToWidth(state.displayName(), inner-41, metrics.vaultTitleFontSize+2.0f))
-                            .fontFamily(uiFontFamily(state)).fontSize(metrics.vaultTitleFontSize+2.0f).fontWeight(600)
-                            .color(colors.text).verticalAlign(eui::VerticalAlign::Center).build();
-                        ui.text("outline.summary").position(33, 25).size(std::max(0.0f, inner-41), 16)
-                            .text(i18n::format("outline.count", {{"count", std::to_string(state.outline.size())}}))
-                            .fontFamily(uiFontFamily(state)).fontSize(metrics.vaultPathFontSize)
-                            .color(colors.textMuted).build();
-                    }).build();
-
-                    if (!state.markdownCapable()) {
-                        ui.text("outline.empty")
-                            .size(inner, 44.0f)
-                            .text(i18n::tr("outline.plain_text"))
-                            .fontFamily(uiFontFamily(state))
-                            .fontSize(metrics.vaultFilterFontSize)
-                            .color(colors.textMuted)
-                            .wrap(true)
-                            .build();
-                        return;
-                    }
-                    if (state.outline.empty()) {
-                        ui.text("outline.empty")
-                            .size(inner, 44.0f)
-                            .text(i18n::tr("outline.no_headings"))
-                            .fontFamily(uiFontFamily(state))
-                            .fontSize(metrics.vaultFilterFontSize)
-                            .color(colors.textMuted)
-                            .wrap(true)
-                            .build();
-                        return;
-                    }
-
-                    components::virtualList(ui, "outline.list")
-                        .theme(colors.tokens)
-                        .size(inner, listHeight)
-                        .itemCount(static_cast<std::int64_t>(state.outline.size()))
-                        .rowHeight(rowHeight)
-                        .offset(state.outlineScroll)
-                        .step(78.0f)
-                        .overscanViewports(0.5f)
-                        .transition(quickTransition())
-                        .onChange([&state](float value) { state.outlineScroll = value; })
-                        .row([&state, &colors, &metrics, rowHeight](eui::Ui& rowUi,
-                             const std::string& rowId, std::int64_t index, float rowWidth, float) {
-                            const std::size_t i = static_cast<std::size_t>(index);
-                            if (i >= state.outline.size()) {
-                                return;
-                            }
-                            const OutlineEntry entry = state.outline[i];
-                            const float indent = 7.0f + static_cast<float>(entry.level - 1) *
-                                std::min(8.0f, metrics.vaultIndentPerDepth);
-                            const bool active = entry.byteOffset == state.outlineCurrentByte;
-                            const float badgeWidth = metrics.vaultRowFontSize * 1.65f + 5.0f;
-                            const float labelX = indent + badgeWidth + 7.0f;
-                            const float labelWidth = std::max(0.0f, rowWidth - labelX - 7.0f);
-                            rowUi.stack(rowId)
-                                .size(rowWidth, rowHeight)
-                                .content([&] {
-                                    rowUi.rect(rowId + ".bg")
-                                        .position(0, 2).size(rowWidth, rowHeight-4)
-                                        .radius(5.0f)
-                                        .states(active ? core::mixColor(colors.panel, colors.accent, .13f)
-                                                      : entry.level == 1 ? core::mixColor(colors.panel, colors.border, .18f)
-                                                                         : transparentColor(),
-                                                colors.rowHover, colors.pressed)
-                                        .transition(quickTransition())
-                                        .cursor(eui::CursorShape::Hand)
-                                        .preserveFocusOnPress()
-                                        .onClick([&state, entry] {
-                                            state.pendingOutlineJumpByte = entry.byteOffset;
-                                            app::requestUpdate();
-                                        })
-                                        .build();
-                                    if (active) {
-                                        rowUi.rect(rowId + ".current").position(0, 7)
-                                            .size(2, rowHeight-14).radius(1).color(colors.accent).build();
-                                    }
-                                    rowUi.rect(rowId + ".badge.bg").position(indent, (rowHeight-20)*.5f)
-                                        .size(badgeWidth, 20).radius(4)
-                                        .color(core::mixColor(colors.panel,
-                                            active ? colors.accent : colors.textMuted, entry.level <= 2 ? .14f : .07f))
-                                        .build();
-                                    rowUi.text(rowId + ".badge").position(indent, 0).size(badgeWidth, rowHeight)
-                                        .text("H" + std::to_string(entry.level)).fontFamily(uiFontFamily(state))
-                                        .fontSize(metrics.vaultPathFontSize).fontWeight(600)
-                                        .color(active ? colors.accent : colors.textMuted)
-                                        .horizontalAlign(eui::HorizontalAlign::Center).verticalAlign(eui::VerticalAlign::Center).build();
-                                    rowUi.text(rowId + ".label")
-                                        .position(labelX, 0.0f)
-                                        .size(labelWidth, rowHeight)
-                                        .text(elideToWidth(entry.title, labelWidth,
-                                                           metrics.vaultRowFontSize))
-                                        .fontFamily(uiFontFamily(state))
-                                        .fontSize(metrics.vaultRowFontSize)
-                                        .fontWeight(entry.level <= 2 ? 600 : 400)
-                                        .color(active ? colors.accent : colors.text)
-                                        .verticalAlign(eui::VerticalAlign::Center)
-                                        .build();
-                                })
-                                .build();
-                        })
-                        .build();
-                })
-                .build();
-        })
-        .build();
 }
 
 } // namespace neo

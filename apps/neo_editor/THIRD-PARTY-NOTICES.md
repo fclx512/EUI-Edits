@@ -11,6 +11,7 @@ The Windows x64 package uses statically linked dependencies and the following re
 | zlib 1.3.1 | zlib license | `LICENSES/zlib.txt` |
 | MD4C 0.5.3 | MIT | `LICENSES/MD4C.txt` |
 | yyjson 0.12.0 | MIT | `LICENSES/yyjson.txt` |
+| Material Color Utilities (commit dd62982dfdefdfc9232ce8d76e122fb1c6d188ae) | Apache-2.0; Copyright Google LLC | `LICENSES/material-color-utilities.txt` |
 | tray | MIT | `LICENSES/tray.txt` |
 | stb_image | MIT alternative | `LICENSES/stb_image.txt` |
 | NanoSVG / NanoSVG rasterizer | zlib-style license | `LICENSES/nanosvg.txt`, `nanosvgrast.txt` |

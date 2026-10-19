@@ -19,7 +19,9 @@
 #include <cstring>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
+#include <vector>
 
 namespace neo {
 
@@ -41,6 +43,7 @@ struct EditorColors {
     eui::Color textMuted;
     eui::Color border;
     eui::Color accent;
+    eui::Color selectionBackground; // Text selection only; independent RGB and opacity.
     eui::Color rowHover;
     eui::Color rowActive;
     eui::Color codeBackground;
@@ -123,6 +126,14 @@ struct ThemeVariant {
     ThemeTypography typography;
 };
 
+struct ThemeImportEntry {
+    bool light = false;
+    std::string field;
+    std::string source;
+    std::string reason;
+    bool imported = false;
+};
+
 // 当前生效的主题文件内容。空 path = 没有主题文件（内置配色）。
 // v1 使用 colors/typography/baseLight；v2 使用 light/dark。
 //
@@ -130,6 +141,12 @@ struct ThemeVariant {
 // 实例），而不是由 theme_loader.cpp 持有再开访问函数：style_schema.h 不能反向依赖
 // theme_loader.cpp —— 只编头文件的单测（lp_decorations / undo_incremental /
 // perf_benchmark）会因此断链。写入方只有 model/theme_loader.cpp。
+struct ThemeAutoRecipe {
+    std::string seed = "#62866B";
+    std::string variant = "soft";
+    int round = 0;
+};
+
 struct ThemeFileData {
     int version = 0;          // schema 版本（0 = 没有生效的主题文件）
     std::string name;         // 主题名（展示用，可空）
@@ -139,6 +156,12 @@ struct ThemeFileData {
     ThemeVariant light;                         // v2: independent light overrides
     ThemeVariant dark;                          // v2: independent dark overrides
     int skippedCssDeclarations = 0;             // Obsidian import report
+    std::vector<ThemeImportEntry> importReport;
+    std::optional<ThemeVariant> importLightBaseline;
+    std::optional<ThemeVariant> importDarkBaseline;
+    std::string importSource;
+    std::set<std::string> lightLocks, darkLocks;
+    std::optional<ThemeAutoRecipe> autoRecipe;
     std::string path;                          // UTF-8 主题文件路径（空 = 内置）
     // 生效内容的版本号：每次加载/卸载主题 ++。editorColors() 拿它当缓存键
     // （命中 = 一次整数比较；变了 = 就地重建一次两套配色）。markdownStyle 不缓存，
@@ -175,6 +198,7 @@ inline constexpr ThemeColorField kThemeColorFields[] = {
     {"textMuted", &EditorColors::textMuted},
     {"border", &EditorColors::border},
     {"accent", &EditorColors::accent},
+    {"selectionBackground", &EditorColors::selectionBackground},
     {"rowHover", &EditorColors::rowHover},
     {"rowActive", &EditorColors::rowActive},
     {"codeBackground", &EditorColors::codeBackground},
@@ -241,11 +265,11 @@ inline EditorColors makeColors(bool light) {
         value.textMuted = rgba(0.431f, 0.467f, 0.506f);
         value.border = rgba(0.816f, 0.843f, 0.871f);
         value.accent = rgba(0.220f, 0.443f, 0.878f);
-        // hsl(210, 4.8%, 91.8%): an opaque neutral hover on every light surface.
-        value.rowHover = rgba(0.914064f, 0.918f, 0.921936f);
+        // Distinct hover on editor, panel and title surfaces.
+        value.rowHover = rgba(0.835f, 0.853f, 0.875f);
         value.rowActive = rgba(0.220f, 0.443f, 0.878f, 0.140f);
         value.codeBackground = rgba(0.953f, 0.961f, 0.973f);
-        value.pressed = rgba(0.0f, 0.0f, 0.0f, 0.070f);
+        value.pressed = rgba(0.755f, 0.785f, 0.825f);
         value.heading = rgba(0.051f, 0.067f, 0.090f);
         value.codeText = rgba(0.133f, 0.133f, 0.133f);      // Obsidian --code-normal #222222
         value.quoteBackground = rgba(0.220f, 0.443f, 0.878f, 0.070f);
@@ -304,6 +328,7 @@ inline EditorColors makeColors(bool light) {
         value.iconData = rgba(0.902f, 0.631f, 0.353f);
     }
 
+    value.selectionBackground = rgba(value.accent.r, value.accent.g, value.accent.b, 0.24f);
     deriveThemeTokens(value, light);
     return value;
 }
@@ -390,6 +415,8 @@ inline components::MarkdownStyle markdownStyle(float bodySize, const char* bodyF
     style.accent = colors.markdownAccent;
     style.codeText = colors.codeText;
     style.codeBackground = colors.codeBackground;
+    style.inlineCodeBackground = core::mixColor(colors.editor, colors.accent, .075f);
+    style.inlineCodeBorder = core::mixColor(colors.editor, colors.accent, .28f);
     style.quoteBackground = colors.quoteBackground;
     style.divider = colors.divider;
     // 正文跟随用户选的编辑区字体；代码块/行内代码跟随代码字体（默认系统等宽预设）。

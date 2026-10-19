@@ -273,6 +273,14 @@ inline Rect backdropCaptureRect(const LayoutRect& frame, float blur, const Trans
     return visualRect(frame, Shadow{}, blur, transform);
 }
 
+// Synthetic italic ink extends beyond its unchanged advance box. Include both
+// old/new overhang in damage and retained-layer bounds, before transforms.
+inline Rect textVisualRect(const LayoutRect& frame, const Transform& transform,
+                           float fontSize, bool italic) {
+    const float pad = italic ? std::max(1.0f, fontSize * 0.3f) : 0.0f;
+    return transformRect({frame.x-pad, frame.y, frame.width+2*pad, frame.height}, frame, transform);
+}
+
 inline Rect imageVisualRect(const LayoutRect& frame, const Transform& transform = {}) {
     return transformRect({frame.x, frame.y, frame.width, frame.height}, frame, transform);
 }

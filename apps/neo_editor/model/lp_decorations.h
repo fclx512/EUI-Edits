@@ -287,9 +287,8 @@ inline int quotePrefixEnd(const std::string& text, const LpLine& line) {
 
 // ── 行内样式段 ──────────────────────────────────────────────────────────────
 // 只给"有可见样式差别"的片段生成段：粗体、斜体、行内代码、链接、删除线、行内公式。
-// 强调（`*斜体*`）只在**字体真有斜体字面**时生成段：italicFamily 由
-// core::TextPrimitive::resolveItalicFontPath 解析（找不到返回空串），为空就保持原样 ——
-// 合成斜体是另一个量级（要动渲染管线），宁可不做（S3d 降级版）。
+// 优先采用同族斜体字面；缺少字面（包括中文回退）由渲染层倾斜字形，
+// 不改变 advance、换行或光标位置。
 inline void appendLineRuns(const LpLine& line,
                            const components::MarkdownStyle& style,
                            const std::string& italicFamily,
@@ -310,6 +309,13 @@ inline void appendLineRuns(const LpLine& line,
                 run.style.edit().fontFamily = style.codeFontFamily;
                 run.style.edit().color = style.codeText;
                 run.style.edit().background = style.codeBackground;
+                if (span.kind == LpSpanKind::InlineCode) {
+                    run.style.edit().background = style.inlineCodeBackground.a > 0 ? style.inlineCodeBackground : style.codeBackground;
+                    run.style.edit().borderColor = style.inlineCodeBorder;
+                    run.style.edit().borderWidth = style.inlineCodeBorderWidth;
+                    run.style.edit().chipRadius = style.inlineCodeRadius;
+                    run.style.edit().chipPadding = style.inlineCodePadding;
+                }
                 break;
             case LpSpanKind::Link:
             case LpSpanKind::Image:
@@ -323,9 +329,7 @@ inline void appendLineRuns(const LpLine& line,
                 run.style.edit().color = style.muted;
                 break;
             case LpSpanKind::Emphasis:
-                if (italicFamily.empty()) {
-                    continue;  // 字体没有斜体字面：不生成段，内容保持常规字面
-                }
+                run.style.edit().italic = true;
                 // 走 fontFamily = 斜体文件路径这条路，测量与渲染拿到的是同一份字面，
                 // caret 宽度天然对得上（组件本来就把 run 的 fontFamily 透给两条路径）。
                 run.style.edit().fontFamily = italicFamily;
@@ -380,11 +384,18 @@ inline void mergeRuns(std::vector<LineRun>& runs) {
             const auto& style = runs[i].style.get();
             segment.style.edit().weight = std::max(segment.style.get().weight, style.weight);
             if (segment.style.get().color.a == 0.0f) segment.style.edit().color = style.color;
-            if (segment.style.get().background.a == 0.0f) segment.style.edit().background = style.background;
+            if (segment.style.get().background.a == 0.0f) {
+                segment.style.edit().background = style.background;
+                segment.style.edit().borderColor = style.borderColor;
+                segment.style.edit().borderWidth = style.borderWidth;
+                segment.style.edit().chipRadius = style.chipRadius;
+                segment.style.edit().chipPadding = style.chipPadding;
+            }
             if (segment.style.get().fontFamily.empty()) segment.style.edit().fontFamily = style.fontFamily;
             segment.style.edit().strike |= style.strike;
             segment.style.edit().link |= style.link;
             segment.style.edit().underline |= style.underline;
+            segment.style.edit().italic |= style.italic;
         }
         if (!merged.empty() && merged.back().end == segment.beg &&
             merged.back().style == segment.style) merged.back().end = segment.end;
@@ -1648,6 +1659,9 @@ struct PlanCache {
     // 所以即便这里的链条判断松了，错的 delta 也会在那一步被挡下来。
     unsigned long long textRevision = 0;
     bool builtCommitted = false;
+    // Actual temporary-text delta, published only after the single-line partial
+    // parser has proved it. Never treated as a committed InputModel edit.
+    PendingTextEdit preeditEdit;
 };
 
 inline PlanCache& planCache() {
@@ -1679,15 +1693,16 @@ inline void invalidatePlanCache() {
     cache.prevValid = false;    // 没有可比的上一代 ⇒ 局部重解析的链条必须断开
     cache.textRevision = 0;
     cache.builtCommitted = false;
+    cache.preeditEdit = {};
     invalidateDecorationCache();
 }
 
 // 取（或建）当前文本的计划。
 //
-// editInfo == nullptr（或链不完整）→ 全量 buildLpPlan，行为与改造前逐字一致。
-// editInfo 带着这次编辑的 PendingTextEdit 且 revision 链正好 +1 → **尝试局部重解析**
-// （T5）：只对受影响的段落重跑 md4c，其余按上一代平移复用；任何一处证明不了就
-// 当场回退全量（原因留在 neo::planRejectReason()）。
+// 已提交编辑带着可信 PendingTextEdit 且 revision 链正好 +1，或连续未提交的同一
+// 正文 revision 的单行预编辑实际字节变化，才尝试局部重解析。后者从两份实际文本
+// 求 delta，仍由 buildLpPlanPartial 的逐字节和块边界证明决定是否可复用。
+// 其它情况全量；证明成功的临时差分可供同代装饰尝试增量。
 //
 // 不变式（T4 依赖，动它之前先读 T4 B）：**文本变一次，version 恰好 +1**，且
 // prevPlan/prevVersion 指向上一次建表用的那份计划 —— 局部与全量两条路都必须满足。
@@ -1704,6 +1719,7 @@ inline const LpPlan& cachedPlan(const std::string& text,
     cache.prevVersion = cache.version;
     cache.prevValid = cache.valid;
     cache.valid = false;  // 中途失败也不得让下一次把半成品当"当前代"
+    cache.preeditEdit = {};
 
     // 编辑链（与 cachedDecorations 的判据一字不差）：可信公共漏斗 + revision 恰好 +1。
     const bool chain =
@@ -1724,6 +1740,57 @@ inline const LpPlan& cachedPlan(const std::string& text,
         delta.oldTailLine = editInfo->edit->oldTailLine;
         delta.cursorBefore = editInfo->edit->cursorBefore;
         partial = buildLpPlanPartial(text, prevText, cache.prevPlan, delta, cache.plan, nullptr);
+    } else if (editInfo != nullptr && !editInfo->committed && cache.prevValid &&
+               !cache.builtCommitted && cache.textRevision == editInfo->textRevision &&
+               !cache.prevPlan.lines.empty()) {
+        // The previous generation must itself be a preedit for the same document
+        // revision. Find the actual changed bytes; compositionRevision and a
+        // pending committed edit cannot describe this temporary text.
+        const std::size_t shared = std::min(prevText.size(), text.size());
+        std::size_t prefix = 0;
+        while (prefix < shared && prevText[prefix] == text[prefix]) ++prefix;
+        const auto utf8Boundary = [](const std::string& value, std::size_t offset) {
+            return offset == value.size() ||
+                (static_cast<unsigned char>(value[offset]) & 0xc0u) != 0x80u;
+        };
+        while (prefix > 0 && (!utf8Boundary(prevText, prefix) ||
+                              !utf8Boundary(text, prefix))) --prefix;
+        std::size_t suffix = 0;
+        while (suffix < shared - prefix &&
+               prevText[prevText.size() - suffix - 1] == text[text.size() - suffix - 1]) ++suffix;
+        while (suffix > 0 && (!utf8Boundary(prevText, prevText.size() - suffix) ||
+                              !utf8Boundary(text, text.size() - suffix))) --suffix;
+
+        const std::size_t oldEnd = prevText.size() - suffix;
+        const std::size_t newEnd = text.size() - suffix;
+        const int firstLine = cache.prevPlan.lineIndexFor(static_cast<int>(prefix));
+        const LpLine* previousLine = cache.prevPlan.lineAt(firstLine);
+        if (previousLine != nullptr && oldEnd <= static_cast<std::size_t>(previousLine->srcEnd) &&
+            prevText.find('\n', prefix) >= oldEnd && text.find('\n', prefix) >= newEnd) {
+            LpTextEdit delta;
+            delta.valid = true;
+            delta.revision = editInfo->textRevision;
+            delta.byteBeg = static_cast<int>(prefix);
+            delta.oldEnd = static_cast<int>(oldEnd);
+            delta.newEnd = static_cast<int>(newEnd);
+            delta.firstLine = firstLine;
+            delta.newLastLine = firstLine;
+            delta.oldTailLine = firstLine + 1;
+            partial = buildLpPlanPartial(text, prevText, cache.prevPlan, delta, cache.plan, nullptr);
+            if (partial) {
+                auto& edit = cache.preeditEdit;
+                edit.valid = true;
+                edit.revision = delta.revision;
+                edit.byteBeg = delta.byteBeg;
+                edit.oldEnd = delta.oldEnd;
+                edit.newEnd = delta.newEnd;
+                edit.firstLine = delta.firstLine;
+                edit.newLastLine = delta.newLastLine;
+                edit.oldTailLine = delta.oldTailLine;
+            }
+        } else {
+            planRejectReason() = "预编辑变化跨源行或包含换行";
+        }
     } else {
         planRejectReason() = "编辑链不完整（无 delta / 非提交文本 / revision 断链）";
     }
@@ -2072,8 +2139,22 @@ inline components::input_detail::LineDecorationSnapshot cachedDecorationSnapshot
         editInfo->edit->revision == editInfo->textRevision;
     const bool planChain = planVersion == cache.planVersion + 1 && planCache().prevValid &&
                            planCache().prevVersion == cache.planVersion;
+    // A preedit has no committed PendingTextEdit. Use only the actual-byte delta
+    // proved by the immediately preceding plan generation for this same body
+    // revision, with all presentation keys and both temporary provenances intact.
+    const auto& plans = planCache();
+    const bool preeditChain = editInfo && !editInfo->committed && !cache.builtCommitted &&
+        cache.textRevision == editInfo->textRevision && plans.valid &&
+        !plans.builtCommitted && plans.textRevision == editInfo->textRevision &&
+        &plan == &plans.plan && planVersion == plans.version &&
+        plans.preeditEdit.valid && plans.preeditEdit.revision == editInfo->textRevision &&
+        text == plans.text;
+    PendingTextEdit preeditEdit = plans.preeditEdit;
+    preeditEdit.cursorBefore = cache.cursor;
+    const PendingTextEdit* delta = revisionChain ? editInfo->edit :
+                                  preeditChain ? &preeditEdit : nullptr;
     std::vector<LineDecoration> next;
-    if (inputsMatch && revisionChain && planChain && cache.snapshot) {
+    if (inputsMatch && delta && planChain && cache.snapshot) {
         // Build privately; all consumers keep the old immutable generation until publication.
         const auto previous = cache.snapshot;
         const int previousCursor = cache.cursor;  // 上一次建表用的光标（旧活动块要用）
@@ -2082,7 +2163,7 @@ inline components::input_detail::LineDecorationSnapshot cachedDecorationSnapshot
         IncrementalDecorationPatches patches;
         if (buildDecorationsIncremental(planCache().prevPlan, plan, style, cursor, previousCursor,
                                         next, fontFamily, docDir, foldedHeadings, text,
-                                        colors, *editInfo->edit, *previous, &unchanged, &patches)) {
+                                        colors, *delta, *previous, &unchanged, &patches)) {
             if (unchanged) {
                 cache.snapshot = previous;
                 ++decorationDebugStats().editUnchanged;
@@ -2091,7 +2172,7 @@ inline components::input_detail::LineDecorationSnapshot cachedDecorationSnapshot
                 cache.snapshot = previous->replacing(patches.rows, std::move(patches.decorations),
                     &decorationDebugStats().editCopiedRows);
                 ++decorationDebugStats().editPaged;
-                if (editInfo->edit->newEnd != editInfo->edit->oldEnd)
+                if (delta->newEnd != delta->oldEnd)
                     ++decorationDebugStats().editShiftPaged;
                 decorationDebugStats().editChangedRows += changedRows;
             } else {

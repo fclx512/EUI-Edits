@@ -44,19 +44,35 @@ struct LineRunStyle {
     // 否则"没设置颜色"会被当成"白字"。
     core::Color color{0.0f, 0.0f, 0.0f, 0.0f};           // alpha == 0 表示用行级文字色
     core::Color background{0.0f, 0.0f, 0.0f, 0.0f};      // alpha == 0 表示不画底色
+    core::Color borderColor{0,0,0,0};
+    float borderWidth = 0, chipRadius = 0, chipPadding = 0;
     std::string fontFamily;      // 空表示沿用控件字体（行内代码用等宽）
     bool strike = false;         // 删除线：视图层在段中间画一条线
     // 链接段（2026-09-26）：命中测试据此判定"点在链接上"，样式仍由上层给色。
     bool link = false;
     bool underline = false;
+    bool italic = false;
 
     bool operator==(const LineRunStyle& other) const {
         return weight == other.weight && colorEquals(color, other.color) &&
-               colorEquals(background, other.background) && fontFamily == other.fontFamily &&
-               strike == other.strike && link == other.link && underline == other.underline;
+               colorEquals(background, other.background) && colorEquals(borderColor, other.borderColor) &&
+               borderWidth == other.borderWidth && chipRadius == other.chipRadius && chipPadding == other.chipPadding &&
+               fontFamily == other.fontFamily &&
+               strike == other.strike && link == other.link && underline == other.underline && italic == other.italic;
     }
     bool operator!=(const LineRunStyle& other) const { return !(*this == other); }
 };
+
+inline float inlineChipPadding(const LineRunStyle& style, float fontSize) {
+    return style.background.a > 0.0f
+        ? (style.chipPadding > 0.0f ? style.chipPadding : std::max(1.0f, fontSize * 0.10f)) : 0.0f;
+}
+
+inline float inlineChipSpacing(const LineRunStyle& style, float fontSize) {
+    // Reserve the painted padding plus a small gap outside the border. Geometry
+    // carries this space; document bytes and hidden-marker mappings stay intact.
+    return style.background.a > 0.0f ? inlineChipPadding(style, fontSize) + 1.5f : 0.0f;
+}
 
 // Published runs share exact style values; editing a copied run detaches first.
 // The small thread-local interner retains at most 256 values, never documents.
@@ -93,7 +109,9 @@ private:
         return a.weight == b.weight && a.fontFamily == b.fontFamily &&
             std::memcmp(&a.color, &b.color, sizeof(a.color)) == 0 &&
             std::memcmp(&a.background, &b.background, sizeof(a.background)) == 0 &&
-            a.strike == b.strike && a.link == b.link && a.underline == b.underline;
+            std::memcmp(&a.borderColor, &b.borderColor, sizeof(a.borderColor)) == 0 &&
+            a.borderWidth == b.borderWidth && a.chipRadius == b.chipRadius && a.chipPadding == b.chipPadding &&
+            a.strike == b.strike && a.link == b.link && a.underline == b.underline && a.italic == b.italic;
     }
     void assign(const LineRunStyle& value) {
         static const LineRunStyle empty;
@@ -418,7 +436,8 @@ struct DecoratorEditInfo {
     // 本次回调所给 text 对应的 InputState::textRevision。
     unsigned long long textRevision = 0;
     // false = 这份 text 是 IME 合成中的临时文本（displayState 的 preedit 副本）。
-    // 它不是任何公共漏斗的产物，禁止据此做增量 —— 强制全量。
+    // 它不是公共编辑漏斗的产物，不能复用已提交编辑的 delta/revision 链。
+    // provider 可从前后实际文本独立证明局部计划；装饰仍走全量。
     bool committed = true;
     // nullptr = 没有可信的编辑区间（无编辑 / 已断链 / 外部赋值）→ 全量。
     const PendingTextEdit* edit = nullptr;
@@ -877,6 +896,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         int cursorBeforePress = 0;
         bool hasPreferredCursorX = false;
         bool followCaret = true;
+        bool typewriter = false;
         float preferredCursorX = 0.0f;
         float horizontalScroll = 0.0f;
         bool wordWrap = true;
@@ -1089,6 +1109,9 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 layout.scroll = state.horizontalScroll;
                 layout.textWidth = state.cachedTextWidth;
                 layout.contentHeight = layout.geometryTable().total();
+                // Trailing breathing room lets the final input row reach the
+                // middle without changing source/visual-row geometry.
+                if (state.typewriter) layout.contentHeight += viewportHeight * 0.5f;
                 layout.cursorPixel = caretXInLine(cursorLine, state.cursor);
                 layout.cursorX = inset + layout.cursorPixel - layout.scroll;
                 layout.maxVerticalScroll = std::max(0.0f, layout.contentHeight - viewportHeight);
@@ -2103,6 +2126,18 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
     struct StyledLineLayout {
         core::TextPrimitive::TextMetrics metrics;
         std::vector<TextRun> runs;
+        // Temporary wrap bounds only for padded runs. At a shared byte boundary,
+        // the start belongs to the next run and the end to the previous run.
+        std::vector<float> wrapBegins, wrapEnds;
+        float wrapEndAt(std::size_t index) const {
+            return wrapEnds.empty() ? metrics.caretX[index] : wrapEnds[index];
+        }
+        float wrapStartAt(int byte) const {
+            const auto it = std::lower_bound(metrics.byteIndices.begin(), metrics.byteIndices.end(), byte);
+            const auto index = static_cast<std::size_t>(it - metrics.byteIndices.begin());
+            if (index >= metrics.caretX.size()) return metrics.width;
+            return wrapBegins.empty() ? metrics.caretX[index] : wrapBegins[index];
+        }
     };
 
     // caret 表去重：同一偏移只留第一个（各段的接缝处两边都会报同一个偏移）。
@@ -2225,6 +2260,9 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                               const std::string& defaultFontFamily,
                                               const StyledProjection* projection) {
         StyledLineLayout layout;
+        const bool padded = std::any_of(pieces.begin(), pieces.end(), [](const VisiblePiece& piece) {
+            return piece.style && piece.style->background.a > 0.0f;
+        });
         float x = 0.0f;
         for (const VisiblePiece& piece : pieces) {
             const int from = std::max(piece.visibleBeg, visBeg);
@@ -2240,10 +2278,24 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             const LineRunStyle style = piece.style != nullptr ? *piece.style : LineRunStyle{};
             const std::string family = style.fontFamily.empty() ? defaultFontFamily : style.fontFamily;
             const core::TextPrimitive::TextMetrics pieceMetrics = measureMetrics(text, family, fontSize, style.weight);
+            const float spacing = inlineChipSpacing(style, fontSize);
+            x += spacing;
             const std::size_t stops = std::min(pieceMetrics.byteIndices.size(), pieceMetrics.caretX.size());
             for (std::size_t i = 0; i < stops; ++i) {
-                addCaretStop(layout.metrics, from - visBeg + pieceMetrics.byteIndices[i],
-                             x + pieceMetrics.caretX[i]);
+                const int byte = from - visBeg + pieceMetrics.byteIndices[i];
+                const float caret = x + pieceMetrics.caretX[i];
+                if (padded) {
+                    const bool duplicate = !layout.metrics.byteIndices.empty() && layout.metrics.byteIndices.back() == byte;
+                    overrideCaretStop(layout.metrics, byte, caret);
+                    if (duplicate) {
+                        layout.wrapBegins.back() = caret - spacing;
+                    } else {
+                        layout.wrapBegins.push_back(caret - spacing);
+                        layout.wrapEnds.push_back(caret + spacing);
+                    }
+                } else {
+                    addCaretStop(layout.metrics, byte, caret);
+                }
             }
             TextRun run;
             run.beg = docBeg;
@@ -2252,7 +2304,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             run.width = pieceMetrics.width;
             run.style = style;
             layout.runs.push_back(std::move(run));
-            x += pieceMetrics.width;
+            x += pieceMetrics.width + spacing;
         }
         layout.metrics.width = x;
         (void) lineEnd;
@@ -3243,9 +3295,20 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         }
         auto& display = *state.preedit;
         const auto range = selectionRange(state);
-        std::string text = state.text;
-        text.replace(static_cast<size_t>(range.first), static_cast<size_t>(range.second - range.first), state.compositionText);
-        if (display.text != text) {
+        const auto begin = static_cast<size_t>(range.first);
+        const auto end = static_cast<size_t>(range.second);
+        const auto compositionSize = state.compositionText.size();
+        // Compare the virtual splice before allocating a full document copy.
+        // Check actual bytes, not revisions: external .value writeback may keep
+        // the same revision, and selection/composition can change independently.
+        const bool unchanged = display.text.size() == state.text.size() - (end - begin) + compositionSize &&
+            display.text.compare(begin, compositionSize, state.compositionText) == 0 &&
+            display.text.compare(0, begin, state.text, 0, begin) == 0 &&
+            display.text.compare(begin + compositionSize, std::string::npos,
+                                 state.text, end, std::string::npos) == 0;
+        if (!unchanged) {
+            std::string text = state.text;
+            text.replace(begin, end - begin, state.compositionText);
             display.text = std::move(text);
             ++display.textRevision;
         }
@@ -3253,6 +3316,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         display.selectionStart = range.first;
         display.selectionEnd = display.cursor;
         display.followCaret = state.followCaret;
+        display.typewriter = state.typewriter;
         display.horizontalScroll = state.horizontalScroll;
         display.wordWrap = state.wordWrap;
         display.viewportMetrics = state.viewportMetrics;
@@ -3753,8 +3817,9 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 const auto& family = style.fontFamily.empty() ? fontFamily : style.fontFamily;
                 const float width = core::TextPrimitive::measureTextWidth(text, family, lineFontSize,
                                                                          style.weight > 0 ? style.weight : 400);
-                coarse.runs.push_back({beg, pieceEnd, coarse.metrics.width, width, style});
-                coarse.metrics.width += width;
+                const float spacing = inlineChipSpacing(style, lineFontSize);
+                coarse.runs.push_back({beg, pieceEnd, coarse.metrics.width + spacing, width, style});
+                coarse.metrics.width += width + spacing * 2.0f;
             }
             if (viewportWidth <= 1.0f || coarse.metrics.width <= viewportWidth) {
                 out.push_back({start, end, hardBreakAfter, std::move(coarse.metrics), lineFontSize,
@@ -3793,7 +3858,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         const size_t count = std::min(whole.metrics.byteIndices.size(), whole.metrics.caretX.size());
         for (size_t i = 1; i < count; ++i) {
             const int stop = whole.metrics.byteIndices[i];
-            const float x = whole.metrics.caretX[i];
+            const float x = whole.wrapEndAt(i);
             if (previousProjected > segmentProjected && x - segmentStartX > viewportWidth) {
                 const int segmentEndProjected = previousProjected;
                 const int segmentDocumentBeg = std::max(previousDocumentEnd,
@@ -3807,7 +3872,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                lineColor, std::move(segment.runs)});
                 previousDocumentEnd = segmentDocumentEnd;
                 segmentProjected = segmentEndProjected;
-                segmentStartX = caretXInMetrics(whole.metrics, segmentProjected);
+                segmentStartX = whole.wrapStartAt(segmentProjected);
             }
             previousProjected = stop;
         }
@@ -4001,7 +4066,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             float segmentStartX = 0.0f;
             for (std::size_t i = 1; i < total; ++i) {
                 const int stop = whole.metrics.byteIndices[i];
-                const float x = whole.metrics.caretX[i];
+                const float x = whole.wrapEndAt(i);
                 if (previousStop > segmentFrom && x - segmentStartX > columnWidth) {
                     const int segmentTo = previousStop;
                     wrapped.segFrom.push_back(segmentFrom);
@@ -4009,7 +4074,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                         value, cell.beg, cell.end, holes, pieces, segmentFrom, segmentTo,
                         lineFontSize, fontFamily)));
                     segmentFrom = segmentTo;
-                    segmentStartX = caretXInMetrics(whole.metrics, segmentFrom);
+                    segmentStartX = whole.wrapStartAt(segmentFrom);
                 }
                 previousStop = stop;
             }
@@ -4222,6 +4287,10 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             state.verticalScroll = 0.0f;
             return;
         }
+        if (state.typewriter && !state.selecting) {
+            state.verticalScroll = std::max(0.0f, (cursorTop + cursorBottom - viewportHeight) * 0.5f);
+            return;
+        }
         if (cursorTop - state.verticalScroll < 0.0f) {
             state.verticalScroll = cursorTop;
         } else if (cursorBottom - state.verticalScroll > viewportHeight) {
@@ -4350,6 +4419,16 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             return line.start;
         }
         const InputLayout::Line& previousLine = lines[static_cast<size_t>(lineIndex - 1)];
+        // A soft wrap shares one document offset: previousLine.end == line.start.
+        // Returning that end would leave Left at the same caret forever. Step
+        // through the previous visual row's projected stops instead, including
+        // Markdown holes and UTF-8 glyph boundaries. A hard newline still gets
+        // its own stop at previousLine.end.
+        if (!previousLine.hardBreakAfter && previousLine.end == byteIndex &&
+            previousLine.start < previousLine.end) {
+            return previousVisibleCaret(previousLine.metrics, previousLine.presentation().holes,
+                                        previousLine.start, byteIndex);
+        }
         return previousLine.end;
     }
 

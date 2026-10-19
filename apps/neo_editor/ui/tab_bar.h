@@ -1,4 +1,5 @@
 #pragma once
+#include "platform/window_chrome.h"
 
 #include "state/app_actions.h"
 #include "model/tab_presentation.h"
@@ -22,10 +23,49 @@ namespace tab_bar_detail {
 // ── 顶栏固定几何（DIP）；公式本体在 model/tab_presentation.h 的 layout 命名空间，
 // 绘制与单测共用同一套，避免两处漂移。────────────────────────────────────────
 inline constexpr float kTabWidth = tabpresentation::layout::tabWidth;         // 176
-inline constexpr float kTabGap = tabpresentation::layout::tabGap;             // 4
-inline constexpr float kTabPitch = tabpresentation::layout::tabPitch;         // 180
+inline constexpr float kTabGap = tabpresentation::layout::tabGap;             // 0
+inline constexpr float kTabPitch = tabpresentation::layout::tabPitch;         // 176
 inline constexpr float kTabCloseSize = 24.0f;                                 // 关闭 hit
 inline constexpr float kTabCloseCenter = tabpresentation::layout::closeCenterInset;  // 162
+inline constexpr float kDragThreshold = 6.0f;
+
+struct DragState {
+    std::uint64_t source = 0;
+    std::uint64_t activeAtStart = 0;
+    std::vector<std::uint64_t> originalOrder;
+    bool dragging = false;
+    float pointerX = 0.0f;
+    float grabOffset = 0.0f;
+    std::size_t targetIndex = 0;
+};
+
+inline bool dragInProgress = false;
+inline bool escapeCancelRequested = false;
+
+inline bool requestDragCancelOnEscape() {
+    if (!dragInProgress) return false;
+    escapeCancelRequested = true;
+    return true;
+}
+
+inline void cancelDrag(eui::Ui& ui) {
+    auto& drag = ui.state<DragState>("menubar.tabs.drag");
+    if (drag.source != 0)
+        ui.state<std::uint64_t>("menubar.tabs.drag.suppressedRelease") = drag.source;
+    drag = {};
+    ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
+    dragInProgress = false;
+    escapeCancelRequested = false;
+    platform::chrome::armTabDragEscape(false);
+}
+
+inline std::size_t dragTargetIndex(float pointerX, float grabOffset, float left,
+                                   float scroll, std::size_t count) {
+    if (count == 0) return 0;
+    const float contentX = pointerX - grabOffset - left + scroll + kTabWidth * 0.5f;
+    return std::min(count - 1, static_cast<std::size_t>(std::max(0.0f,
+        std::floor(contentX / kTabPitch))));
+}
 
 inline std::string basename(const std::string& path) {
     if (path.empty()) return {};
@@ -271,7 +311,10 @@ inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
                     const UiMetrics& metrics, const TabInfo& tab,
                     const std::vector<TabInfo>& tabs, float x, float width,
                     bool active, bool interactive, bool allowAnchor,
-                    const TabLabelIndex* labels = nullptr) {
+                    const TabLabelIndex* labels = nullptr,
+                    float regionLeft = 0.0f, float regionWidth = 0.0f,
+                    float maxScroll = 0.0f, bool dragEnabled = false,
+                    bool placeholder = false, bool flatLeft = false) {
     const std::string id = "menubar.tabs." + std::to_string(tab.id);
     const float height = metrics.menuBarHeight - 4.0f;
     const float y = 4.0f;
@@ -294,37 +337,142 @@ inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
         ? elideMeasured(tabLabel(tab, tabs, labels), family, metrics.menuFontSize, titleWidth)
         : std::string{};
 
-    const eui::Color fill = active ? colors.editor : colors.toolbar;
-    const eui::Color edge = active ? colors.border
-                                   : rgba(colors.border.r, colors.border.g, colors.border.b, 0.66f);
+    // One closed face, with no bottom stroke. The lower concave shoulders and
+    // upper convex corners share endpoints instead of overlapping clipped shapes.
+    if (active && !placeholder) {
+        constexpr float r = 8.0f;
+        constexpr float pi = 3.14159265358979323846f;
+        const float topRadius = std::min(r, width * 0.5f);
+        std::vector<core::Vec2> face;
+        const auto arc = [&](float cx, float cy, float radius, float start, float end) {
+            for (int step = 0; step <= 16; ++step) {
+                const float angle = start + (end-start) * step / 16.0f;
+                face.push_back({cx + radius * std::cos(angle), cy + radius * std::sin(angle)});
+            }
+        };
+        if (flatLeft) {
+            face.push_back({r, height});
+        } else {
+            arc(0, height-r, r, pi*.5f, 0);
+        }
+        arc(r+topRadius, topRadius, topRadius, pi, pi*1.5f);
+        arc(r+width-topRadius, topRadius, topRadius, pi*1.5f, pi*2);
+        arc(width+2*r, height-r, r, pi, pi*.5f);
+        // Extend into the editor by one DIP: two separately antialiased edges
+        // meeting at fractional device pixels otherwise expose a faint seam.
+        face.push_back({width+2*r, height+1.0f});
+        face.push_back({flatLeft ? r : 0.0f, height+1.0f});
+        ui.polygon(id + ".face").position(x-r, y).size(width+2*r, height+1.0f)
+            .points(std::move(face)).color(colors.editor)
+            .hitTestMode(core::dsl::HitTestMode::None).build();
+    }
 
-    ui.rect(id + ".surface")
-        .position(x, y).size(width, height).radius(8.0f)
-        .color(fill).border(1.0f, edge)
+    const auto hoverFill = !active && !placeholder &&
+        (ui.state<std::uint64_t>("menubar.tabs.hovered") == tab.id ||
+         ui.state<std::uint64_t>("menubar.tabs.closeHovered") == tab.id)
+        ? core::mixColor(colors.toolbar, colors.editor, 0.62f) : transparentColor();
+    if (flatLeft) ui.rect(id + ".squareLeft").position(x, y + height - 8.0f)
+        .size(std::min(8.0f, width), 8.0f).color(hoverFill)
+        .hitTestMode(core::dsl::HitTestMode::None).build();
+    auto surface = ui.rect(id + ".surface");
+    surface.position(x, y).size(width, height).radius(8.0f)
+        .color(hoverFill)
         .preserveFocusOnPress().disabled(!interactive)
-        .onClick([&ui, &state, idValue = tab.id, interactive] {
-            if (interactive) activate(ui, state, idValue);
+        .onClick([&ui, &state, idValue = tab.id] {
+            const auto& drag = ui.state<DragState>("menubar.tabs.drag");
+            if (ui.state<std::uint64_t>("menubar.tabs.drag.suppressedRelease") == idValue) return;
+            if (drag.source != idValue || !drag.dragging) activate(ui, state, idValue);
         })
-        .transition(quickTransition()).build();
+        .transition(quickTransition());
+    surface.build();
 
     // The close slot includes the narrow edge and the space above/below the
     // original close hit. Only the title side participates in tooltip hover.
     ui.rect(id + ".tooltip.hit")
         .position(x, y).size(showClose ? std::max(0.0f, closeHitX - x) : width, height)
         .color(transparentColor()).preserveFocusOnPress().disabled(!interactive)
-        .onClick([&ui, &state, idValue = tab.id, interactive] {
-            if (interactive) activate(ui, state, idValue);
+        .onPress([&ui, &state, idValue = tab.id, cardX = regionLeft + x,
+                  dragEnabled](const core::PointerEvent& event, const core::Rect&) {
+            if (!dragEnabled || event.button != core::PointerButton::Left) return;
+            auto& drag = ui.state<DragState>("menubar.tabs.drag");
+            drag = {};
+            ui.state<std::uint64_t>("menubar.tabs.drag.suppressedRelease") = 0;
+            drag.source = idValue;
+            drag.activeAtStart = state.tabId;
+            drag.originalOrder = state.tabOrder;
+            drag.pointerX = static_cast<float>(event.x);
+            drag.grabOffset = drag.pointerX - cardX;
+        })
+        .onDragUpdate([&ui, &state, idValue = tab.id, dragEnabled,
+                       regionLeft](const core::dsl::DragEvent& event) {
+            auto& drag = ui.state<DragState>("menubar.tabs.drag");
+            if (!dragEnabled || drag.source != idValue || event.button != core::PointerButton::Left)
+                return false;
+            bool justStarted = false;
+            if (!drag.dragging) {
+                if (std::fabs(event.totalX) <= kDragThreshold ||
+                    std::fabs(event.totalX) <= std::fabs(event.totalY)) return false;
+                drag.dragging = true;
+                dragInProgress = true;
+                platform::chrome::armTabDragEscape(true);
+                justStarted = true;
+                clearCloseAnchor(state);
+                ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
+            }
+            const bool moved = drag.pointerX != static_cast<float>(event.x);
+            drag.pointerX = static_cast<float>(event.x);
+            drag.targetIndex = dragTargetIndex(drag.pointerX, drag.grabOffset,
+                                               regionLeft, state.tabScroll, state.tabOrder.size());
+            return moved || justStarted;
+        })
+        .onRelease([&ui, &state, idValue = tab.id, interactive, dragEnabled,
+                    regionLeft, regionWidth, barHeight = metrics.menuBarHeight]
+                   (const core::PointerEvent& event, const core::Rect& bounds) {
+            auto& drag = ui.state<DragState>("menubar.tabs.drag");
+            auto& suppressed = ui.state<std::uint64_t>("menubar.tabs.drag.suppressedRelease");
+            if (suppressed == idValue) {
+                if (event.action == core::PointerAction::Release) suppressed = 0;
+                return;
+            }
+            if (event.action == core::PointerAction::Cancel) {
+                if (drag.source == idValue) cancelDrag(ui);
+                return;
+            }
+            const bool wasDrag = drag.source == idValue && drag.dragging;
+            const std::size_t target = dragTargetIndex(static_cast<float>(event.x),
+                drag.grabOffset, regionLeft, state.tabScroll, state.tabOrder.size());
+            if (drag.source == idValue) {
+                drag = {};
+                dragInProgress = false;
+                escapeCancelRequested = false;
+                platform::chrome::armTabDragEscape(false);
+            }
+            if (!interactive || event.action != core::PointerAction::Release ||
+                event.button != core::PointerButton::Left) return;
+            if (wasDrag) {
+                ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
+                if (dragEnabled && event.x >= regionLeft && event.x < regionLeft + regionWidth &&
+                    event.y >= 4.0f && event.y < barHeight)
+                    moveDocumentTabToIndex(state, idValue, target);
+                app::requestUpdate();
+            } else if (event.x >= bounds.x && event.x < bounds.x + bounds.width &&
+                       event.y >= bounds.y && event.y < bounds.y + bounds.height) {
+                activate(ui, state, idValue);
+            }
         })
         .onHover([&ui, idValue = tab.id](bool hovered) {
             std::uint64_t& current = ui.state<std::uint64_t>("menubar.tabs.hovered");
-            if (hovered) current = idValue;
+            if (ui.state<DragState>("menubar.tabs.drag").dragging) current = 0;
+            else if (hovered) current = idValue;
             else if (current == idValue) current = 0;
             app::requestUpdate();
         })
         .build();
 
+    if (placeholder) return;
+
     ui.rect(id + ".vaultColor")
-        .position(x + 1.0f, y + 8.0f).size(3.0f, std::max(0.0f, height - 8.0f))
+        .position(x + 3.0f, y + 6.0f).size(3.0f, std::max(3.0f, height - 12.0f))
         .radius(1.5f).color(groupColor(colors, tab)).build();
 
     if (showIcon) {
@@ -361,6 +509,12 @@ inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
             .size(closeWidth, closeWidth).radius(6.0f)
             .states(transparentColor(), colors.rowHover, colors.pressed)
             .preserveFocusOnPress().disabled(!interactive)
+            .onHover([&ui, idValue = tab.id](bool hovered) {
+                auto& current = ui.state<std::uint64_t>("menubar.tabs.closeHovered");
+                if (hovered) current = idValue;
+                else if (current == idValue) current = 0;
+                app::requestUpdate();
+            })
             .onClick([&state, idValue = tab.id, interactive, allowAnchor,
                       // x 已是区域局部坐标（外层 clip stack 定位在 regionLeft），
                       // 所以关闭中心本身就是区域局部 X，不能再减一次 regionLeft。
@@ -493,7 +647,7 @@ inline void tabList(eui::Ui& ui, AppState& state, const eui::Screen& screen,
     }
 
     ui.stack("menubar.tabs.list")
-        .position(x, top).size(width, height).clip().zIndex(2500)
+        .position(x, top).size(width, height).zIndex(2500)
         .onScroll([&scroll, maxScroll](const core::ScrollEvent& event) {
             const float delta = event.y != 0.0 ? -static_cast<float>(event.y) : static_cast<float>(event.x);
             scroll = std::clamp(scroll + delta * 36.0f, 0.0f, maxScroll);
@@ -747,6 +901,19 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
     const UiMetrics metrics = uiMetrics(state);
     const std::vector<TabInfo> tabs = documentTabs(state);
     const bool interactive = tab_bar_detail::tabSwitchEnabled(state);
+    auto& drag = ui.state<tab_bar_detail::DragState>("menubar.tabs.drag");
+    if (drag.source == 0) {
+        tab_bar_detail::dragInProgress = false;
+        tab_bar_detail::escapeCancelRequested = false;
+        platform::chrome::armTabDragEscape(false);
+    }
+    if (drag.source != 0 && (tab_bar_detail::escapeCancelRequested ||
+        platform::chrome::tabDragEscapePressed() ||
+        !interactive || state.tabListOpen || !platform::chrome::foreground() ||
+        drag.activeAtStart != state.tabId || drag.originalOrder != state.tabOrder ||
+        std::find_if(tabs.begin(), tabs.end(), [&](const TabInfo& tab) {
+            return tab.id == drag.source;
+        }) == tabs.end())) tab_bar_detail::cancelDrag(ui);
     const float buttonWidth = 28.0f;
     const float available = std::max(0.0f, right - left);
     const bool showNew = available >= buttonWidth * 2.0f + 20.0f;
@@ -754,7 +921,20 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
     const float listX = right - (showList ? buttonWidth : 0.0f);
     const float newX = listX - (showNew ? buttonWidth : 0.0f);
     const float regionLeft = left;
-    const float regionWidth = std::max(0.0f, newX - regionLeft);
+    const bool flushVaultEdge = state.mode == EditorMode::Vault &&
+        std::fabs(left - (std::min(state.vaultWidth, screen.width * 0.38f) + 1.0f)) < 0.5f;
+    const float leftBleed = flushVaultEdge ? 0.0f : 8.0f;
+    const auto railColor = core::mixColor(colors.toolbar, colors.border, 0.16f);
+    const float regionWidth = std::max(0.0f, newX - regionLeft - (showList ? 8.0f : 0.0f));
+
+    if (available > 0.0f) {
+        ui.rect("menubar.tabs.region.bg").position(left - leftBleed, 2.0f)
+            .size(regionWidth + leftBleed + 8.0f, metrics.menuBarHeight - 4.0f).radius(10.0f)
+            .color(railColor).build();
+        if (flushVaultEdge) ui.rect("menubar.tabs.region.squareLeft").position(left, 2.0f)
+            .size(std::min(10.0f, regionWidth), metrics.menuBarHeight - 4.0f)
+            .color(railColor).build();
+    }
 
     std::uint64_t orderFingerprint = 1469598103934665603ull;
     for (const TabInfo& tab : tabs) {
@@ -771,6 +951,19 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
     }
     // 完整卡放不下时只绘活动页，宽度取 regionWidth（不缩小字体挤出多个不可用标签）。
     const bool activeOnly = !tabs.empty() && regionWidth < tab_bar_detail::kTabWidth;
+    if (activeOnly && drag.source != 0) tab_bar_detail::cancelDrag(ui);
+    std::vector<TabInfo> displayTabs = tabs;
+    if (drag.dragging && !activeOnly) {
+        const auto source = std::find_if(displayTabs.begin(), displayTabs.end(), [&](const TabInfo& tab) {
+            return tab.id == drag.source;
+        });
+        if (source != displayTabs.end()) {
+            TabInfo moving = *source;
+            displayTabs.erase(source);
+            displayTabs.insert(displayTabs.begin() + static_cast<std::ptrdiff_t>(
+                std::min(drag.targetIndex, displayTabs.size())), std::move(moving));
+        }
+    }
     std::optional<tab_bar_detail::TabLabelIndex> labels;
     if (!activeOnly && regionWidth > 0.0f && tabs.size() > 1) labels.emplace(tabs);
     const auto* labelIndex = labels ? &*labels : nullptr;
@@ -846,7 +1039,8 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
 
     if (activeOnly) {
         scroll = 0.0f;
-    } else if ((shouldRevealActive || state.closeAnchorRevealPending) && !tabs.empty() && !state.closeAnchor.enabled) {
+    } else if ((shouldRevealActive || state.closeAnchorRevealPending) && !tabs.empty() &&
+               !state.closeAnchor.enabled && !drag.dragging) {
         const float activeLeft = static_cast<float>(activeIndex) * tab_bar_detail::kTabPitch;
         const float activeRight = activeLeft + tab_bar_detail::kTabWidth;
         if (activeLeft < scroll) scroll = activeLeft;
@@ -856,9 +1050,38 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
     state.tabScroll = scroll;
     if (!state.closeAnchor.enabled) state.closeAnchorRevealPending = false;
 
+    if (drag.dragging) {
+        const float margin = std::min(28.0f, regionWidth * 0.25f);
+        const int edge = drag.pointerX < regionLeft + margin ? -1 :
+            drag.pointerX > regionLeft + regionWidth - margin ? 1 : 0;
+        const bool canScroll = (edge < 0 && state.tabScroll > 0.0f) ||
+                               (edge > 0 && state.tabScroll < maxScroll);
+        ui.rect("menubar.tabs.drag.timer").size(0.0f, 0.0f)
+            .onTimer(canScroll ? 1.0f / 60.0f : 0.1f,
+                [&ui, &state, regionLeft, edge, maxScroll] {
+                    auto& current = ui.state<tab_bar_detail::DragState>("menubar.tabs.drag");
+                    if (!current.dragging) return;
+                    if (tab_bar_detail::escapeCancelRequested ||
+                        platform::chrome::tabDragEscapePressed() ||
+                        !platform::chrome::foreground() ||
+                        current.activeAtStart != state.tabId || current.originalOrder != state.tabOrder ||
+                        !tab_bar_detail::tabSwitchEnabled(state)) {
+                        tab_bar_detail::cancelDrag(ui);
+                        return;
+                    }
+                    if (edge != 0) {
+                        state.tabScroll = std::clamp(state.tabScroll + edge * 8.0f, 0.0f, maxScroll);
+                        current.targetIndex = tab_bar_detail::dragTargetIndex(
+                            current.pointerX, current.grabOffset, regionLeft,
+                            state.tabScroll, state.tabOrder.size());
+                    }
+                }).build();
+    }
+
     if (regionWidth > 0.0f && !tabs.empty()) {
         ui.stack("menubar.tabs.clip")
-            .position(regionLeft, 0.0f).size(regionWidth, metrics.menuBarHeight).clip()
+            .position(regionLeft - leftBleed, 0.0f)
+            .size(regionWidth + leftBleed + 8.0f, metrics.menuBarHeight + 1.0f).clip()
             .onScroll([&state, maxScroll](const core::ScrollEvent& event) {
                 if (!tab_bar_detail::tabSwitchEnabled(state)) return;
                 // 用户滚轮横移：解除关闭链，回到普通布局。
@@ -868,25 +1091,89 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
                 app::requestUpdate();
             })
             .content([&] {
-                if (activeOnly) {
-                    tab_bar_detail::tabCard(ui, state, colors, metrics, tabs[activeIndex], tabs,
-                                            0.0f, regionWidth, true, interactive, false, labelIndex);
-                    return;
-                }
-                for (std::size_t index = 0; index < tabs.size(); ++index) {
-                    const TabInfo& tab = tabs[index];
-                    const float x = static_cast<float>(index) * tab_bar_detail::kTabPitch - scroll +
-                                    closeDrawOffset;
-                    tab_bar_detail::tabCard(ui, state, colors, metrics, tab, tabs, x,
-                                            tab_bar_detail::kTabWidth, tab.id == state.tabId, interactive,
-                                            true, labelIndex);
-                }
+                ui.stack("menubar.tabs.cards").position(leftBleed, 0.0f)
+                    .size(regionWidth, metrics.menuBarHeight).content([&] {
+                    if (activeOnly) {
+                        platform::chrome::exclude(regionLeft, 4, regionWidth, metrics.menuBarHeight-4);
+                        tab_bar_detail::tabCard(ui, state, colors, metrics, tabs[activeIndex], tabs,
+                                                0.0f, regionWidth, true, interactive, false, labelIndex,
+                                                regionLeft, regionWidth, maxScroll, false, false, flushVaultEdge);
+                        return;
+                    }
+                    // Paint the active face last so its shoulders cover adjacent cards.
+                    for (int pass = 0; pass < 2; ++pass)
+                    for (std::size_t index = 0; index < displayTabs.size(); ++index) {
+                        const TabInfo& tab = displayTabs[index];
+                        if ((tab.id == state.tabId) != (pass == 1)) continue;
+                        const float x = static_cast<float>(index) * tab_bar_detail::kTabPitch - scroll +
+                                        closeDrawOffset;
+                        const float visibleLeft = std::max(0.0f, x);
+                        const float visibleRight = std::min(regionWidth, x+tab_bar_detail::kTabWidth);
+                        platform::chrome::exclude(regionLeft+visibleLeft, 4, visibleRight-visibleLeft, metrics.menuBarHeight-4);
+                        tab_bar_detail::tabCard(ui, state, colors, metrics, tab, tabs, x,
+                                                tab_bar_detail::kTabWidth, tab.id == state.tabId, interactive,
+                                                true, labelIndex, regionLeft, regionWidth, maxScroll,
+                                                tabs.size() > 1, drag.dragging && tab.id == drag.source,
+                                                flushVaultEdge && std::fabs(x) < 0.5f);
+                    }
+                }).build();
             }).build();
     }
 
+    // Two fixed-width overlays only when content overflows. No blur, animation,
+    // offscreen mask or per-tab opacity updates; all pointer events pass through.
+    if (!activeOnly && regionWidth > 0.0f) {
+        const float fadeWidth = std::min(20.0f, regionWidth * 0.25f);
+        const auto clearRail = rgba(railColor.r, railColor.g, railColor.b, 0.0f);
+        if (scroll - closeDrawOffset > 0.5f)
+            ui.rect("menubar.tabs.fade.left").position(regionLeft - leftBleed, 4.0f)
+                .size(fadeWidth + leftBleed, metrics.menuBarHeight - 4.0f)
+                .gradient(railColor, clearRail, core::GradientDirection::Horizontal)
+                .hitTestMode(core::dsl::HitTestMode::None).build();
+        if (contentWidth - scroll + closeDrawOffset > regionWidth + 0.5f)
+            ui.rect("menubar.tabs.fade.right").position(regionLeft + regionWidth - fadeWidth, 4.0f)
+                .size(fadeWidth + 8.0f, metrics.menuBarHeight - 4.0f)
+                .gradient(clearRail, railColor, core::GradientDirection::Horizontal)
+                .hitTestMode(core::dsl::HitTestMode::None).build();
+    }
+
+    if (drag.dragging && regionWidth > 0.0f) {
+        const auto source = std::find_if(tabs.begin(), tabs.end(), [&](const TabInfo& tab) {
+            return tab.id == drag.source;
+        });
+        if (source != tabs.end()) {
+            const float ghostX = std::clamp(drag.pointerX - drag.grabOffset,
+                regionLeft, std::max(regionLeft, regionLeft + regionWidth - tab_bar_detail::kTabWidth));
+            ui.stack("menubar.tabs.dragGhost")
+                .position(ghostX, 3.0f).size(tab_bar_detail::kTabWidth, metrics.menuBarHeight - 3.0f)
+                .zIndex(2100).hitTestMode(core::dsl::HitTestMode::None)
+                .content([&] {
+                    ui.rect("menubar.tabs.dragGhost.bg").fill().radius(8.0f)
+                        .color(colors.editor).border(1.0f, colors.accent)
+                        .shadow(components::theme::popupShadow(colors.tokens)).build();
+                    ui.text("menubar.tabs.dragGhost.label")
+                        .position(12.0f, 0.0f).size(tab_bar_detail::kTabWidth - 42.0f, metrics.menuBarHeight - 3.0f)
+                        .text(tab_bar_detail::elideMeasured(tab_bar_detail::tabLabel(*source, tabs, labelIndex),
+                            uiFontFamily(state), metrics.menuFontSize, tab_bar_detail::kTabWidth - 42.0f))
+                        .fontFamily(uiFontFamily(state)).fontSize(metrics.menuFontSize)
+                        .color(colors.text).verticalAlign(eui::VerticalAlign::Center).wrap(false).build();
+                }).build();
+        }
+    }
+
+    // Rounded action group, separated from both the tab shoulders and the
+    // native window controls; keep the existing draggable space to its right.
+    if (showList) {
+        ui.rect("menubar.tabs.actions.bg").position(newX, 3.0f)
+            .size(right - newX, metrics.menuBarHeight - 6.0f).radius(10.0f)
+            .color(core::mixColor(colors.toolbar, colors.editor, 0.72f))
+            .border(1.0f, core::mixColor(colors.toolbar, colors.border, 0.65f))
+            .hitTestMode(core::dsl::HitTestMode::None).build();
+    }
     if (showNew) {
+        platform::chrome::exclude(newX, 4, buttonWidth-2, metrics.menuBarHeight-8);
         ui.rect("menubar.tabs.new.hit")
-            .position(newX, 4.0f).size(buttonWidth - 2.0f, metrics.menuBarHeight - 4.0f)
+            .position(newX + 1.0f, 4.0f).size(buttonWidth - 2.0f, metrics.menuBarHeight - 8.0f)
             .radius(7.0f).states(transparentColor(), colors.rowHover, colors.pressed)
             .preserveFocusOnPress().disabled(!interactive)
             .onClick([&state, &ui, interactive] {
@@ -902,8 +1189,9 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
                  newX + 5.0f, (metrics.menuBarHeight - 18.0f) * 0.5f, 18.0f, colors.textMuted);
     }
     if (showList) {
+        platform::chrome::exclude(listX, 4, buttonWidth-2, metrics.menuBarHeight-8);
         ui.rect("menubar.tabs.list.hit")
-            .position(listX, 4.0f).size(buttonWidth - 2.0f, metrics.menuBarHeight - 4.0f)
+            .position(listX + 1.0f, 4.0f).size(buttonWidth - 2.0f, metrics.menuBarHeight - 8.0f)
             .radius(7.0f).states(state.tabListOpen ? colors.rowHover : transparentColor(),
                                   colors.rowHover, colors.pressed)
             .preserveFocusOnPress().disabled(!interactive)
@@ -939,7 +1227,7 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
     tab_bar_detail::tabList(ui, state, screen, colors, metrics, tabs, right + 8.0f, interactive);
 
     std::uint64_t& hoveredId = ui.state<std::uint64_t>("menubar.tabs.hovered");
-    if (hoveredId != 0 && !state.tabListOpen) {
+    if (hoveredId != 0 && !state.tabListOpen && !drag.dragging) {
         const auto found = std::find_if(tabs.begin(), tabs.end(), [&](const TabInfo& tab) {
             return tab.id == hoveredId;
         });

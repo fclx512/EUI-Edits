@@ -3,6 +3,7 @@
 #include "state/app_state.h"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,7 @@ bool cursorClientPosition(float& x, float& y);
 bool activateDocumentTab(AppState& state, std::uint64_t id);
 void requestCloseTab(AppState& state, std::uint64_t id);
 void moveDocumentTab(AppState& state, std::uint64_t id, int direction);
+bool moveDocumentTabToIndex(AppState& state, std::uint64_t id, std::size_t targetIndex);
 DocumentSession* documentTab(AppState& state, std::uint64_t id);
 const DocumentSession* documentTab(const AppState& state, std::uint64_t id);
 // Internal transitions: keep modal guards at the public action boundary.
@@ -74,6 +76,14 @@ void requestOpenPath(AppState& state, const std::string& path);
 
 bool saveDocument(AppState& state);
 bool saveDocumentAs(AppState& state);
+// Change the current manuscript's output encoding without reloading disk text.
+// This is a document change; normal Save / Save As commits it to disk.
+bool convertDocumentToUtf8(AppState& state);
+namespace testing {
+// Main-thread fault injection between a successful write and read-back verification.
+// Empty in production; tests must reset it after each scenario.
+void setBeforeSaveVerification(std::function<void(const std::string&)> hook);
+}
 bool requestCloseDocument(AppState& state);
 void resolveDocumentConfirmation(AppState& state, filesafety::UnsavedChoice choice);
 void resolveSaveConflict(AppState& state, int choice); // 0 overwrite, 1 Save As, 2 cancel
@@ -136,6 +146,11 @@ void vaultDeleteEntry(AppState& state, const std::string& relative, bool isDir);
 // 其余按本地路径解析 —— 文档目录 → 文档库根，没有扩展名先补 .md 再试。
 // docDir 为空（未落盘的新文档）时只试文档库根。
 void openLinkTarget(AppState& state, std::string target, const std::string& docDir);
+// Consume only a plan built for this exact document text, after editorView.
+void resolvePendingLinkAnchor(AppState& state, const LpPlan& plan, const std::string& planText);
+// Keep the link request until its resolved byte offset is actually consumed.
+void cancelPendingLinkAnchor(AppState& state);
+int takePendingOutlineJump(AppState& state);
 
 // 库内相对路径（'/' 分隔）与绝对路径互转。
 std::string vaultRelativePath(const AppState& state, const std::string& absolutePath);

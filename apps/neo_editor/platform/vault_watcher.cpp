@@ -134,7 +134,7 @@ struct VaultWatcher::Impl {
                 }
                 DWORD bytes = 0;
                 const BOOL ok = ReadDirectoryChangesW(
-                    dir, buffer.data(), static_cast<DWORD>(buffer.size()), TRUE,
+                    dir, buffer.data(), static_cast<DWORD>(buffer.size()), FALSE,
                     FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
                         FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE,
                     &bytes, nullptr, nullptr);

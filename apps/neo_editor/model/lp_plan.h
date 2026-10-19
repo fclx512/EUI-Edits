@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 // Live Preview 的「源码 → 逐行装饰计划」。
 //
 // 这一层是纯逻辑：只吃源码字符串，产出每行"是什么块 / 要隐藏哪些字节 / 行内有哪些片段"，
@@ -279,6 +281,22 @@ struct LpPlanDebugStats {
     // 逐字段 oracle 在真实文档上没有漏网之鱼。
     unsigned long long verifyMismatch = 0;
 };
+
+#if defined(EUI_LP_STAGE_PROFILE)
+// Exclusive wall-clock time spent inside plan construction. The counters are
+// cumulative for the calling thread; callers can snapshot and subtract them.
+// Partial-proof validation and optional oracle comparison are outside these
+// stages; an oracle's own buildLpPlanImpl call is counted if enabled.
+struct LpPlanStageProfile {
+    std::uint64_t indexRawLinesNs = 0;
+    std::uint64_t skeletonPassANs = 0;
+    std::uint64_t carryCompareNs = 0;
+    std::uint64_t md4cNs = 0;
+    std::uint64_t finishNs = 0;
+};
+
+LpPlanStageProfile& lpPlanStageProfile();
+#endif
 
 inline LpPlanDebugStats& planDebugStats() {
     static LpPlanDebugStats stats;

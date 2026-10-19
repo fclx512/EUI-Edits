@@ -1,14 +1,13 @@
 #pragma once
 
-// 按根共享的文档库扫描缓存（执行计划阶段 B）。
+// 按根共享的文档库分层分页缓存。
 //
-// 目标：切页不再同步整库扫描；同根的多个标签共用一份只读扫描快照；目录事件到来时
-// 后台重扫，完成后原子发布。每页仍各自保存 expanded/filter/selection/scroll，rows 是
+// 同根的多个标签共用已加载快照；后台每次至多读取一个目录的 500 个直属条目。
+// 每页仍各自保存 expanded/filter/selection/scroll，rows 是
 // 每页的视图投影，绝不把一页的筛选结果共享给另一页。
 //
-// 生命周期：worker 只拿到拥有根字符串的不可变输入，产出 ScanResult；完成回调在**主线程**
-// （core::async::dispatchReady）里发布，只有根身份仍匹配时才替换快照。快照是
-// shared_ptr<const ScanResult>，被页/投影捕获时按引用计数记账。
+// 生命周期：worker 读取目录迭代游标，完成回调在主线程发布新快照；
+// 取消/切根时关闭游标并丢弃过期结果。
 
 #include "model/vault.h"
 
@@ -24,6 +23,7 @@ struct ScanView {
     std::uint64_t generation = 0;                   // 快照代次；0 = 从无快照
     bool scanning = false;                          // 同根是否有扫描在飞
     bool rescanPending = false;                     // 在飞期间又来过变化
+    bool loadingPages = false;                      // 子目录或续页读取在飞
 };
 
 // 查询某根当前快照，不触发扫描。
@@ -37,12 +37,20 @@ struct RequestResult {
 };
 RequestResult requestScan(const std::string& root);
 
-// 同步扫描并发布（首次无快照时用于避免空白，或测试用）。返回代次。
+// 异步读取目录的首批或下一批。relative 为空表示根；refresh=true 丢弃该层
+// 既有页并从头读取（文件操作后使用）。同层在飞请求去重。
+RequestResult requestPage(const std::string& root, const std::string& relative,
+                          bool refresh = false);
+
+// 仅测试/兼容调用：同步读取根的首批直属条目并发布。产品路径不调用。
 std::uint64_t requestScanSync(const std::string& root);
 
 // 丢弃某根的缓存（换根、根被删除）。
 void invalidate(const std::string& root);
 void clear();
+// 激活浏览根：取消其他根在飞扫描，防止快切时旧任务继续遍历。
+void activateRoot(const std::string& root);
+void setExpanded(const std::string& root, const std::set<std::string>& expanded);
 
 // LRU 修剪：保留活动根，从最久未用的非活动根开始淘汰，直到根数/估算字节回到预算内。
 void prune(const std::string& activeRoot);

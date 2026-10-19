@@ -80,9 +80,13 @@ inline bool isWord(std::uint32_t cp) {
 
 inline std::vector<Match> matches(const std::string& text,
                                  const std::string& query,
-                                 Options options = {}) {
+                                 Options options = {},
+                                 std::size_t rangeBegin = 0,
+                                 std::size_t rangeEnd = std::string::npos) {
     std::vector<Match> result;
-    if (query.empty()) return result;
+    rangeEnd = std::min(rangeEnd, text.size());
+    if (query.empty() || rangeBegin >= rangeEnd ||
+        (rangeBegin && (static_cast<unsigned char>(text[rangeBegin]) & 0xC0) == 0x80)) return result;
 
     std::vector<std::uint32_t> pattern;
     for (std::size_t offset = 0; offset < query.size();) {
@@ -102,10 +106,11 @@ inline std::vector<Match> matches(const std::string& text,
     const std::size_t ringSize = pattern.size() + 1;
     std::vector<detail::Unit> recent(ringSize);
     std::size_t sourceIndex = 0;
-    std::size_t offset = 0;
+    std::size_t offset = rangeBegin;
     std::size_t matched = 0;
-    while (offset < text.size()) {
+    while (offset < rangeEnd) {
         const auto unit = detail::decodeOne(text, offset);
+        if (unit.end > rangeEnd) break;
         recent[sourceIndex % ringSize] = unit;
         const auto value = options.matchCase ? unit.value : detail::simpleFold(unit.value);
         while (matched && value != pattern[matched]) matched = prefix[matched - 1];
@@ -117,6 +122,12 @@ inline std::vector<Match> matches(const std::string& text,
             if (options.wholeWord && firstIndex != 0) {
                 const auto& before = recent[(firstIndex - 1) % ringSize];
                 leftOk = !detail::isWord(before.value);
+            } else if (options.wholeWord && rangeBegin != 0) {
+                // A selection edge is not a word boundary. Retain the real
+                // source context while starting non-overlapping search here.
+                auto before = rangeBegin - 1;
+                while (before && (static_cast<unsigned char>(text[before]) & 0xC0) == 0x80) --before;
+                leftOk = !detail::isWord(detail::decodeOne(text, before).value);
             }
             bool rightOk = true;
             if (options.wholeWord && unit.end < text.size()) {

@@ -351,11 +351,59 @@ void testSingleLineMetricsRemainOwned() {
     check(layout.cursorPixel == Model::caretX(state.cachedMetrics, state.cursor),
           "single-line UTF8 caret still uses its owned metrics");
 }
+void testPreeditVirtualSplice() {
+    State state;
+    state.text = std::string(1024 * 1024, 'x') + "中🙂tail";
+    state.selectionStart = 7;
+    state.selectionEnd = 3; // reverse selection
+    state.compositionText = "中文🙂";
+    const auto verify = [&]() {
+        const auto range = Model::selectionRange(state);
+        auto expected = state.text;
+        expected.replace(static_cast<std::size_t>(range.first),
+                         static_cast<std::size_t>(range.second - range.first), state.compositionText);
+        auto& display = Model::displayState(state, true);
+        check(display.text == expected, "preedit must equal a fresh splice oracle");
+        check(display.cursor == range.first + static_cast<int>(state.compositionText.size()),
+              "preedit cursor follows composition in source bytes");
+        return display.textRevision;
+    };
+    const auto firstRevision = verify();
+    state.wordWrap = false;
+    state.horizontalScroll = 17;
+    allocation_probe::begin();
+    auto& stable = Model::displayState(state, true);
+    allocation_probe::end();
+    check(allocation_probe::count.load() == 0, "unchanged preedit must not allocate a document copy");
+    check(stable.textRevision == firstRevision && !stable.wordWrap && stable.horizontalScroll == 17,
+          "unchanged text still synchronizes presentation without a text revision");
+    state.text[0] = 'p'; // external same-length write without a revision
+    check(verify() == firstRevision + 1, "external prefix changes must invalidate preedit");
+    state.text.back() = 'z';
+    check(verify() == firstRevision + 2, "external suffix changes must invalidate preedit");
+    state.text[4] = 'q'; // selected source is hidden by composition
+    check(verify() == firstRevision + 2, "hidden selected bytes do not change display text");
+    state.compositionText = "文中🙂";
+    check(verify() == firstRevision + 3, "equal-byte-length composition changes must invalidate");
+    state.selectionStart = state.selectionEnd = static_cast<int>(state.text.size());
+    verify(); // insertion at end, empty suffix
+    state.selectionStart = 0;
+    state.selectionEnd = static_cast<int>(state.text.size());
+    state.compositionText.clear();
+    verify(); // whole document replaced by empty preedit
+    auto& committed = Model::displayState(state, false);
+    check(&committed == &state && !state.preedit && !state.text.empty(),
+          "ending preedit returns committed state without overwriting text");
+    Model::loadDocument(state, "新页🙂");
+    state.compositionText = "中";
+    verify(); // document replacement must not reuse old virtual text
+}
 }  // namespace
 
 int main() {
     testCopiesDoNotCloneLongLineMetrics();
     testMultilineUtf8Oracle();
     testSingleLineMetricsRemainOwned();
+    testPreeditVirtualSplice();
     return failures ? 1 : 0;
 }

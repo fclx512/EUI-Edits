@@ -89,6 +89,18 @@ inline const std::vector<Type>& associationTypes() {
     }();
     return value;
 }
+// Recommendation is narrower than eligibility: these types commonly open in a
+// browser or execute. They remain available for an explicit individual choice.
+inline std::vector<std::string> recommendedAssociations() {
+    std::vector<std::string> result;
+    for (const auto& type : associationTypes()) {
+        const std::string language = type.language;
+        if (language == "html" || language == "shell" || language == "batch" ||
+            language == "powershell") continue;
+        result.emplace_back(type.extension);
+    }
+    return result;
+}
 inline std::vector<std::string> extensions() {
     std::vector<std::string> result;
     for(const auto& type:types()) result.emplace_back(type.extension);

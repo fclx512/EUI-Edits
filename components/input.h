@@ -11,6 +11,7 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -38,6 +39,7 @@ struct InputStyle {
     core::Color text;
     core::Color placeholder;
     core::Color cursor;
+    std::optional<core::Color> selectionBackground;
     core::Shadow shadow;
     float radius = 10.0f;
 };
@@ -75,11 +77,15 @@ public:
     InputBuilder& multiline(bool value = true) { multiline_ = value; return *this; }
     InputBuilder& wordWrap(bool value = true) { wordWrap_ = value; return *this; }
     InputBuilder& viewportMetrics(bool value = true) { viewportMetrics_ = value; return *this; }
+    InputBuilder& typewriter(bool value = true) { typewriter_ = value; return *this; }
+    InputBuilder& focusLine(bool value = true, bool animated = true) { focusLine_ = value; focusLineAnimated_ = animated; return *this; }
     /** @brief 多行输入溢出时显示垂直滚动条，默认关闭；不影响滚轮和光标跟随。 */
     InputBuilder& scrollbar(bool value = true) { scrollbar_ = value; return *this; }
     InputBuilder& fontSize(float value) { fontSize_ = std::max(1.0f, value); return *this; }
     InputBuilder& fontFamily(std::string value) { fontFamily_ = std::move(value); return *this; }
     InputBuilder& inset(float value) { inset_ = std::max(0.0f, value); return *this; }
+    // Reserve content space without moving the control's outer scrollbar.
+    InputBuilder& contentRightInset(float value) { contentRightInset_ = std::max(0.0f, value); return *this; }
     /**
      * @brief 内容列最大宽度（"限制行宽"/可读行宽，仅多行时生效，<= 0 关闭）。
      *
@@ -227,7 +233,7 @@ public:
         // 内缩**。所有"到文本原点的距离"（命中换算、光标、选区裁剪）用 inset；
         // 所有"对称宽度"（换行宽、横向滚动范围）用 inset + rightInset。
         float inset = baseInset + gutterWidth;
-        float rightInset = baseInset;
+        float rightInset = baseInset + contentRightInset_;
         // 开启时固定预留槽位，避免溢出临界点因滚动条显隐反复改变换行宽度。
         // 右侧留白是 baseInset（行号列只在左边），别把 gutterWidth 也算进来，
         // 否则开行号时滚动条整体左移一段。
@@ -287,6 +293,8 @@ public:
         const std::string fontFamily = fontFamily_;
         InputState& state = ui_.state<InputState>(id_);
         state.wordWrap = wordWrap_;
+        if (state.typewriter != typewriter_) state.followCaret = true;
+        state.typewriter = typewriter_;
         state.viewportMetrics = viewportMetrics_;
         if (state.text != text) {
             const bool wasFocused = focused;
@@ -319,7 +327,7 @@ public:
         // 光标在同一块内移动时这里返回的表逐项相同，于是一次测量都不会做。
         //
         // 编辑上下文（T4 A2）：revision 取**文档**（真身 state）的 textRevision；合成中
-        // 交给 provider 的是 displayState 的临时文本，committed 置 false 让它退回全量；
+        // 交给 provider 的是 displayState 的临时文本，committed 置 false 隔离提交编辑链；
         // pendingEdit 只在"它描述的就是当前这份文本"（revision 对得上）时才递出去。
         input_detail::DecoratorEditInfo editInfo;
         input_detail::LineDecorationChanges decorationChanges;
@@ -403,7 +411,12 @@ public:
             .dirtyKey(InputModel::makeDirtyKey(state, focused, layout) +
                       "|d" + std::to_string(display.decorationRevision) +
                       (wordWrap_ ? "|wrap" : "|nowrap") +
+                      (typewriter_ ? "|typewriter" : "|normal") +
+                      (focusLine_ ? (focusLineAnimated_ ? "|focus-animated" : "|focus-static") : "|unfocused-lines") +
                       (scrollbar_ ? "|bar" : "|no-bar") + placeholderKey +
+                      (style_.selectionBackground ? "|selection:" + std::to_string(style_.selectionBackground->r) + "," +
+                          std::to_string(style_.selectionBackground->g) + "," + std::to_string(style_.selectionBackground->b) + "," +
+                          std::to_string(style_.selectionBackground->a) : "|selection:default") +
                       (lineOverlay_ ? "|overlay:" + lineOverlayKey_ : std::string{}));
         if (hasX_) {
             root.x(x_);
@@ -419,13 +432,19 @@ public:
             });
         }
         root.content([&] {
-                auto hit = ui_.rect(hitId)
-                    .size(width_, height_)
-                    .color(style_.background)
-                    .radius(style_.radius)
+                // Keep the antialiased surface inside the input's scissor at
+                // fractional DPI. Pointer/IME bounds retain the full control size.
+                const float surfaceInset = 0.5f;
+                ui_.rect(id_ + ".surface")
+                    .position(surfaceInset, surfaceInset)
+                    .size(std::max(0.0f, width_ - surfaceInset * 2), std::max(0.0f, height_ - surfaceInset * 2))
+                    .color(style_.background).radius(style_.radius)
                     .border(1.0f, focused ? style_.focusBorder : style_.border)
                     .shadow(focused ? style_.shadow : core::Shadow{})
-                    .transition(transition_)
+                    .transition(transition_).hitTestMode(core::dsl::HitTestMode::None).build();
+                auto hit = ui_.rect(hitId)
+                    .size(width_, height_)
+                    .color(core::Color{0,0,0,0})
                     .focusable()
                     .imeRect(caretX, caretY, 1.5f, std::max(1.0f, layout.cursorLineHeight()))
                     .onPress([&state, controlWidth, inset, baseInset, callbackLayout, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
@@ -1097,7 +1116,9 @@ public:
                                 ui_.rect(id_ + ".selection." + std::to_string(index))
                                     .position(selectionRect.x - inset, selectionRect.y - textY)
                                     .size(selectionRect.width, selectionRect.height)
-                                    .color(theme::withAlpha(style_.cursor, hasComposition ? 0.12f : 0.24f))
+                                    .color(style_.selectionBackground
+                                        ? theme::withOpacity(*style_.selectionBackground, hasComposition ? 0.5f : 1.0f)
+                                        : theme::withAlpha(style_.cursor, hasComposition ? 0.12f : 0.24f))
                                     .radius(multiline_ ? 0.0f : 3.0f)
                                     .build();
                                 if (hasComposition) {
@@ -1130,11 +1151,21 @@ public:
                                     continue;
                                 }
                                 const float linePixelHeight = hasGeometry ? geometry.height(index) : textLineHeight;
-                                const float y = (hasGeometry ? geometry.top(index)
+                                const float rowY = (hasGeometry ? geometry.top(index)
                                                              : static_cast<float>(index) * textLineHeight) - state.verticalScroll;
-                                if (y + linePixelHeight < 0.0f || y > textHeight) {
+                                if (rowY + linePixelHeight < 0.0f || rowY > textHeight) {
                                     continue;
                                 }
+                                const auto selected = InputModel::selectionRange(state);
+                                const bool selectedRow = !hasComposition && selected.first < selected.second &&
+                                    line.end > selected.first && line.start < selected.second;
+                                const float lineOpacity = !focusLine_ || index == layout.cursorLine || selectedRow ? 1.0f : .45f;
+                                auto focusRow = ui_.stack(id_ + ".focus." + std::to_string(index))
+                                    .position(0,rowY).size(layout.visibleTextWidth,linePixelHeight).opacity(lineOpacity);
+                                if (focusLine_ && focusLineAnimated_)
+                                    focusRow.transition(core::Transition::make(.14f,core::Ease::OutCubic)).animate(core::AnimProperty::Opacity);
+                                focusRow.content([&] {
+                                const float y = 0;
                                 // 有隐藏区间的行渲染"投影文本"（标记已被删掉）。"光标所在块显示源码"
                                 // 由上层表达——对那几行不返回 holes，组件本身不做这个判断。
                                 // 行级文字色（标题/代码块）与行内样式段都由上层给，组件只照着画。
@@ -1279,7 +1310,8 @@ public:
                                     const float runViewportRight = layout.scroll + textWidth + runMargin;
                                     for (std::size_t runIndex = 0; runIndex < line.presentation().runs.size(); ++runIndex) {
                                         const input_detail::TextRun& run = line.presentation().runs[runIndex];
-                                        if (run.x + run.width < runViewportLeft || run.x > runViewportRight) {
+                                        const float runOverhang = input_detail::inlineChipPadding(run.style.get(), lineFontSize);
+                                        if (run.x + run.width + runOverhang < runViewportLeft || run.x - runOverhang > runViewportRight) {
                                             continue;
                                         }
                                         const std::string runId = id_ + ".text." + std::to_string(index) + "r" +
@@ -1304,14 +1336,25 @@ public:
                                                 .build();
                                         }
                                         if (run.style.get().background.a > 0.0f) {
-                                            // The chip follows the centered text origin, preserving
-                                            // its padding and baseline beside the other runs.
-                                            const float chipPad = std::max(1.0f, lineFontSize * 0.10f);
+                                            // Measure actual fallback ink; font size alone cannot
+                                            // contain CJK ascenders/descenders in a code-font run.
+                                            core::TextStyle chipText;
+                                            chipText.text = runText;
+                                            chipText.fontFamily = !run.style.get().fontFamily.empty() ? run.style.get().fontFamily
+                                                : (!line.rare().fontFamily.empty() ? line.rare().fontFamily : fontFamily_);
+                                            chipText.fontSize = lineFontSize;
+                                            chipText.fontWeight = run.style.get().weight > 0 ? run.style.get().weight : 400;
+                                            chipText.fontItalic = run.style.get().italic;
+                                            const auto ink = core::TextPrimitive::measureSingleLineInk(chipText);
+                                            const float chipPad = input_detail::inlineChipPadding(run.style.get(), lineFontSize);
+                                            const float chipTop = textOrigin + ink.x - 2.0f;
+                                            const float chipHeight = std::max(1.0f, ink.y - ink.x) + 4.0f;
                                             ui_.rect(runId + ".bg")
-                                                .position(run.x - chipPad, textOrigin + lineFontSize * 0.06f)
-                                                .size(run.width + chipPad * 2.0f, lineFontSize * 0.80f)
+                                                .position(run.x - chipPad, chipTop)
+                                                .size(run.width + chipPad * 2.0f, chipHeight)
                                                 .color(run.style.get().background)
-                                                .radius(std::max(2.0f, lineFontSize * 0.18f))
+                                                .radius(run.style.get().chipRadius > 0 ? run.style.get().chipRadius : std::max(2.0f, lineFontSize * 0.18f))
+                                                .border(run.style.get().borderWidth, run.style.get().borderColor)
                                                 .build();
                                         }
                                         ui_.text(runId)
@@ -1326,6 +1369,7 @@ public:
                                                          : (!line.rare().fontFamily.empty() ? line.rare().fontFamily
                                                                                      : fontFamily_))
                                             .fontWeight(run.style.get().weight > 0 ? run.style.get().weight : 400)
+                                            .fontItalic(run.style.get().italic)
                                             .lineHeight(textBand.height)
                                             .color(runColor)
                                             .wrap(false)
@@ -1404,6 +1448,7 @@ public:
                                         .verticalAlign(core::VerticalAlign::Center)
                                         .build();
                                 }
+                                }).build(); // focus row: same geometry and input mapping
                             }
                         
                             }).build();
@@ -1546,6 +1591,8 @@ private:
     input_detail::LineDecorationProviderEx decorator_;
     input_detail::LineDecorationSnapshotProvider snapshotDecorator_;
     bool viewportMetrics_ = false;
+    bool typewriter_ = false;
+    bool focusLine_ = false, focusLineAnimated_ = true;
     std::string text_;
     const std::string* borrowedText_ = nullptr;
     std::string placeholder_ = "Hello EUI-NEO 😉";
@@ -1559,6 +1606,7 @@ private:
     float x_ = 0.0f;
     float y_ = 0.0f;
     float inset_ = -1.0f;
+    float contentRightInset_ = 0.0f;
     float maxTextWidth_ = 0.0f;
     bool lineNumbers_ = false;
     core::Color lineNumberColor_{0.0f, 0.0f, 0.0f, 0.0f};

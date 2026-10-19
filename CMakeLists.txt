@@ -343,6 +343,30 @@ endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/scripts/EuiShaderToy.cmake")
 
+# Offline editor theme generation; pinned upstream and license in 3rd/.
+set(EUI_MCU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/3rd/material-color-utilities")
+add_library(eui_material_colors STATIC
+    "${EUI_MCU_DIR}/cpp/cam/cam.cc"
+    "${EUI_MCU_DIR}/cpp/cam/hct.cc"
+    "${EUI_MCU_DIR}/cpp/cam/hct_solver.cc"
+    "${EUI_MCU_DIR}/cpp/cam/viewing_conditions.cc"
+    "${EUI_MCU_DIR}/cpp/contrast/contrast.cc"
+    "${EUI_MCU_DIR}/cpp/dislike/dislike.cc"
+    "${EUI_MCU_DIR}/cpp/dynamiccolor/dynamic_color.cc"
+    "${EUI_MCU_DIR}/cpp/dynamiccolor/dynamic_scheme.cc"
+    "${EUI_MCU_DIR}/cpp/dynamiccolor/material_dynamic_colors.cc"
+    "${EUI_MCU_DIR}/cpp/palettes/tones.cc"
+    "${EUI_MCU_DIR}/cpp/scheme/scheme_neutral.cc"
+    "${EUI_MCU_DIR}/cpp/scheme/scheme_tonal_spot.cc"
+    "${EUI_MCU_DIR}/cpp/scheme/scheme_vibrant.cc"
+    "${EUI_MCU_DIR}/cpp/utils/utils.cc")
+target_include_directories(eui_material_colors PUBLIC "${EUI_MCU_DIR}")
+target_compile_features(eui_material_colors PUBLIC cxx_std_17)
+set_target_properties(eui_material_colors PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(eui_material_colors PRIVATE /utf-8)
+endif()
+
 set(EUI_YYJSON_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/3rd/yyjson-0.12.0/src/yyjson.c")
 if(EUI_BUILD_SHARED)
     add_library(eui_yyjson STATIC "${EUI_YYJSON_SOURCE}")
@@ -691,6 +715,7 @@ if(EUI_BUILD_USER_APPS)
         target_link_libraries(neo_editor PRIVATE png_static)
     endif()
     if(TARGET neo_editor)
+        target_link_libraries(neo_editor PRIVATE eui_material_colors)
         target_link_libraries(neo_editor PRIVATE freetype)
         if(WIN32)
             target_link_libraries(neo_editor PRIVATE comctl32)
@@ -928,12 +953,20 @@ if(EUI_BUILD_TEST_FIXTURES)
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/mindmap_layout.cpp")
             target_include_directories(${unit_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
         endif()
-        if(unit_name STREQUAL "lp_decorations")
+        if(unit_name STREQUAL "lp_decorations" OR unit_name STREQUAL "heading_anchor")
             # Live Preview 适配层的测试要同时编进 app 侧的解析器（lp_plan.cpp）。
             # 测的是编辑器真正跑的那条路：lp_plan → lp_decorations → 组件装饰。
             # text_file.cpp 提供路径的 UTF-8 ↔ 宽字符转换（5a644a2 起
             # resolveLocalImageSrc 依赖它，不编进来就断链）。
             # text_file.cpp 的 save 走 atomic_write（编码严格往返），一并编入。
+            target_sources(${unit_name} PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/lp_plan.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/text_file.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/atomic_write.cpp")
+            target_include_directories(${unit_name} PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+        endif()
+        if(unit_name STREQUAL "editor_context_menu_lp" OR unit_name STREQUAL "link_editor_focus" OR unit_name STREQUAL "markdown_writing")
             target_sources(${unit_name} PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/lp_plan.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/text_file.cpp"
@@ -1013,7 +1046,7 @@ if(EUI_BUILD_TEST_FIXTURES)
             target_include_directories(${unit_name} PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
         endif()
-        if(unit_name STREQUAL "lp_edit_benchmark" OR unit_name STREQUAL "editor_pipeline_benchmark")
+        if(unit_name STREQUAL "lp_edit_benchmark" OR unit_name STREQUAL "editor_pipeline_benchmark" OR unit_name STREQUAL "editor_latency_benchmark")
             # B3 前置：真实 LP 编辑链基准（cachedPlan → cachedDecorations → 排版）。
             # 与 lp_decorations 同一套接线：要编进 app 侧解析器 lp_plan.cpp，
             # text_file.cpp / atomic_write.cpp 是 lp_decorations 依赖链的既有接线。
@@ -1023,6 +1056,9 @@ if(EUI_BUILD_TEST_FIXTURES)
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/atomic_write.cpp")
             target_include_directories(${unit_name} PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+        endif()
+        if(unit_name STREQUAL "editor_latency_benchmark")
+            target_compile_definitions(${unit_name} PRIVATE EUI_LP_STAGE_PROFILE=1)
         endif()
         if(unit_name STREQUAL "image_attach")
             # R2：DIB 解析（平台文件）+ PNG 编码（libpng）+ 附件目录/命名纯逻辑。
@@ -1146,7 +1182,10 @@ if(EUI_BUILD_TEST_FIXTURES)
                 target_link_libraries(${unit_name} PRIVATE shell32)
             endif()
         endif()
-        if(unit_name STREQUAL "theme_loader")
+        if(unit_name STREQUAL "theme_loader" OR unit_name STREQUAL "theme_workbench" OR unit_name STREQUAL "theme_workbench_ui")
+            target_compile_definitions(${unit_name} PRIVATE EUI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+            target_link_libraries(${unit_name} PRIVATE eui_material_colors)
+            target_sources(${unit_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/theme_auto_palette.cpp")
             # T13 第一阶段：主题 JSON（内置导出→重载逐字段 golden / 缺字段回退 /
             # 坏 JSON / Unicode 路径 / 静态配色缓存真实失效 / last_theme_file 换进程
             # 重读）。直接编入 app 侧的 theme_loader.cpp 与 settings.cpp 及其依赖：
@@ -1172,6 +1211,11 @@ if(EUI_BUILD_TEST_FIXTURES)
             endif()
         endif()
         add_test(NAME ${unit_name} COMMAND ${unit_name})
+        if(unit_name STREQUAL "text_atlas_growth")
+            # Separate process: atlas saturation must not contaminate italic checks.
+            add_test(NAME text_italic COMMAND ${unit_name} --italic)
+            set_tests_properties(text_italic PROPERTIES LABELS "unit")
+        endif()
         if(unit_name STREQUAL "settings_atomic")
             foreach(language_mode zh en invalid legacy)
                 add_test(NAME settings_language_${language_mode} COMMAND ${unit_name} --${language_mode})
@@ -1179,7 +1223,8 @@ if(EUI_BUILD_TEST_FIXTURES)
             endforeach()
         endif()
         if(unit_name STREQUAL "perf_benchmark" OR unit_name STREQUAL "lp_edit_benchmark" OR unit_name STREQUAL "editor_pipeline_benchmark"
-           OR unit_name STREQUAL "table_layout_benchmark" OR unit_name STREQUAL "editor_prepare_benchmark")
+           OR unit_name STREQUAL "table_layout_benchmark" OR unit_name STREQUAL "editor_prepare_benchmark"
+           OR unit_name STREQUAL "input_preedit_benchmark" OR unit_name STREQUAL "editor_latency_benchmark")
             # T12 / B3 无头性能基准：只打印 ms/次，不因绝对耗时失败；仅 NEO_PERF_GUARD=1
             # 才启用相对护栏。挂 performance 标签 → 默认 `ctest -L unit`（CI/release
             # 两处都按 -L unit 跑）不会带上它，需要时单独 `ctest -L performance`。

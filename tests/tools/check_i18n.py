@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Check EUI-Edits' C++ message catalog and literal translation calls.
+"""Check EUI-Edits' C++ message catalog and statically bounded translation calls.
 
 This intentionally uses only the Python standard library. Dynamic message IDs
-are reported for review, but are not guessed or treated as failures.
+are reported for review, but are not guessed or treated as failures. Ternaries
+whose leaves are string literals are checked on every possible branch.
 """
 
 from __future__ import annotations
@@ -206,18 +207,8 @@ def first_argument_end(text: str, masked: str, pos: int) -> int:
     parens = brackets = braces = 0
     i = pos
     while i < len(text):
-        if text[i] == '"' or text[i] == "'":
-            quote = text[i]
-            i += 1
-            while i < len(text):
-                if text[i] == "\\":
-                    i += 2
-                    continue
-                if text[i] == quote:
-                    i += 1
-                    break
-                i += 1
-            continue
+        # Literals and comments are already blanked. Looking at raw quotes here
+        # would mistake an apostrophe inside a comment for a character literal.
         char = masked[i]
         if char == "(":
             parens += 1
@@ -243,6 +234,72 @@ def line_number(text: str, pos: int) -> int:
     return text.count("\n", 0, pos) + 1
 
 
+def literal_message_ids(expression: str, depth: int = 0) -> set[str] | None:
+    """Resolve only literal leaves, parentheses and bounded ?: expressions.
+
+    Conditions are never evaluated. A single runtime-valued leaf makes the
+    entire expression dynamic; this is deliberately not a general C++ parser.
+    """
+    if depth > 32:
+        return None
+    text = expression.strip()
+    code = mask_non_code(text)
+    left = len(code) - len(code.lstrip())
+    right = len(code.rstrip()) - 1
+    if left <= right and code[left] == "(" and find_call_close(code, left) == right:
+        return literal_message_ids(text[left + 1:right], depth + 1)
+    brackets = 0
+    question = None
+    nested = 0
+    for index, char in enumerate(code):
+        if char in "([{":
+            brackets += 1
+        elif char in ")]}":
+            brackets -= 1
+        elif brackets == 0:
+            if char == "?":
+                if question is None:
+                    question = index
+                else:
+                    nested += 1
+            elif char == ":" and question is not None:
+                if (index and code[index - 1] == ":") or (index + 1 < len(code) and code[index + 1] == ":"):
+                    continue
+                if nested:
+                    nested -= 1
+                else:
+                    yes = literal_message_ids(text[question + 1:index], depth + 1)
+                    no = literal_message_ids(text[index + 1:], depth + 1)
+                    return None if yes is None or no is None else yes | no
+    if question is not None:
+        return None
+
+    def trivia(pos: int) -> int:
+        while pos < len(text):
+            if text[pos].isspace():
+                pos += 1
+            elif text.startswith("//", pos):
+                end = text.find("\n", pos + 2)
+                pos = len(text) if end < 0 else end + 1
+            elif text.startswith("/*", pos):
+                end = text.find("*/", pos + 2)
+                pos = len(text) if end < 0 else end + 2
+            else:
+                break
+        return pos
+
+    pos = trivia(0)
+    pieces: list[str] = []
+    while pos < len(text):
+        parsed = read_cpp_string(text, pos)
+        if parsed is None:
+            return None
+        value, pos = parsed
+        pieces.append(value)
+        pos = trivia(pos)
+    return {"".join(pieces)} if pieces else None
+
+
 def scan_calls(messages: dict[str, tuple[str, str, str]]) -> tuple[list[str], list[str], int]:
     errors: list[str] = []
     dynamic: list[str] = []
@@ -263,50 +320,38 @@ def scan_calls(messages: dict[str, tuple[str, str, str]]) -> tuple[list[str], li
             kind = match.group(1)
             open_paren = code.find("(", match.start(), match.end())
             arg_pos = skip_space(text, open_paren + 1)
-            parsed = read_cpp_string(text, arg_pos)
             first_end = first_argument_end(text, code, arg_pos)
-            first_expr = text[arg_pos:first_end].strip().replace("\n", " ")
+            expression = text[arg_pos:first_end]
+            first_expr = expression.strip().replace("\n", " ")
             loc = f"{path.relative_to(ROOT)}:{line_number(text, match.start())}"
-            if parsed is None:
+            message_ids = literal_message_ids(expression)
+            if message_ids is None:
                 if first_expr:
                     dynamic.append(f"{loc}: i18n::{kind}({first_expr})")
                 else:
                     errors.append(f"{loc}: could not parse first argument to i18n::{kind}")
                 continue
-            message_id, after_literal = parsed
-            after_literal = skip_space(text, after_literal)
-            # Adjacent C++ literals still form one compile-time string ID.
-            pieces = [message_id]
-            while after_literal < len(text) and text[after_literal] == '"':
-                adjacent = read_cpp_string(text, after_literal)
-                if adjacent is None:
-                    break
-                pieces.append(adjacent[0])
-                after_literal = skip_space(text, adjacent[1])
-            if after_literal < len(text) and text[after_literal] not in ",)":
-                dynamic.append(f"{loc}: i18n::{kind}({first_expr})")
-                continue
-            message_id = "".join(pieces)
             literal_count += 1
-            if message_id not in messages:
-                errors.append(f"{loc}: unknown message ID {message_id!r}")
-                continue
-            if kind != "format":
-                continue
-            zh, en, _ = messages[message_id]
-            expected = set(PLACEHOLDER_RE.findall(zh))
-            call_close = find_call_close(code, open_paren)
-            if call_close is None:
-                errors.append(f"{loc}: could not find closing parenthesis for i18n::format")
-                continue
-            remainder = text[after_literal:call_close]
-            remainder_masked = mask_comments_only(remainder)
-            actual = set(PAIR_KEY_RE.findall(remainder_masked))
-            if actual != expected:
-                errors.append(
-                    f"{loc}: format fields for {message_id!r} do not match catalog: "
-                    f"expected={sorted(expected)}, provided={sorted(actual)}"
-                )
+            for message_id in sorted(message_ids):
+                if message_id not in messages:
+                    errors.append(f"{loc}: unknown message ID {message_id!r}")
+                    continue
+                if kind != "format":
+                    continue
+                zh, en, _ = messages[message_id]
+                expected = set(PLACEHOLDER_RE.findall(zh))
+                call_close = find_call_close(code, open_paren)
+                if call_close is None:
+                    errors.append(f"{loc}: could not find closing parenthesis for i18n::format")
+                    continue
+                remainder = text[first_end:call_close]
+                remainder_masked = mask_comments_only(remainder)
+                actual = set(PAIR_KEY_RE.findall(remainder_masked))
+                if actual != expected:
+                    errors.append(
+                        f"{loc}: format fields for {message_id!r} do not match catalog: "
+                        f"expected={sorted(expected)}, provided={sorted(actual)}"
+                    )
     return errors, dynamic, literal_count
 
 

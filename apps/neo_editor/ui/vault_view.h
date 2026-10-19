@@ -166,10 +166,6 @@ inline std::string stableRowId(const std::string& relative) {
 } // namespace vault_detail
 
 inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float height) {
-    if (state.vaultTab == VaultTab::Outline) {
-        outlinePanelView(ui, state, width, height);
-        return;
-    }
     using namespace vault_detail;
     const EditorColors& colors = editorColors();
     const UiMetrics metrics = uiMetrics(state);
@@ -185,7 +181,6 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
     constexpr float kIconGap = 6.0f;
 
     const float rowHeight = metrics.vaultRowHeight;
-    const float tabsHeight = metrics.vaultTitleFontSize + 20.0f;
     const float inner = std::max(0.0f, width - kPadding * 2.0f);
 
     // 地址栏跳转后把目标行滚进视野。行号要等 rows 重建完才存在，
@@ -202,10 +197,13 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
         }
         // 暖快照可能尚未包含刚出现的目标；后台核验完成前保留请求。
         // 扫描已结束仍未命中时清掉，避免不存在/被过滤的目标永久挂起。
-        if (revealed || !vaultcache::query(state.vaultRoot).scanning) state.vaultPendingReveal.clear();
+        const auto pending = vaultcache::query(state.vaultRoot);
+        if (revealed || (!pending.scanning && !pending.loadingPages)) state.vaultPendingReveal.clear();
     }
+    const float filterNoticeHeight = state.vaultPathInputMode ? 0.0f : 18.0f;
     const float listHeight = std::max(0.0f,
-                                      height - 16.0f - tabsHeight - kHeaderHeight - kRootHeight - kGap * 3.0f);
+                                      height - 16.0f - kHeaderHeight - kRootHeight - kGap * 2.0f -
+                                          (filterNoticeHeight > 0.0f ? filterNoticeHeight + kGap : 0.0f));
     // Give the action its measured label width while keeping it inside the sidebar.
     const float chooseGlyph = std::min(18.0f, metrics.vaultFilterFontSize + 2.0f);
     const float chooseNaturalWidth = core::TextPrimitive::measureTextWidth(
@@ -239,7 +237,6 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                 .gap(kGap)
                 .zIndex(1)
                 .content([&] {
-                    vaultTabsView(ui, state, inner, metrics.vaultTitleFontSize);
                     ui.row("vault.head")
                         .size(inner, kHeaderHeight)
                         .gap(kToolbarGap)
@@ -335,6 +332,16 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                         })
                         .build();
 
+                    if (!state.vaultPathInputMode) {
+                        ui.text("vault.filter.loaded_only")
+                            .size(inner, filterNoticeHeight)
+                            .text(i18n::tr("vault.filter_loaded_only"))
+                            .fontFamily(uiFontFamily(state))
+                            .fontSize(metrics.vaultFilterFontSize - 1.0f)
+                            .color(colors.textMuted)
+                            .build();
+                    }
+
                     if (!state.vaultRoot.empty() && !state.vaultScan) {
                         // 首次尚无共享快照：明确加载态（扫描在后台进行），不把加载中当错误。
                         ui.text("vault.loading")
@@ -407,6 +414,28 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                                 return;
                             }
                             const vault::Row row = state.rows[rowIndex];
+                            if (row.loadMore) {
+                                const std::string id = "vault.more." + stableRowId(row.relative);
+                                rowUi.stack(id).size(rowWidth, rowHeight).content([&] {
+                                    rowUi.rect(id + ".hit").fill().radius(4.0f)
+                                        .states(transparentColor(), colors.rowHover, colors.pressed)
+                                        .cursor(row.cacheLimitReached ? eui::CursorShape::Arrow : eui::CursorShape::Hand)
+                                        .onClick([&state, row] {
+                                            if (row.cacheLimitReached) return;
+                                            vaultcache::requestPage(state.vaultRoot, row.relative,
+                                                                    !row.pageError.empty());
+                                            app::requestUpdate();
+                                        }).build();
+                                    rowUi.text(id + ".label").position(8.0f + row.depth * metrics.vaultIndentPerDepth, 0.0f)
+                                        .size(rowWidth - 12.0f, rowHeight)
+                                        .text(row.cacheLimitReached ? i18n::tr("vault.cache_limit") :
+                                              row.pageError.empty() ? i18n::tr("vault.load_more") :
+                                              std::string(i18n::tr("vault.retry")) + ": " + row.pageError)
+                                        .fontFamily(uiFontFamily(state)).fontSize(metrics.vaultRowFontSize)
+                                        .color(colors.accent).verticalAlign(eui::VerticalAlign::Center).build();
+                                }).build();
+                                return;
+                            }
                             const std::string absolute =
                                 row.isDir ? std::string{} : vaultAbsolutePath(state, row.relative);
                             const bool active =
@@ -527,7 +556,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                         .build();
                 })
                 .build();
-            const float toolbarCenterY = 8.0f + tabsHeight + kGap + kHeaderHeight * 0.5f;
+            const float toolbarCenterY = 8.0f + kHeaderHeight * 0.5f;
             toolbarTooltip(ui, "vault.mode.tooltip", "vault.mode.filter.hit",
                            i18n::tr(state.vaultPathInputMode ? "vault.filter_mode" : "vault.path_mode"),
                            kPadding + kModeButtonWidth * 0.5f, toolbarCenterY + kHeaderHeight * 0.5f,

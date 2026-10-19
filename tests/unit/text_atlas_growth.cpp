@@ -229,10 +229,57 @@ bool sameGeometryWithInk(const TextCopy& before, const TextCopy& after) {
 
 }  // namespace
 
-int main() {
+int italicRegression(RecordingBackend& backend) {
+    // Style toggles must update vertices without invalidating advances or the
+    // atlas. Native italic glyphs must not be slanted twice; CJK fallback must.
+    core::TextPrimitive slant;
+    if (!slant.initialize()) return 1;
+    slant.setFontFamily("Microsoft YaHei"); slant.setFontSize(24);
+    slant.setText("Hello 中文🙂");
+    const auto upright = draw(slant, backend);
+    const auto uprightSize = slant.measuredSize();
+    slant.setFontItalic(true);
+    const auto tilted = draw(slant, backend);
+    if (upright.vertices.size() != tilted.vertices.size() || upright.vertices.empty() ||
+        !sameSize(uprightSize, slant.measuredSize())) return 20;
+    bool sawTilt=false;
+    for (size_t i=0; i<tilted.vertices.size(); i+=30) {
+        const auto& a=upright.vertices; const auto& b=tilted.vertices;
+        if (a[i+4] > .5f) {
+            if (!std::equal(a.begin()+i,a.begin()+i+30,b.begin()+i)) return 21;
+        } else {
+            if (b[i]-b[i+25] <= 0) return 22;
+            sawTilt=true;
+        }
+        // UVs and vertical positions are unchanged, including glyph cache reuse.
+        for (size_t j=i;j<i+30;j+=5)
+            for (size_t k=1;k<5;++k) if (a[j+k]!=b[j+k]) return 23;
+    }
+    if (!sawTilt) return 24;
+    slant.setFontItalic(false);
+    if (draw(slant,backend).vertices != upright.vertices) return 25;
+    if (std::filesystem::exists("C:/Windows/Fonts/timesi.ttf")) {
+        slant.setFontFamily("C:/Windows/Fonts/timesi.ttf"); slant.setText("Italic 中文");
+        const auto native=draw(slant,backend);
+        slant.setFontItalic(true); const auto mixed=draw(slant,backend);
+        if (native.vertices.size()!=mixed.vertices.size() || mixed.vertices.size()<30) return 26;
+        if (!std::equal(native.vertices.begin(),native.vertices.begin()+30,mixed.vertices.begin())) {
+            for(size_t i=0;i<30;++i) if(native.vertices[i]!=mixed.vertices[i])
+                std::cerr << "native italic changed field " << i << ": " << native.vertices[i] << " -> " << mixed.vertices[i] << '\n';
+            return 27;
+        }
+        if (native.vertices==mixed.vertices) return 28; // Chinese upright fallback now slants.
+    }
+
+    std::printf("text italic fallback: ALL PASS\n");
+    return 0;
+}
+
+int main(int argc, char** argv) {
     useDefaultAtlasStart();
     RecordingBackend backend;
     core::render::ScopedRenderBackend activeBackend(backend);
+    if (argc > 1 && std::string(argv[1]) == "--italic") return italicRegression(backend);
 
     core::TextPrimitive stable;
     if (!stable.initialize()) {
@@ -349,6 +396,37 @@ int main() {
         return 1;
     }
 
+    // Chip bounds must contain the actual fallback glyph quads, including the
+    // renderer's device-pixel rounding at fractional layout scales.
+    for (float scale : {1.0f, 1.25f, 1.5f}) {
+        core::TextPrimitive::setLayoutPixelScale(scale);
+        for (int weight : {400,700}) for (bool italic : {false,true}) {
+            core::TextStyle style;
+            style.text = "dfgdsf 中文测试 gy";
+            style.fontFamily = "monospace";
+            style.fontSize = 17;
+            style.fontWeight = weight;
+            style.fontItalic = italic;
+            const auto ink = core::TextPrimitive::measureSingleLineInk(style);
+            const auto warm = core::TextPrimitive::measureSingleLineInk(style);
+            if (!sameSize(ink,warm) || ink.y <= ink.x) return 2;
+            core::TextPrimitive rendered;
+            if (!rendered.initialize()) return 2;
+            style.fontSize *= scale;
+            rendered.setStyle(style);
+            const auto actual = draw(rendered,backend);
+            if (actual.vertices.empty()) return 2;
+            float top=actual.vertices[1],bottom=top;
+            for(std::size_t i=1;i<actual.vertices.size();i+=5) {
+                top=std::min(top,actual.vertices[i]); bottom=std::max(bottom,actual.vertices[i]);
+            }
+            if (std::fabs(top-ink.x*scale)>.51f || std::fabs(bottom-ink.y*scale)>.51f) {
+                std::cerr << "single-line ink does not match rendered fallback bounds\n";
+                return 2;
+            }
+        }
+    }
+    core::TextPrimitive::setLayoutPixelScale(1);
     std::printf("text atlas growth: ALL PASS\n");
     return 0;
 }

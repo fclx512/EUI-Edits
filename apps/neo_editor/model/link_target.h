@@ -5,9 +5,10 @@
 // 右键菜单（打开链接 / 编辑链接）共用同一份判定。
 //
 // URL 区间的口径：
-//   · [文字](url) / ![alt](src) —— closeMark 覆盖 "](url)"，URL = 去掉两端括号；
-//   · [[目标|别名]] / [[目标#小节]] —— URL = '|' 与 '#' 之前的部分（别名与小节
-//     不参与路径解析）；
+//   · [文字](url "title") / ![alt](<src> "title") —— 只取 destination，
+//     编辑区间保留外层尖括号、空白和 title；
+//   · [[目标#小节|别名]] —— 编辑区间只覆盖目标路径；navigationUrl 保留小节、
+//     去掉别名，供打开链接使用；
 //   · <autolink> —— closeMark 为空，content 就是 URL。
 
 #include "model/lp_plan.h"
@@ -25,6 +26,7 @@ struct LinkTarget {
     int urlBeg = 0;        // URL 部分的文档区间（"编辑链接"只替换这一段）
     int urlEnd = 0;
     std::string url;       // URL 原文（未解析、未解码）
+    std::string navigationUrl; // 打开目标；Wiki 保留 #小节，但不包含 |别名
 };
 
 inline LinkTarget linkTargetAt(const LpPlan& plan, const std::string& text, int byteIndex) {
@@ -56,19 +58,60 @@ inline LinkTarget linkTargetAt(const LpPlan& plan, const std::string& text, int 
         out.spanEnd = std::max(out.spanBeg, end);
         out.wikilink = span.kind == LpSpanKind::WikiLink;
         if (out.wikilink) {
-            out.urlBeg = std::max(0, span.content.beg);
-            int stop = std::min(static_cast<int>(text.size()), span.content.end);
-            for (int i = out.urlBeg; i < stop; ++i) {
-                const char ch = text[static_cast<std::size_t>(i)];
-                if (ch == '|' || ch == '#') {
-                    stop = i;
+            // md4c puts [[target| inside openMark and only the alias in content.
+            // Read the complete source span so both forms have the same target.
+            const int size = static_cast<int>(text.size());
+            out.urlBeg = std::clamp(span.openMark.beg + 2, 0, size);
+            const int targetEnd = std::clamp(span.closeMark.end - 2, out.urlBeg, size);
+            int navigationEnd = targetEnd;
+            for (int i = out.urlBeg; i < targetEnd; ++i) {
+                if (text[static_cast<std::size_t>(i)] == '|') {
+                    navigationEnd = i;
                     break;
                 }
             }
-            out.urlEnd = std::max(out.urlBeg, stop);
+            out.urlEnd = navigationEnd;
+            for (int i = out.urlBeg; i < navigationEnd; ++i) {
+                if (text[static_cast<std::size_t>(i)] == '#') {
+                    out.urlEnd = i;
+                    break;
+                }
+            }
+            out.navigationUrl = text.substr(static_cast<std::size_t>(out.urlBeg),
+                                            static_cast<std::size_t>(navigationEnd - out.urlBeg));
         } else if (span.closeMark.beg < span.closeMark.end &&
-                   span.closeMark.end - span.closeMark.beg >= 2) {
-            // "](url)"：URL 夹在 "](" 与 ")" 之间。
+                   span.closeMark.end - span.closeMark.beg >= 2 &&
+                   span.closeMark.beg >= 0 && span.closeMark.beg + 1 < static_cast<int>(text.size()) &&
+                   text[static_cast<std::size_t>(span.closeMark.beg)] == ']' &&
+                   text[static_cast<std::size_t>(span.closeMark.beg + 1)] == '(') {
+            // md4c has already recognized the span. Restrict the edit range to
+            // its destination; title and delimiters must survive replacement.
+            out.urlBeg = std::min(static_cast<int>(text.size()), span.closeMark.beg + 2);
+            const int limit = std::clamp(span.closeMark.end - 1, out.urlBeg,
+                                         static_cast<int>(text.size()));
+            const auto isSpace = [](char ch) {
+                return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+            };
+            while (out.urlBeg < limit && isSpace(text[static_cast<std::size_t>(out.urlBeg)]))
+                ++out.urlBeg;
+            const bool angled = out.urlBeg < limit && text[static_cast<std::size_t>(out.urlBeg)] == '<';
+            if (angled) ++out.urlBeg;
+            out.urlEnd = out.urlBeg;
+            while (out.urlEnd < limit) {
+                const char ch = text[static_cast<std::size_t>(out.urlEnd)];
+                if (angled ? ch == '>' : isSpace(ch)) break;
+                // Skip escaped punctuation while finding the closing '>'. Keep
+                // source bytes intact: urlBeg/urlEnd are used by the editor.
+                if (ch == '\\' && out.urlEnd + 1 < limit) {
+                    const unsigned char next = static_cast<unsigned char>(text[static_cast<std::size_t>(out.urlEnd + 1)]);
+                    if ((next >= '!' && next <= '/') || (next >= ':' && next <= '@') ||
+                        (next >= '[' && next <= '`') || (next >= '{' && next <= '~')) ++out.urlEnd;
+                }
+                ++out.urlEnd;
+            }
+        } else if (span.closeMark.end - span.closeMark.beg >= 2) {
+            // Reference-style links have no inline destination. Preserve their
+            // existing extraction until reference-definition resolution is added.
             out.urlBeg = std::min(static_cast<int>(text.size()), span.closeMark.beg + 2);
             out.urlEnd = std::clamp(span.closeMark.end - 1, out.urlBeg,
                                     static_cast<int>(text.size()));
@@ -80,6 +123,7 @@ inline LinkTarget linkTargetAt(const LpPlan& plan, const std::string& text, int 
         out.urlEnd = std::min(out.urlEnd, static_cast<int>(text.size()));
         out.url = text.substr(static_cast<std::size_t>(out.urlBeg),
                               static_cast<std::size_t>(std::max(0, out.urlEnd - out.urlBeg)));
+        if (!out.wikilink) out.navigationUrl = out.url;
         break;
     }
     return out;

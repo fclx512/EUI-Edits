@@ -11,7 +11,8 @@ param(
     [string]$Dumpbin,
     [string]$Generator,
     [ValidateRange(1, 32)][int]$Parallel = 2,
-    [switch]$PreflightOnly
+    [switch]$PreflightOnly,
+    [switch]$KeepBuildDirectories
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -36,6 +37,7 @@ $packageBuild = Join-Path $RunDirectory 'package-build'
 $receipt = [ordered]@{
     repository = $repo; version = $Version; started = (Get-Date).ToString('o')
     parallel = $Parallel; output = $OutputDirectory; status = 'RUNNING'; error = $null
+    keepBuildDirectories = [bool]$KeepBuildDirectories
     stages = @(); evidenceWarnings = @(); gui = 'NOT_RUN'; publication = 'NOT_RUN'
 }
 function Save-Receipt {
@@ -131,8 +133,10 @@ try {
         $receipt.status = 'READY_FOR_GUI'
         foreach ($build in @($checkBuild, $packageBuild)) {
             Preserve-BuildEvidence $build
-            $safeBuild = Assert-EuiRepositoryPath $build $RunDirectory 'Owned build tree'
-            Remove-Item -LiteralPath $safeBuild -Recurse -Force
+            if (-not $KeepBuildDirectories) {
+                $safeBuild = Assert-EuiRepositoryPath $build $RunDirectory 'Owned build tree'
+                Remove-Item -LiteralPath $safeBuild -Recurse -Force
+            }
         }
     }
 } catch {

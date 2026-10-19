@@ -189,6 +189,18 @@ inline void languageOverlay(eui::Ui& ui,AppState& state,const eui::Screen& scree
 // 原样保留。确认后排队 EditorCommand::EditLink，compose 里经 applyEditLink 落地
 // （撤销历史按一次编辑记录）。URL 区间在打开弹窗时已记进 pendingLinkBeg/End。
 inline void linkEditorOverlay(eui::Ui& ui, AppState& state, const eui::Screen& screen) {
+    // Start a fresh input session once per opening, including when the URL is
+    // unchanged. Ordinary recomposition must preserve the caret and preedit.
+    bool& wasOpen = ui.state<bool>("editor.linkedit.wasOpen");
+    if (state.linkEditorOpen && !wasOpen) {
+        using InputModel = components::input_detail::InputModel;
+        auto& input = ui.state<InputModel::InputState>("editor.linkedit.input");
+        InputModel::loadDocument(input, state.linkEditorUrl);
+        input.selectionStart = 0;
+        input.cursor = input.selectionEnd = static_cast<int>(input.text.size());
+        ui.requestFocus("editor.linkedit.input.hit");
+    }
+    wasOpen = state.linkEditorOpen;
     constexpr float kPanelWidth = 460.0f;
     constexpr float kPanelHeight = 176.0f;
     constexpr float kPad = 24.0f;
@@ -231,6 +243,8 @@ inline void linkEditorOverlay(eui::Ui& ui, AppState& state, const eui::Screen& s
                 .style(inputStyle)
                 .transition(quickTransition())
                 .onChange([&state](const std::string& value) { state.linkEditorUrl = value; })
+                .onEnter([&state] { confirmLinkEditor(state); })
+                .onEscape([&state] { cancelLinkEditor(state); })
                 .build();
 
             const float buttonY = kPanelHeight - 54.0f;
@@ -243,12 +257,7 @@ inline void linkEditorOverlay(eui::Ui& ui, AppState& state, const eui::Screen& s
                 .radius(6.0f)
                 .border(1.0f, tokens.border)
                 .shadow(0.0f, 0.0f, 0.0f, components::theme::color(0.0f, 0.0f, 0.0f, 0.0f))
-                .onClick([&state] {
-                    state.linkEditorOpen = false;
-                    state.pendingLinkBeg = -1;
-                    state.pendingLinkEnd = -1;
-                    app::requestUpdate();
-                })
+                .onClick([&state] { cancelLinkEditor(state); })
                 .build();
             components::button(ui, "editor.linkedit.primary")
                 .theme(tokens, true)
@@ -259,20 +268,11 @@ inline void linkEditorOverlay(eui::Ui& ui, AppState& state, const eui::Screen& s
                 .radius(6.0f)
                 .border(1.0f, components::theme::withAlpha(tokens.primary, 0.64f))
                 .shadow(10.0f, 0.0f, 3.0f, components::theme::withAlpha(tokens.primary, 0.18f))
-                .onClick([&state] {
-                    // 弹窗里的新 URL 在确认这一刻才装进命令载荷（URL 区间在菜单里
-                    // 点"编辑链接"时已记下；弹窗期间文档没被改过，区间仍然有效）。
-                    state.pendingLinkUrl = state.linkEditorUrl;
-                    state.pendingEditorCommand = EditorCommand::EditLink;
-                    state.linkEditorOpen = false;
-                    app::requestUpdate();
-                })
+                .onClick([&state] { confirmLinkEditor(state); })
                 .build();
         })
         .onOpenChange([&state](bool open) {
-            if (!open) {
-                state.linkEditorOpen = false;
-            }
+            if (!open) cancelLinkEditor(state);
         })
         .build();
 }

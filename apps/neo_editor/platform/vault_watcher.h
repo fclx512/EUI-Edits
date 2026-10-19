@@ -6,7 +6,7 @@
 
 namespace neo::platform {
 
-// 目录变更监视：后台线程用 ReadDirectoryChangesW 盯着 vault 根目录（含子树），
+// 目录变更监视：后台线程用 ReadDirectoryChangesW 只盯着当前 vault 根的直属条目，
 // 有变动就递增计数。UI 层每帧比对计数、防抖后重扫——文档库侧栏因此能实时反映
 // 外部对目录的增删改（外部编辑器/脚本写文件不用手动点刷新）。
 // 非 Windows 平台为空实现（计数恒 0，不启动线程）。

@@ -55,6 +55,8 @@ struct MarkdownStyle {
     core::Color accent;
     core::Color codeText;
     core::Color codeBackground;
+    core::Color inlineCodeBackground{0,0,0,0}, inlineCodeBorder{0,0,0,0};
+    float inlineCodeBorderWidth = 1, inlineCodeRadius = 3, inlineCodePadding = 2;
     core::Color quoteBackground;
     core::Color divider;
     std::string fontFamily;

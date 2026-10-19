@@ -733,6 +733,7 @@ inline std::uint64_t RuntimeRenderer::retainedElementPaintSignature(const Elemen
     seed = mix(seed, static_cast<std::uint64_t>(element.gradient.direction));
     seed = mix(seed, quant(element.fontSize));
     seed = mix(seed, static_cast<std::uint64_t>(element.fontWeight));
+    seed = mix(seed, element.fontItalic ? 1u : 0u);
     seed = mix(seed, quant(element.maxWidth));
     seed = mix(seed, quant(element.lineHeight));
     seed = mix(seed, element.wrap ? 1u : 0u);
@@ -1029,6 +1030,7 @@ inline void RuntimeRenderer::prepareText(
     instance.primitive->setFontFamily(instance.fontFamily);
     instance.primitive->setFontSize(toPixels(instance.fontSize, dpiScale));
     instance.primitive->setFontWeight(instance.fontWeight);
+    instance.primitive->setFontItalic(instance.fontItalic);
     instance.primitive->setMaxWidth(maxWidth);
     instance.primitive->setWrap(instance.wrap);
     instance.primitive->setHorizontalAlign(instance.horizontalAlign);
@@ -1081,6 +1083,7 @@ inline void RuntimeRenderer::renderText(
     instance.primitive->setFontFamily(instance.fontFamily);
     instance.primitive->setFontSize(toPixels(instance.fontSize, dpiScale));
     instance.primitive->setFontWeight(instance.fontWeight);
+    instance.primitive->setFontItalic(instance.fontItalic);
     instance.primitive->setMaxWidth(maxWidth);
     instance.primitive->setWrap(instance.wrap);
     instance.primitive->setHorizontalAlign(instance.horizontalAlign);

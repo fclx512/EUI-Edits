@@ -46,6 +46,11 @@ inline void closeFindBar(AppState& state) {
     state.findOpen = false;
     state.findOptionsOpen = false;
     state.pendingFindAction = FindAction::None;
+    state.findSelectionOnly = false;
+    state.findScope = state.findScopeCandidate = {};
+    state.findObservedSelectionStart = state.findObservedSelectionEnd = -1;
+    ++state.findScopeGeneration;
+    state.pendingFindRevealByte = -1;
     state.findEditorFocusPending = true;
     app::requestUpdate();
 }
@@ -69,9 +74,10 @@ inline void queueFindAction(AppState& state, FindAction action) {
 // Literal UTF-8 search. A byte sequence counts only when both ends fall on code
 // point boundaries; matches never overlap. Empty queries have no matches.
 inline std::vector<FindMatch> literalMatches(const std::string& text, const std::string& query,
-                                           bool matchCase = true, bool wholeWord = false) {
+                                           bool matchCase = true, bool wholeWord = false,
+                                           std::size_t begin = 0, std::size_t end = std::string::npos) {
     std::vector<FindMatch> matches;
-    for (const auto& match : search::matches(text, query, {matchCase, wholeWord}))
+    for (const auto& match : search::matches(text, query, {matchCase, wholeWord}, begin, end))
         matches.push_back({match.begin, match.end});
     return matches;
 }
@@ -110,40 +116,114 @@ inline void selectFindMatch(components::input_detail::InputModel::InputState& in
     input.selecting = false;
     input.hasPreferredCursorX = false;
     input.followCaret = true;
+    state.findObservedSelectionStart = input.selectionStart;
+    state.findObservedSelectionEnd = input.selectionEnd;
+}
+
+inline bool findRangeCurrent(const FindRange& range, const AppState& state,
+                             const components::input_detail::InputModel::InputState& input,
+                             bool verifyBytes) {
+    if (!range.valid || range.revision != state.revision || range.inputRevision != input.textRevision ||
+        range.documentBytes != state.doc.text.size() || range.documentBytes != input.text.size() ||
+        range.begin < 0 || range.end < range.begin || static_cast<std::size_t>(range.end) > input.text.size()) return false;
+    // Revisions cover normal edits, undo and external reload. Verify the actual
+    // selected bytes before search rebuild/actions too, without rescanning an
+    // unchanged selection on every idle frame.
+    if (!verifyBytes) return true;
+    const auto before = static_cast<std::size_t>(range.begin);
+    const auto after = static_cast<std::size_t>(range.end);
+    if (range.before.size() > before || range.after.size() > input.text.size() - after) return false;
+    const auto matches = [&](const std::string& text) {
+        return text.compare(range.begin, range.end - range.begin, range.text) == 0 &&
+            text.compare(before - range.before.size(), range.before.size(), range.before) == 0 &&
+            text.compare(after, range.after.size(), range.after) == 0;
+    };
+    return matches(input.text) && matches(state.doc.text);
+}
+
+inline FindRange captureFindRange(const AppState& state,
+                                 const components::input_detail::InputModel::InputState& input) {
+    FindRange range;
+    const int begin = std::min(input.selectionStart, input.selectionEnd);
+    const int end = std::max(input.selectionStart, input.selectionEnd);
+    const auto boundary = [&](int byte) {
+        return byte >= 0 && static_cast<std::size_t>(byte) <= input.text.size() &&
+            (static_cast<std::size_t>(byte) == input.text.size() ||
+             (static_cast<unsigned char>(input.text[byte]) & 0xC0) != 0x80);
+    };
+    if (begin >= end || !boundary(begin) || !boundary(end) || input.text != state.doc.text) return range;
+    range.valid = true; range.begin = begin; range.end = end;
+    range.revision = state.revision; range.inputRevision = input.textRevision;
+    range.documentBytes = input.text.size();
+    range.text = input.text.substr(begin, end - begin);
+    auto before = static_cast<std::size_t>(begin);
+    if (before) {
+        --before;
+        while (before && (static_cast<unsigned char>(input.text[before]) & 0xC0) == 0x80) --before;
+    }
+    range.before = input.text.substr(before, static_cast<std::size_t>(begin) - before);
+    const auto after = static_cast<std::size_t>(end) < input.text.size()
+        ? search::detail::decodeOne(input.text, end).end : static_cast<std::size_t>(end);
+    range.after = input.text.substr(end, after - end);
+    return range;
 }
 
 inline void refreshFindMatches(AppState& state,
                                components::input_detail::InputModel::InputState& input) {
-    if (state.findMatchesRevision == state.revision &&
+    const bool cached = state.findMatchesRevision == state.revision &&
+        state.findMatchesInputRevision == input.textRevision &&
+        state.findMatchesScopeGeneration == state.findScopeGeneration &&
         state.findMatchesQuery == state.findQuery &&
         state.findMatchesCase == state.findMatchCase &&
-        state.findMatchesWholeWord == state.findWholeWord) {
+        state.findMatchesWholeWord == state.findWholeWord;
+    if (state.findSelectionOnly && !findRangeCurrent(state.findScope, state, input,
+            !cached || state.pendingFindAction != FindAction::None)) {
+        const bool wasValid = state.findScope.valid;
+        state.findScope.valid = false;
+        state.findMatches.clear(); state.findCurrent = -1;
+        state.pendingFindAction = FindAction::None;
+        state.pendingFindRevealByte = -1;
+        state.findNotice = i18n::tr("find.scope_invalid");
+        if (wasValid) showToast(state, i18n::tr("find.selection_scope"), state.findNotice);
         return;
     }
+    if (cached) return;
     const bool queryChanged = state.findMatchesQuery != state.findQuery ||
         state.findMatchesCase != state.findMatchCase || state.findMatchesWholeWord != state.findWholeWord;
     const int selectedBeg = std::min(input.selectionStart, input.selectionEnd);
     const int selectedEnd = std::max(input.selectionStart, input.selectionEnd);
     int searchStart = input.cursor;
+    bool selectedPreviousMatch = false;
     if (state.findCurrent >= 0 && state.findCurrent < static_cast<int>(state.findMatches.size())) {
         const auto& previous = state.findMatches[static_cast<std::size_t>(state.findCurrent)];
-        if (previous.begin == selectedBeg && previous.end == selectedEnd) searchStart = selectedBeg;
+        selectedPreviousMatch = previous.begin == selectedBeg && previous.end == selectedEnd;
+        if (selectedPreviousMatch) searchStart = selectedBeg;
     }
     state.findNotice.clear();
-    state.findMatches = literalMatches(state.doc.text, state.findQuery, state.findMatchCase, state.findWholeWord);
+    state.findMatches = literalMatches(state.doc.text, state.findQuery, state.findMatchCase, state.findWholeWord,
+        state.findSelectionOnly ? static_cast<std::size_t>(state.findScope.begin) : 0,
+        state.findSelectionOnly ? static_cast<std::size_t>(state.findScope.end) : std::string::npos);
     state.findMatchesRevision = state.revision;
+    state.findMatchesInputRevision = input.textRevision;
+    state.findMatchesScopeGeneration = state.findScopeGeneration;
     state.findMatchesQuery = state.findQuery;
     state.findMatchesCase = state.findMatchCase;
     state.findMatchesWholeWord = state.findWholeWord;
     if (state.findMatches.empty()) {
         state.findCurrent = -1;
-        input.selectionStart = input.cursor;
-        input.selectionEnd = input.cursor;
+        // A query change may dismiss its old highlighted match. Document edits
+        // and undo, however, own their selection even when search finds nothing.
+        if (queryChanged && selectedPreviousMatch) {
+            input.selectionStart = input.cursor;
+            input.selectionEnd = input.cursor;
+        }
         return;
     }
     for (std::size_t i = 0; i < state.findMatches.size(); ++i) {
         if (state.findMatches[i].begin == selectedBeg && state.findMatches[i].end == selectedEnd) {
             state.findCurrent = static_cast<int>(i);
+            state.findObservedSelectionStart = input.selectionStart;
+            state.findObservedSelectionEnd = input.selectionEnd;
             return;
         }
     }
@@ -163,6 +243,14 @@ inline void commitFindTextChange(AppState& state,
     }
     state.doc.text = input.text;
     ++state.revision;
+    if (state.findSelectionOnly && state.findScope.valid) {
+        auto& scope = state.findScope;
+        scope.end += static_cast<int>(input.text.size()) - static_cast<int>(scope.documentBytes);
+        scope.documentBytes = input.text.size();
+        scope.revision = state.revision; scope.inputRevision = input.textRevision;
+        scope.text = input.text.substr(scope.begin, scope.end - scope.begin);
+        state.findScopeCandidate = {};
+    }
     state.recovered = false;
     maybeWriteRecovery(state);
     state.findMatchesRevision = static_cast<unsigned long long>(-1);
@@ -173,6 +261,27 @@ inline void commitFindTextChange(AppState& state,
 inline void applyFindState(eui::Ui& ui, AppState& state) {
     using InputModel = components::input_detail::InputModel;
     auto& input = ui.state<InputModel::InputState>(editorInputId(state));
+    if (!state.findOpen) return;
+    // Remember selections produced by this call. Manual drag frames need no
+    // snapshot copy: capture the final range only before an action/query update
+    // could consume it, or before the initial prefill selects a search result.
+    struct SelectionObserver {
+        AppState& state; InputModel::InputState& input;
+        int begin, end;
+        ~SelectionObserver() {
+            if (begin != input.selectionStart || end != input.selectionEnd) {
+                state.findObservedSelectionStart = input.selectionStart;
+                state.findObservedSelectionEnd = input.selectionEnd;
+            }
+        }
+    } observer{state, input, input.selectionStart, input.selectionEnd};
+    const bool searchMaySelect = state.pendingFindAction != FindAction::None ||
+        state.findMatchesQuery != state.findQuery || state.findMatchesCase != state.findMatchCase ||
+        state.findMatchesWholeWord != state.findWholeWord;
+    if (state.findPrefillSelection || (searchMaySelect &&
+        (input.selectionStart != state.findObservedSelectionStart || input.selectionEnd != state.findObservedSelectionEnd))) {
+        state.findScopeCandidate = captureFindRange(state, input);
+    }
     if (state.findPrefillSelection) {
         state.findPrefillSelection = false;
         const int begin = std::min(input.selectionStart, input.selectionEnd);
@@ -185,13 +294,51 @@ inline void applyFindState(eui::Ui& ui, AppState& state) {
             }
         }
     }
-    if (!state.findOpen) {
+    bool selectionScopeChanged = false;
+    if (state.pendingFindAction == FindAction::SelectionScope) {
+        state.pendingFindAction = FindAction::None;
+        if (!input.compositionText.empty()) return;
+        if (!findRangeCurrent(state.findScopeCandidate, state, input, true)) {
+            state.findNotice = i18n::tr("find.scope_empty");
+            showToast(state, i18n::tr("find.selection_scope"), state.findNotice);
+            return;
+        }
+        state.findSelectionOnly = true;
+        state.findScope = std::move(state.findScopeCandidate);
+        state.findScopeCandidate = {};
+        ++state.findScopeGeneration;
+        state.findMatchesRevision = static_cast<unsigned long long>(-1);
+        input.cursor = input.selectionStart = input.selectionEnd = input.dragAnchor = state.findScope.begin;
+        selectionScopeChanged = true;
+    } else if (state.pendingFindAction == FindAction::DocumentScope) {
+        state.pendingFindAction = FindAction::None;
+        state.findSelectionOnly = false; state.findScope = {};
+        ++state.findScopeGeneration;
+    }
+    if (!input.compositionText.empty()) {
+        state.pendingFindAction = FindAction::None;
         return;
     }
     refreshFindMatches(state, input);
+    if (selectionScopeChanged && !state.findMatches.empty()) {
+        selectFindMatch(input, state, state.findCurrent >= 0 ? state.findCurrent : 0);
+    }
     const FindAction action = state.pendingFindAction;
     state.pendingFindAction = FindAction::None;
     if (action == FindAction::None || state.findMatches.empty()) {
+        return;
+    }
+    // Refuse a stale model/app pairing before a destructive action even when a
+    // caller bypassed revision updates. Never overwrite an external value.
+    if ((action == FindAction::ReplaceOne || action == FindAction::ReplaceAll) && input.text != state.doc.text) {
+        if (state.findSelectionOnly) {
+            state.findScope.valid = false;
+            state.findNotice = i18n::tr("find.scope_invalid");
+            showToast(state, i18n::tr("find.selection_scope"), state.findNotice);
+        }
+        state.findMatches.clear(); state.findCurrent = -1;
+        state.pendingFindRevealByte = -1;
+        state.findMatchesRevision = static_cast<unsigned long long>(-1);
         return;
     }
     const int count = static_cast<int>(state.findMatches.size());
@@ -225,15 +372,21 @@ inline void applyFindState(eui::Ui& ui, AppState& state) {
 
     const unsigned long long beforeRevision = input.textRevision;
     if (action == FindAction::ReplaceOne) {
-        if (state.findCurrent < 0 || state.findCurrent >= count) {
+        // Moving the document caret/selection does not invalidate the text
+        // match cache. Resolve the live selection rather than its old index.
+        const int selectedBeg = std::min(input.selectionStart, input.selectionEnd);
+        const int selectedEnd = std::max(input.selectionStart, input.selectionEnd);
+        const auto selected = std::lower_bound(state.findMatches.begin(), state.findMatches.end(), selectedBeg,
+            [](const FindMatch& match, int offset) { return match.begin < offset; });
+        if (selected == state.findMatches.end() || selected->begin != selectedBeg || selected->end != selectedEnd) {
+            const int next = findAtOrAfter(state.findMatches, input.cursor, state.findWrap);
+            state.findNotice.clear();
+            selectFindMatch(input, state, next);
+            if (next < 0) state.findNotice = i18n::tr("find.at_last");
             return;
         }
-        const FindMatch match = state.findMatches[static_cast<std::size_t>(state.findCurrent)];
-        if (std::min(input.selectionStart, input.selectionEnd) != match.begin ||
-            std::max(input.selectionStart, input.selectionEnd) != match.end) {
-            selectFindMatch(input, state, state.findCurrent);
-            return;
-        }
+        state.findCurrent = static_cast<int>(selected - state.findMatches.begin());
+        const FindMatch match = *selected;
         InputModel::beginEdit(input, match.begin, match.end);
         input.text.replace(static_cast<std::size_t>(match.begin),
                            static_cast<std::size_t>(match.end - match.begin), state.findReplacement);
@@ -295,9 +448,11 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
     const float fieldX = 8.0f + expandWidth + 4.0f;
     const float fieldWidth = std::max(24.0f, width - fieldX - actionsWidth - 12.0f);
     const float navX = fieldX + fieldWidth + 4.0f;
-    const std::string count = (state.findCurrent < 0 ? "0" : std::to_string(state.findCurrent+1))+
+    const std::string count = (state.findSelectionOnly ? std::string(state.findScope.valid ?
+        i18n::tr("find.selection_count") : i18n::tr("find.scope_invalid_short")) + " " : std::string{}) +
+                             (state.findCurrent < 0 ? "0" : std::to_string(state.findCurrent+1))+
                              " / "+std::to_string(state.findMatches.size());
-    const float countWidth = !state.findQuery.empty() && fieldWidth >= 180
+    const float countWidth = ((state.findSelectionOnly && fieldWidth >= 96) || (!state.findQuery.empty() && fieldWidth >= 180))
         ? std::min(fieldWidth*.4f, core::TextPrimitive::measureTextWidth(count, uiFontFamily(state), fontSize)+12)
         : 0;
     components::InputStyle inputStyle(colors.tokens);
@@ -342,7 +497,8 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
                    });
         components::input(ui, kFindQueryInputId).position(fieldX, top)
             .size(fieldWidth-(countWidth > 0 ? countWidth+4 : 0), fieldHeight)
-            .value(state.findQuery).placeholder(i18n::tr("find.find")).fontSize(fontSize)
+            .value(state.findQuery).placeholder(state.findSelectionOnly ?
+                i18n::tr("find.selection_scope") : i18n::tr("find.find")).fontSize(fontSize)
             .fontFamily(uiFontFamily(state)).inset(10).style(inputStyle)
             .onChange([&state](const std::string& value) { state.findQuery = value; })
             .onEnter([&state] { queueFindAction(state, FindAction::Next); })
@@ -408,12 +564,16 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
         .size(std::max(210.0f, fontSize*12+40), fontSize+18)
         .items(std::vector<Item>{Item(i18n::tr("find.case")).withChecked(state.findMatchCase),
                                 Item(i18n::tr("find.whole_word")).withChecked(state.findWholeWord),
-                                Item(i18n::tr("find.wrap")).withChecked(state.findWrap)})
+                                Item(i18n::tr("find.wrap")).withChecked(state.findWrap),
+                                Item(i18n::tr("find.document_scope")).withChecked(!state.findSelectionOnly),
+                                Item(i18n::tr("find.selection_scope")).withChecked(state.findSelectionOnly)})
         .zIndex(1050).onSelectPath([&state](const std::vector<int>& path) {
             if (path.empty()) return;
             if (path[0] == 0) state.findMatchCase = !state.findMatchCase;
             if (path[0] == 1) state.findWholeWord = !state.findWholeWord;
             if (path[0] == 2) state.findWrap = !state.findWrap;
+            if (path[0] == 3) state.pendingFindAction = FindAction::DocumentScope;
+            if (path[0] == 4) state.pendingFindAction = FindAction::SelectionScope;
             state.findNotice.clear();
             state.findOptionsOpen = false;
             app::requestUpdate();

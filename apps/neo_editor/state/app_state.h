@@ -63,7 +63,7 @@ enum class VaultPromptKind { None = 0, NewFile, NewFolder, Rename };
 // 设置面板的第二页：None = 正常设置项，其余 = 正在给哪个目标挑字体。
 enum class FontPickerTarget { None = 0, Editor, Code, Ui };
 enum class SettingsCategory { Appearance = 0, Editor, FileSystem, About };
-enum class FindAction { None = 0, Next, Previous, ReplaceOne, ReplaceAll };
+enum class FindAction { None = 0, Next, Previous, ReplaceOne, ReplaceAll, SelectionScope, DocumentScope };
 
 struct OutlineEntry {
     std::string title;
@@ -119,8 +119,33 @@ struct VaultContext {
     unsigned long long outlinePlanVersion = static_cast<unsigned long long>(-1);
     float outlineScroll = 0.0f;
     int pendingOutlineJumpByte = -1;
+    unsigned long long pendingLinkJumpRevision = static_cast<unsigned long long>(-1);
+    bool linkAnchorPending = false;
+    std::string pendingLinkAnchor;
+    std::uint64_t pendingLinkTabId = 0;
+    std::string pendingLinkPath;
     int outlineCurrentByte = -1;
 
+    void cancelLinkAnchor() {
+        linkAnchorPending = false;
+        pendingLinkAnchor.clear();
+        pendingLinkTabId = 0;
+        pendingLinkPath.clear();
+        pendingOutlineJumpByte = -1;
+        pendingLinkJumpRevision = static_cast<unsigned long long>(-1);
+    }
+
+};
+
+// Source-byte selection snapshots. A foreign edit invalidates the range rather
+// than silently broadening a queued replacement to the document.
+struct FindRange {
+    bool valid = false;
+    int begin = 0, end = 0;
+    unsigned long long revision = 0, inputRevision = 0;
+    std::size_t documentBytes = 0;
+    std::string text;
+    std::string before, after; // Adjacent code points used by whole-word search.
 };
 
 struct DocumentSession : VaultContext {
@@ -183,6 +208,11 @@ struct DocumentSession : VaultContext {
     bool findMatchCase = false;
     bool findWholeWord = false;
     bool findWrap = true;
+    bool findSelectionOnly = false;
+    FindRange findScope, findScopeCandidate;
+    int findObservedSelectionStart = -1, findObservedSelectionEnd = -1;
+    unsigned long long findScopeGeneration = 0, findMatchesScopeGeneration = 0;
+    unsigned long long findMatchesInputRevision = static_cast<unsigned long long>(-1);
     bool findMatchesCase = false;
     bool findMatchesWholeWord = false;
     std::string findNotice;
@@ -220,6 +250,7 @@ struct DocumentSession : VaultContext {
     int wrapOverride = -1;
     std::string language() const { return languageOverride.empty() ? (path.empty() ? newDocumentLanguage : filetypes::detect(path).language) : languageOverride; }
     bool markdownCapable() const { return language() == "markdown"; }
+    bool writingCapable() const { const auto lang = language(); return lang == "markdown" || lang == "text"; }
     bool sourceView() const { return filetypes::source(language()); }
     bool wordWrap() const { return wrapOverride < 0 ? !sourceView() : wrapOverride != 0; }
 };
@@ -310,6 +341,11 @@ struct AppState : DocumentSession {
     // 限制行宽（Obsidian 的"可读行宽"）：内容列收窄到 43.75em（700px @ 16）并居中，
     // 左右留白换阅读性。落盘到 settings.ini 的 readable_width。默认开（与 Obsidian 一致）。
     bool readableWidth = true;
+    // Session preferences, effective only for Markdown documents.
+    bool markdownTypewriter = false;
+    bool markdownImmersive = false;
+    bool markdownHeadingMenuOpen = false;
+    bool markdownOutlineOpen = false;
     // 界面动画（悬停/按压配色过渡、按压缩放等反馈动画）。落盘到 settings.ini 的
     // animations；首启值取自系统"动画效果"设置。关闭后界面即时响应、不产生过渡帧。
     bool animations = true;
@@ -415,12 +451,33 @@ struct AppState : DocumentSession {
     std::string associationSearch;
     int associationCategory = 0;
     bool associationSelectionLoaded = false;
+    bool associationManagementOpen = false;
     std::vector<std::string> associationSelected;
     std::vector<fileassoc::TypeStatus> associationStatuses;
 };
 
 inline std::string editorInputId(std::uint64_t id) { return std::string("editor.input.") + std::to_string(id); }
 inline std::string editorInputId(const DocumentSession& document) { return editorInputId(document.tabId); }
+
+inline void cancelLinkEditor(AppState& state) {
+    if (!state.linkEditorOpen) return;
+    state.linkEditorOpen = false;
+    state.pendingLinkBeg = state.pendingLinkEnd = -1;
+    state.pendingLinkUrl.clear();
+    state.findEditorFocusPending = true;
+    app::requestUpdate();
+}
+
+inline void confirmLinkEditor(AppState& state) {
+    if (!state.linkEditorOpen) return;
+    // Keep the source range until compose applies this one queued edit.
+    state.pendingLinkUrl = state.linkEditorUrl;
+    state.pendingEditorCommand = EditorCommand::EditLink;
+    state.linkEditorOpen = false;
+    state.findEditorFocusPending = true;
+    app::requestUpdate();
+}
+
 // Shared persistence funnel; implementation keeps all dirty tabs in independent recovery files.
 bool persistDocumentSession(AppState& state);
 // 退出屏障：提交最终会话并等待 commit ack（有界超时，只在关闭/退出路径用）。
@@ -918,6 +975,9 @@ inline bool insertBlockTemplate(components::input_detail::InputModel::InputState
     using InputModel = components::input_detail::InputModel;
     if (kind == 3) {
         return applyLinePrefix(input, "> ", false);
+    }
+    if (kind == 7) {
+        return applyLinePrefix(input, "- [ ] ", false);
     }
     const int cursor = input.cursor;
     const bool atLineStart = cursor == 0 || input.text[static_cast<std::size_t>(cursor - 1)] == '\n';

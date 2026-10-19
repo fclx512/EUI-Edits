@@ -70,9 +70,23 @@ bool replaceTarget(const fs::path& temporary, const fs::path& target) {
 #endif
 }
 
-} // namespace
+bool publishNewTarget(const fs::path& temporary, const fs::path& target) {
+#if defined(_WIN32)
+    // Without REPLACE_EXISTING, MoveFileExW fails if another writer has already
+    // claimed target. Both paths are in the same directory, so no copy fallback.
+    return ::MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    // POSIX rename replaces an existing target. link claims the directory entry
+    // atomically with EEXIST on collision, then the temporary name is removed.
+    // If hard links are unsupported, fail closed instead of overwriting target.
+    if (::link(temporary.c_str(), target.c_str()) != 0) return false;
+    ::unlink(temporary.c_str());
+    return true;
+#endif
+}
 
-bool writeFile(const fs::path& target, std::string_view content, const std::function<bool()>& beforeReplace) {
+bool writeFileImpl(const fs::path& target, std::string_view content,
+                   const std::function<bool()>& beforePublish, bool createOnly) {
     const fs::path temporary = temporaryPathFor(target);
     const auto abandon = [&temporary]() {
         removeQuietly(temporary);
@@ -102,11 +116,22 @@ bool writeFile(const fs::path& target, std::string_view content, const std::func
     if (g_failBeforeReplace.load(std::memory_order_relaxed)) {
         return abandon();
     }
-    if (beforeReplace && !beforeReplace()) return abandon();
-    if (!replaceTarget(temporary, target)) {
+    if (beforePublish && !beforePublish()) return abandon();
+    if (!(createOnly ? publishNewTarget(temporary, target) : replaceTarget(temporary, target))) {
         return abandon();
     }
     return true;
+}
+
+} // namespace
+
+bool writeFile(const fs::path& target, std::string_view content, const std::function<bool()>& beforeReplace) {
+    return writeFileImpl(target, content, beforeReplace, false);
+}
+
+bool writeFileCreateOnly(const fs::path& target, std::string_view content,
+                         const std::function<bool()>& beforePublish) {
+    return writeFileImpl(target, content, beforePublish, true);
 }
 
 void testing::failBeforeReplace(bool enabled) {

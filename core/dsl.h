@@ -131,6 +131,7 @@ struct Element {
     std::string fontFamily;
     float fontSize = 16.0f;
     int fontWeight = 400;
+    bool fontItalic = false;
     Color textColor = {1.0f, 1.0f, 1.0f, 1.0f};
     float maxWidth = 0.0f;
     bool wrap = false;
@@ -1170,6 +1171,10 @@ public:
         return *this;
     }
 
+    TextBuilder& fontItalic(bool value = true) {
+        element_->fontItalic = value;
+        return *this;
+    }
     TextBuilder& fontWeight(int value) {
         element_->fontWeight = value;
         return *this;
@@ -1682,6 +1687,7 @@ private:
             style.fontFamily = element.fontFamily;
             style.fontSize = element.fontSize;
             style.fontWeight = element.fontWeight;
+            style.fontItalic = element.fontItalic;
             style.maxWidth = element.maxWidth;
             style.wrap = element.wrap;
             style.lineHeight = element.lineHeight;

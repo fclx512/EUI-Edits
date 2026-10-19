@@ -15,7 +15,8 @@ enum class UiIcon {
     None, Search, Outline, File, TextFile, MarkdownFile, CodeFile, DataFile,
     ChevronRight, ChevronDown, Previous, Next, Close, Replace,
     Folder, FolderOpen, ArrowLeft, ArrowRight,
-    Globe, List, Font, Settings, Plus, Minus, Check, Info, Warning, Sliders
+    Globe, List, Font, Settings, Plus, Minus, Check, Info, Warning, Sliders,
+    Heading, Bold, Italic, Link, Image, Task, Table, Code, Typewriter, Focus, Maximize, Restore
 };
 
 
@@ -94,6 +95,62 @@ inline void iconView(eui::Ui& ui, const std::string& id, UiIcon icon,
             else if (kind == UiIcon::File) rules(document_icon::fileRules, document_icon::ruleThickness);
         };
         switch (icon) {
+            case UiIcon::Heading:
+                line(4, 5, 4, 19); line(14, 5, 14, 19); line(4, 12, 14, 12);
+                line(18, 14, 20, 12); line(20, 12, 20, 20); break;
+            case UiIcon::Bold:
+                // One consistent weight, rounded bowls and joined stroke ends.
+                stroke(6, 4, 6, 20, 2.2f);
+                for (int bowl = 0; bowl < 2; ++bowl) {
+                    const float cy = bowl == 0 ? 8.0f : 16.0f;
+                    const float rx = bowl == 0 ? 4.5f : 5.5f;
+                    stroke(6, cy-4, 12, cy-4, 2.2f);
+                    stroke(6, cy+4, 12, cy+4, 2.2f);
+                    float px=12, py=cy-4;
+                    for (int step=1; step<=12; ++step) {
+                        const float a=-1.5707963f + step*3.1415926f/12;
+                        const float nx=12+rx*std::cos(a), ny=cy+4*std::sin(a);
+                        stroke(px,py,nx,ny,2.2f);
+                        dot("bold.join."+std::to_string(bowl)+"."+std::to_string(step),nx,ny,2.2f);
+                        px=nx; py=ny;
+                    }
+                }
+                break;
+            case UiIcon::Italic:
+                line(10, 4, 20, 4); line(4, 20, 14, 20); line(15, 4, 9, 20); break;
+            case UiIcon::Link:
+                line(9, 15, 15, 9); line(6, 10, 3, 13); line(3, 13, 3, 17);
+                line(3, 17, 7, 21); line(7, 21, 11, 21); line(11, 21, 14, 18);
+                line(10, 6, 13, 3); line(13, 3, 17, 3); line(17, 3, 21, 7);
+                line(21, 7, 21, 11); line(21, 11, 18, 14); break;
+            case UiIcon::Task:
+                line(19, 12, 19, 20); line(19, 20, 4, 20); line(4, 20, 4, 5);
+                line(4, 5, 13, 5); line(9, 10, 13, 14); line(13, 14, 21, 4); break;
+            case UiIcon::Table:
+                line(3, 4, 21, 4); line(21, 4, 21, 20); line(21, 20, 3, 20);
+                line(3, 20, 3, 4); line(3, 10, 21, 10); line(3, 15, 21, 15);
+                line(9, 4, 9, 20); line(15, 4, 15, 20); break;
+            case UiIcon::Image:
+                stroke(3,4,21,4,1.7f); stroke(21,4,21,20,1.7f);
+                stroke(21,20,3,20,1.7f); stroke(3,20,3,4,1.7f);
+                stroke(4,18,10,11,1.7f); stroke(10,11,15,16,1.7f); stroke(15,16,18,13,1.7f);
+                stroke(18,13,20,16,1.7f); dot("sun", 16.5f, 8.0f, 3.4f); break;
+            case UiIcon::Code:
+                line(7, 6, 2, 12); line(2, 12, 7, 18); line(17, 6, 22, 12);
+                line(22, 12, 17, 18); line(14, 3, 10, 21); break;
+            case UiIcon::Typewriter:
+                line(3, 4, 21, 4); line(3, 20, 21, 20); line(4, 12, 20, 12);
+                line(1, 9, 4, 12); line(4, 12, 1, 15); line(23, 9, 20, 12);
+                line(20, 12, 23, 15); break;
+            case UiIcon::Focus:
+                line(3, 9, 3, 3); line(3, 3, 9, 3); line(15, 3, 21, 3);
+                line(21, 3, 21, 9); line(21, 15, 21, 21); line(21, 21, 15, 21);
+                line(9, 21, 3, 21); line(3, 21, 3, 15); break;
+            case UiIcon::Maximize:
+                line(5, 5, 19, 5); line(19, 5, 19, 19); line(19, 19, 5, 19); line(5, 19, 5, 5); break;
+            case UiIcon::Restore:
+                line(8, 4, 20, 4); line(20, 4, 20, 16); line(5, 8, 16, 8);
+                line(16, 8, 16, 20); line(16, 20, 5, 20); line(5, 20, 5, 8); break;
             case UiIcon::None: break;
             case UiIcon::Search:
                 ui.rect(id + ".ring").position(4*scale, 4*scale).size(12*scale, 12*scale)

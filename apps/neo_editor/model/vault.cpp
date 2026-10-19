@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <atomic>
+#include <mutex>
 #include <system_error>
 
 #if defined(_WIN32)
@@ -16,6 +18,18 @@
 #endif
 
 namespace neo::vault {
+struct PageCursor {
+    std::filesystem::directory_iterator iterator;
+    std::mutex mutex;
+    std::atomic<bool> closed{false};
+    void requestClose() {
+        closed.store(true, std::memory_order_relaxed);
+        if (mutex.try_lock()) {
+            iterator = {};
+            mutex.unlock();
+        }
+    }
+};
 namespace {
 
 namespace fs = std::filesystem;
@@ -54,22 +68,40 @@ void appendWarning(ScanResult& result, const std::string& relative,
     result.warning += i18n::format("vault.scan_error", {{"path", relative.empty() ? i18n::tr("vault.root") : relative}, {"error", error.message()}});
 }
 
-bool readDirectory(const fs::path& directory,
-                   const std::string& relative,
-                   ScanResult& result,
-                   std::vector<Entry>& out) {
-    std::vector<Entry> directories;
-    std::vector<Entry> files;
+bool entryLess(const Entry& left, const Entry& right) {
+    if (left.isDir != right.isDir) return left.isDir;
+    const std::string leftLower = toLowerAscii(left.name);
+    const std::string rightLower = toLowerAscii(right.name);
+    return leftLower == rightLower ? left.name < right.name : leftLower < rightLower;
+}
 
-    std::error_code iteratorError;
-    fs::directory_iterator iterator(directory, fs::directory_options::none, iteratorError);
-    if (iteratorError) {
-        appendWarning(result, relative, iteratorError);
+bool readDirectoryPage(const fs::path& directory, const std::string& relative,
+                       std::shared_ptr<PageCursor> cursor,
+                       const std::function<bool()>& cancelled, ScanResult& result) {
+    if (!cursor) {
+        cursor = std::make_shared<PageCursor>();
+        std::error_code iteratorError;
+        cursor->iterator = fs::directory_iterator(directory, fs::directory_options::none, iteratorError);
+        if (iteratorError) {
+            appendWarning(result, relative, iteratorError);
+            return false;
+        }
+    }
+    std::lock_guard<std::mutex> cursorGuard(cursor->mutex);
+    if (cursor->closed.load(std::memory_order_relaxed)) {
+        result.cancelled = true;
+        cursor->iterator = {};
         return false;
     }
-
-    while (iterator != fs::directory_iterator{}) {
-        const fs::directory_entry item = *iterator;
+    std::size_t examined = 0;
+    while (cursor->iterator != fs::directory_iterator{} && examined < kPageSize) {
+        if ((cancelled && cancelled()) || cursor->closed.load(std::memory_order_relaxed)) {
+            result.cancelled = true;
+            if (cursor->closed.load(std::memory_order_relaxed)) cursor->iterator = {};
+            return false;
+        }
+        const fs::directory_entry item = *cursor->iterator;
+        ++examined;
         std::error_code entryError;
         const std::string name = textfile::pathToUtf8(item.path().filename());
         bool directoryLink = false;
@@ -118,24 +150,22 @@ bool readDirectory(const fs::path& directory,
             entry.name = name;
             entry.relative = joinRelative(relative, name);
             entry.isDir = true;
-            // A directory link is listed as a leaf. Following links can escape the
-            // chosen tree or form cycles; ordinary directories are scanned completely.
-            if (!directoryLink) readDirectory(item.path(), entry.relative, result, entry.children);
-            ++result.directoryCount;
-            directories.push_back(std::move(entry));
+            // Link-like directories are leaves. Ordinary directories stay unopened.
+            entry.childrenLoaded = directoryLink;
+            entry.linkLeaf = directoryLink;
+            result.roots.push_back(std::move(entry));
         } else if (!name.empty() && !entryError && (regularEntry || item.is_regular_file(entryError))) {
             Entry entry;
             entry.name = name;
             entry.relative = joinRelative(relative, name);
             entry.isDir = false;
-            ++result.fileCount;
-            files.push_back(std::move(entry));
+            result.roots.push_back(std::move(entry));
         }
 
         // Use the error-code overload so one unreadable entry does not abort the
         // remaining siblings. Permission-denied directories remain visible above.
         std::error_code incrementError;
-        iterator.increment(incrementError);
+        cursor->iterator.increment(incrementError);
         if (incrementError) {
             // The iterator cannot reliably continue after this error. Keep the
             // entries already found and surface the partial result to the UI.
@@ -144,17 +174,18 @@ bool readDirectory(const fs::path& directory,
         }
     }
 
-    const auto byName = [](const Entry& left, const Entry& right) {
-        const std::string leftLower = toLowerAscii(left.name);
-        const std::string rightLower = toLowerAscii(right.name);
-        return leftLower == rightLower ? left.name < right.name : leftLower < rightLower;
-    };
-    std::sort(directories.begin(), directories.end(), byName);
-    std::sort(files.begin(), files.end(), byName);
-
-    out.reserve(directories.size() + files.size());
-    out.insert(out.end(), std::make_move_iterator(directories.begin()), std::make_move_iterator(directories.end()));
-    out.insert(out.end(), std::make_move_iterator(files.begin()), std::make_move_iterator(files.end()));
+    if (cursor->closed.load(std::memory_order_relaxed)) {
+        result.cancelled = true;
+        cursor->iterator = {};
+        return false;
+    }
+    result.hasMore = cursor->iterator != fs::directory_iterator{};
+    if (result.hasMore) result.cursor = std::move(cursor);
+    std::sort(result.roots.begin(), result.roots.end(), entryLess);
+    for (const auto& entry : result.roots) {
+        if (entry.isDir) ++result.directoryCount;
+        else ++result.fileCount;
+    }
     return true;
 }
 
@@ -172,6 +203,9 @@ void appendRows(const std::vector<Entry>& entries,
         rows.push_back(std::move(row));
         if (entry.isDir && expanded.count(entry.relative) > 0) {
             appendRows(entry.children, expanded, depth + 1, rows);
+            if (entry.hasMore || entry.cacheLimitReached || !entry.pageError.empty())
+                rows.push_back({{}, entry.relative, depth + 1, false, false, true,
+                                entry.cacheLimitReached, entry.pageError});
         }
     }
 }
@@ -198,6 +232,32 @@ void appendFilteredFiles(const std::vector<Entry>& entries,
 } // namespace
 
 ScanResult scan(const std::string& root) {
+    return scanPage(root, {});
+}
+
+void closeCursors(const ScanResult& result) {
+    if (result.cursor) result.cursor->requestClose();
+    const auto closeChildren = [&](const auto& self, const std::vector<Entry>& entries) -> void {
+        for (const auto& entry : entries) {
+            if (entry.cursor) entry.cursor->requestClose();
+            self(self, entry.children);
+        }
+    };
+    closeChildren(closeChildren, result.roots);
+}
+
+void closeCursors(const Entry& entry) {
+    if (entry.cursor) entry.cursor->requestClose();
+    for (const auto& child : entry.children) closeCursors(child);
+}
+
+void closeCursor(const std::shared_ptr<PageCursor>& cursor) {
+    if (cursor) cursor->requestClose();
+}
+
+ScanResult scanPage(const std::string& root, const std::string& relative,
+                    std::shared_ptr<PageCursor> cursor,
+                    const std::function<bool()>& cancelled) {
     ScanResult result;
     if (root.empty()) {
         result.error = i18n::tr("vault.no_directory");
@@ -211,7 +271,9 @@ ScanResult scan(const std::string& root) {
         return result;
     }
 
-    if (!readDirectory(rootPath, {}, result, result.roots)) {
+    if (!readDirectoryPage(relative.empty() ? rootPath : rootPath / textfile::pathFromUtf8(relative),
+                           relative, std::move(cursor), cancelled, result)) {
+        if (result.cancelled) return result;
         result.error = result.warning.empty() ? i18n::tr("vault.read_failed") : result.warning;
         result.warning.clear();
         return result;
@@ -223,6 +285,8 @@ ScanResult scan(const std::string& root) {
 void flatten(const ScanResult& result, const std::set<std::string>& expanded, std::vector<Row>& rows) {
     rows.clear();
     appendRows(result.roots, expanded, 0, rows);
+    if (result.hasMore || result.cacheLimitReached || !result.pageError.empty())
+        rows.push_back({{}, {}, 0, false, false, true, result.cacheLimitReached, result.pageError});
 }
 
 void flattenFiltered(const ScanResult& result, const std::string& filter, std::vector<Row>& rows) {

@@ -89,8 +89,8 @@ private:
 namespace layout {
 
 inline constexpr float tabWidth = 176.0f;           // 常规卡面宽
-inline constexpr float tabGap = 4.0f;               // 卡间距
-inline constexpr float tabPitch = tabWidth + tabGap;  // 180 节距
+inline constexpr float tabGap = 0.0f;               // 卡间距
+inline constexpr float tabPitch = tabWidth + tabGap;  // 176 节距
 inline constexpr float closeCenterInset = 162.0f;   // 关闭中心 = cardLeft + 162
 
 inline float contentWidth(std::size_t count) {

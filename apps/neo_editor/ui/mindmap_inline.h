@@ -256,7 +256,8 @@ inline void drawInlineMindmapLine(
         ui.stack(toggleId).position(x, y).size(buttonWidth, buttonHeight)
             .content([&] {
                 ui.rect(toggleId + ".bg").size(buttonWidth, buttonHeight)
-                    .radius(4.0f).color(editorColors(state.theme).toolbar)
+                    .radius(4.0f).states(editorColors(state.theme).toolbar, editorColors(state.theme).rowHover, editorColors(state.theme).pressed)
+                    .cursor(eui::CursorShape::Hand)
                     .onPress([&ui, &state, blockBeg = line.start](const core::PointerEvent&, const core::Rect&) {
                         const auto reason = openInlineMindmap(ui, state, blockBeg);
                         if (reason != mindmap::RejectReason::None) {

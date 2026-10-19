@@ -222,6 +222,9 @@ struct Scanner {
                          {{u8"当前.md", u8"子目录/当前.md", false, {}}}},
                         {".hidden", ".hidden", false, {}}, {"noext", "noext", false, {}},
                         {u8"当前.md", u8"当前.md", false, {}}};
+        // This test double supplies a preloaded child subtree. Mark it loaded so
+        // the lazy page scheduler does not also schedule a real child IO task.
+        result.roots.front().childrenLoaded = true;
         if (addLater) { result.roots.push_back({"later.md", "later.md", false, {}}); ++result.fileCount; }
         if (tagByRootName) {
             const std::string marker = neo::textfile::fileName(root);
@@ -431,8 +434,8 @@ void consecutiveParentScansKeepActiveRoot(const fs::path& base) {
     check(state.vaultRoot == second && scanner.waitForRoot(second) && scanner.mainCalls == 0,
           "second parent navigation returns before either scan completes");
     scanner.releaseRoot(first);
-    check(pumpUntil([&] { return !neo::vaultcache::query(first).scanning; }),
-          "previous parent scan drains");
+    check(pumpUntil([&] { return neo::vaultcache::stats().scansDropped >= 1; }),
+          "previous parent scan is discarded after switching roots");
     neo::tickVaultScan(state);
     check(state.vaultRoot == second && !state.vaultScan && state.rows.empty(),
           "late previous parent result cannot populate the active root");
@@ -536,8 +539,10 @@ void lateRootCompletionCannotPollute(VaultStart start, const fs::path& firstDir,
     check(!state.vaultScan && state.rows.empty() && state.vaultRowsGeneration == 0,
           "generation reset cannot adopt the previous root's snapshot");
     scanner.releaseRoot(first);
-    check(pumpUntil([&] { return !neo::vaultcache::query(first).scanning; }), "late first-root scan completes");
-    check(neo::vaultcache::query(first).scan != nullptr, "late first root publishes its own snapshot");
+    check(pumpUntil([&] { return neo::vaultcache::stats().scansDropped >= 1; }),
+          "late first-root scan is discarded after cancellation");
+    check(neo::vaultcache::query(first).scan == nullptr,
+          "late first root cannot repopulate an inactive cache");
     neo::tickVaultScan(state);
     check(state.vaultRoot == second && !state.vaultScan && state.rows.empty(),
           "late completion of the previous root cannot populate the active view");
@@ -659,6 +664,117 @@ void navigateWarmMissingTargetClearsReveal(const fs::path& base) {
     eui::Ui settledUi; settledUi.begin("nav.settled"); neo::vaultPanelView(settledUi, state, 264, 600); settledUi.end();
     check(state.vaultPendingReveal.empty(), "completed scan clears an unmatched warm target");
     neo::vaultcache::invalidate(target);
+}
+
+void navigateUnloadedChildDirectly(const fs::path& base) {
+    neo::vaultcache::resetForTest();
+    const fs::path homeDir = makeDirectory(base, "nav-unloaded-home");
+    const fs::path childDir = makeDirectory(homeDir, "unloaded-child");
+    const std::string child = neo::textfile::pathToUtf8(childDir);
+    Scanner scanner;
+    neo::vaultcache::setScannerForTest([&](const std::string& value) { return scanner(value); });
+    neo::AppState state;
+    state.vaultRoot = neo::textfile::pathToUtf8(homeDir);
+    auto partial = std::make_shared<neo::vault::ScanResult>();
+    partial->ok = true;
+    partial->hasMore = true;
+    partial->roots = {{"loaded.md", "loaded.md", false, {}}};
+    state.vaultScan = partial;
+    state.doc.text = "unsaved draft\n";
+    ++state.revision;
+    neo::navigateToVaultPath(state, child);
+    check(state.vaultRoot == child && !state.vaultScan && state.rows.empty(),
+          "address enters unseen child without loading preceding root pages");
+    check(scanner.mainCalls == 0 && scanner.waitForRoot(child),
+          "unseen child address starts its own background scan");
+    check(state.doc.text == "unsaved draft\n" && state.dirty(),
+          "direct child navigation preserves unsaved document");
+    drain(scanner, child);
+    neo::tickVaultScan(state);
+    check(state.vaultRoot == child && state.vaultScan && state.vaultScan->ok && scanner.workerCalls == 1,
+          "only requested child is scanned and adopted");
+}
+
+void collapsedPagesRereadOnlyTheirOwnLevel(const fs::path& base) {
+    neo::vaultcache::resetForTest();
+    neo::vaultcache::resetScannerForTest();
+    const fs::path rootDir = makeDirectory(base, "collapse-pages");
+    for (const char* folder : {"first", "sibling", "cancelled"})
+        put(rootDir / folder / "initial.md", "initial\n");
+    const std::string root = neo::textfile::pathToUtf8(rootDir);
+    neo::vaultcache::activateRoot(root);
+    neo::vaultcache::requestScanSync(root);
+    neo::AppState state;
+    state.vaultRoot = root;
+    state.vaultScan = neo::vaultcache::query(root).scan;
+    state.vaultRowsGeneration = neo::vaultcache::query(root).generation;
+    state.doc.text = u8"未保存的正文🙂\n";
+    ++state.revision;
+    const auto revision = state.revision;
+    const auto savedRevision = state.savedRevision;
+    const auto text = state.doc.text;
+    const auto hasChild = [&](const char* relative, const char* child) {
+        const auto scan = neo::vaultcache::query(root).scan;
+        if (!scan) return false;
+        const auto folder = std::find_if(scan->roots.begin(), scan->roots.end(), [&](const auto& entry) {
+            return entry.relative == relative;
+        });
+        return folder != scan->roots.end() && folder->childrenLoaded &&
+            std::any_of(folder->children.begin(), folder->children.end(), [&](const auto& entry) {
+                return entry.name == child;
+            });
+    };
+    const auto unloaded = [&](const char* relative) {
+        const auto scan = neo::vaultcache::query(root).scan;
+        if (!scan) return false;
+        const auto folder = std::find_if(scan->roots.begin(), scan->roots.end(), [&](const auto& entry) {
+            return entry.relative == relative;
+        });
+        return folder != scan->roots.end() && !folder->childrenLoaded && folder->children.empty() &&
+            !folder->cursor && !folder->hasMore;
+    };
+    const auto settle = [&] {
+        check(pumpUntil([&] { return !neo::vaultcache::query(root).loadingPages; }),
+              "real child-page request drains in bounded time");
+        neo::tickVaultScan(state);
+    };
+    neo::toggleFolder(state, "first"); settle();
+    neo::toggleFolder(state, "sibling"); settle();
+    check(hasChild("first", "initial.md") && hasChild("sibling", "initial.md"),
+          "explicit expansion loads both direct child levels");
+
+    put(rootDir / "first" / "external.md", "external\n");
+    put(rootDir / "sibling" / "unseen.md", "unseen\n");
+    check(neo::vaultcache::requestPage(root, "first", true).scheduled,
+          "a targeted first-level refresh is scheduled");
+    settle();
+    check(hasChild("first", "external.md") && !hasChild("sibling", "unseen.md") &&
+          hasChild("sibling", "initial.md"),
+          "refresh adopts external changes only at its direct parent level");
+
+    neo::toggleFolder(state, "first");
+    check(unloaded("first") && hasChild("sibling", "initial.md"),
+          "collapse releases the selected child cache while retaining its expanded sibling");
+    put(rootDir / "first" / "after-collapse.md", "later\n");
+    neo::toggleFolder(state, "first"); settle();
+    check(hasChild("first", "after-collapse.md") && !hasChild("sibling", "unseen.md"),
+          "re-expansion rereads external child changes without refreshing siblings");
+
+    // Completion publication runs on this thread. Collapse before pumping it, so
+    // even a worker which already finished IO must not resurrect the hidden page.
+    const auto droppedBefore = neo::vaultcache::stats().scansDropped;
+    neo::toggleFolder(state, "cancelled");
+    check(neo::vaultcache::query(root).loadingPages, "new child request is pending before collapse");
+    neo::toggleFolder(state, "cancelled");
+    check(pumpUntil([&] { return neo::vaultcache::stats().scansDropped > droppedBefore; }),
+          "late child completion after collapse is explicitly discarded");
+    neo::tickVaultScan(state);
+    check(unloaded("cancelled") && !state.expanded.count("cancelled"),
+          "discarded completion cannot restore a collapsed child cache");
+    check(state.doc.text == text && state.revision == revision &&
+          state.savedRevision == savedRevision && state.dirty(),
+          "page refresh, collapse and cancellation preserve dirty document state");
+    neo::vaultcache::invalidate(root);
 }
 
 void vaultActionCancellationPreservesDocument(const fs::path& base) {
@@ -836,7 +952,9 @@ int main() {
         consecutiveParentScansKeepActiveRoot(actionBase);
         navigateOpensOutsideDocument(actionBase);
         navigateWarmMissingTargetClearsReveal(actionBase);
+        navigateUnloadedChildDirectly(actionBase);
         vaultActionCancellationPreservesDocument(actionBase);
+        collapsedPagesRereadOnlyTheirOwnLevel(actionBase);
     }
     neo::vaultcache::resetScannerForTest();
     core::async::shutdown(); neo::vaultcache::resetForTest();

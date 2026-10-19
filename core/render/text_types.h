@@ -23,6 +23,7 @@ struct TextStyle {
     std::string fontFamily;
     float fontSize = 16.0f;
     int fontWeight = 400;
+    bool fontItalic = false;
     Color color = {1.0f, 1.0f, 1.0f, 1.0f};
     float maxWidth = 0.0f;
     bool wrap = false;

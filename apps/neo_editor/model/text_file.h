@@ -63,6 +63,11 @@ LoadResult loadWithEncoding(const std::string& path, const ForcedEncoding& force
 bool save(const std::string& path, const Document& document, std::string& error,
           const std::function<bool()>& beforeReplace = {});
 
+// 新建文件时使用相同的编码与换行规则；发布瞬间若目标已存在则失败，
+// 保留已存在文件的内容。beforePublish 在完整临时文件写入后调用。
+bool create(const std::string& path, const Document& document, std::string& error,
+            const std::function<bool()>& beforePublish = {});
+
 // 状态栏/菜单共用的编码显示名。Ansi 只把已知页码叫 GBK/Big5/Shift-JIS，
 // 其余页码显示 "ANSI (N)"，不冒认。
 std::string encodingLabel(const Document& document);

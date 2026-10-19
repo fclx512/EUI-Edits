@@ -42,8 +42,8 @@ inline components::input_detail::LineDecorationSnapshot decorationsForEditor(
     const components::MarkdownStyle style =
         markdownStyle(state.editorFontSize, editorFontFamily(state), codeFontFamily(state), colors,
                       state.theme);
-    // 编辑区间随上下文递给 model 层（T4 A2 / T5 局部重解析）：链不完整（IME 合成、
-    // 换文档、两次编辑之间没建过表…）时 lp 层自己退回全量，这里不做判断也不缓存
+    // 编辑区间随上下文递给 model 层（T4 A2 / T5 局部重解析）：提交编辑链或连续预编辑
+    // 的实际文本不能证明局部等价时，lp 层退回全量；这里不做判断也不缓存
     // 任何编辑状态 —— 折叠键（foldedHeadings）同样按"交给 model 层原样判定"处理。
     const LpPlan& plan = [&]() -> const LpPlan& {
         tracelog::Span span("lp-plan");
@@ -77,7 +77,8 @@ inline components::input_detail::LineDecorationSnapshot decorationsForEditor(
 // - 其它文件走无格式的纯文本编辑 —— 与 Obsidian 一致，纯文本本来就没有格式可渲染。
 //
 // 原先独立的"预览"视图已按 2026-09-23 的决定移除（做坏了直接改，做好了也没必要留两份）。
-inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, float width, float height) {
+inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, float width, float height,
+                       float contentRightInset = 0.0f) {
     const EditorColors& colors = editorColors();
     if (state.unavailable) {
         ui.column("editor.unavailable").size(width, height).padding(24.0f).gap(12.0f).content([&] {
@@ -102,6 +103,7 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
     style.text = colors.text;
     style.placeholder = colors.textMuted;
     style.cursor = colors.accent;
+    style.selectionBackground = colors.selectionBackground;
     style.shadow = eui::Shadow{};
     style.radius = 0.0f;
 
@@ -179,6 +181,7 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
     }
     const auto statsBefore = InputModel::debugLayoutStats();
     components::input(ui, editorInputId(state))
+        .theme(colors.tokens)
         .size(width, height)
         .multiline(true)
         .wordWrap(state.wordWrap())
@@ -187,11 +190,14 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
         // 光标闪烁（组件默认关闭，只有编辑器需要）。
         .caretBlink(true)
         .inset(metrics.editorInset)
+        .contentRightInset(contentRightInset)
         // 限制行宽（Obsidian 的"可读行宽"）：内容列收窄到 43.75em（700px @ 16px）
         // 并居中，行号列与滚动条仍贴两缘。关闭时传 0 = 不限制。
         .maxTextWidth(state.readableWidth && !state.sourceView() && state.wordWrap() ? metrics.editorFontSize * 43.75f : 0.0f)
         // 行号列（画在编辑器左缘留白 + 专属槽位里，随主题的次要文字色）。
-        .lineNumbers(state.showLineNumbers)
+        .lineNumbers(state.showLineNumbers && !(state.writingCapable() && state.markdownImmersive))
+        .typewriter(state.writingCapable() && state.markdownTypewriter)
+        .focusLine(state.writingCapable() && state.markdownImmersive, animationsEnabled(state))
         .lineNumberColor(colors.textMuted)
         .fontSize(metrics.editorFontSize)
         // 自选字体 > 系统正文字体，见 editorFontFamily()。
@@ -304,7 +310,7 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
                 }
                 const LinkTarget target = linkTargetAt(plan, state.doc.text, hit.byteIndex);
                 if (target.valid) {
-                    openLinkTarget(state, target.url, docDir);
+                    openLinkTarget(state, target.navigationUrl, docDir);
                 }
                 return;
             }

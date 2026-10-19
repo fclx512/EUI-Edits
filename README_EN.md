@@ -41,9 +41,9 @@ Markdown covers common writing syntax and some extensions; full Obsidian compati
 
 ## Getting started
 
-Download `EUI-Edits-0.1.4-windows-x64.exe` from the [0.1.4 release page](https://github.com/fclx512/EUI-Edits/releases/tag/v0.1.4), put it where you plan to keep it, and run it directly. No resource folder needs unpacking. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing. The [release process](docs/发版流程.md) defines candidate freezing, gates, packaging, and acceptance before publication.
+Download `EUI-Edits-0.2.0-windows-x64.exe` from the [0.2.0 release page](https://github.com/fclx512/EUI-Edits/releases/tag/neoeditor-v0.2.0), put it where you plan to keep it, and run it directly. No resource folder needs unpacking. The unsigned app targets Windows 10/11 x64. Windows 11 has received on-machine validation; Windows 10 has not received equivalent testing. The [release process](docs/发版流程.md) defines candidate freezing, gates, packaging, and acceptance before publication.
 
-**Changes in 0.1.4:** Building on the 0.1.3 table-selection, IME/viewport synchronization, and read-only mindmap work, this release further reduces duplicated residency in the text model and source decorations, improves background vault-root and parent navigation, and unifies a traceable release entry point and measurement probes.
+**Changes in 0.2.0:** Adds a theme workspace with local palette generation, writing tools and an immersive mode, selection-scoped find and replace, and heading-link navigation. Strengthens save verification and recovery protection, and loads library folders in batches. See the [release notes](apps/neo_editor/RELEASE-NOTES.md) for details and limits.
 
 ### Common actions
 
@@ -92,13 +92,13 @@ Most settings take effect immediately and persist across launches:
 
 The status bar shows file location, syntax mode, encoding, line endings, line count, and character count, with controls for syntax mode and word wrap; some information collapses in narrow windows. Fonts come from your machine or imports; the release ships no font files.
 
-**Local theme import is a beta feature.** Choose JSON or CSS under "Appearance → Theme file (beta) → Theme library…", or place files in the `themes` folder above. For Obsidian themes, select `manifest.json` with a sibling `theme.css`, or select CSS directly. Import maps recognizable colors only, never executes CSS, and does not promise the original layout or plugin styles. Built-in colors remain available.
+**The local theme workspace is a beta feature.** Open "Settings → Appearance → Theme library" to view a sample on the left and edit colors or typography on the right. It supports local palette generation, per-color locks, undo/redo, and saving a new theme. JSON or CSS imports are reviewed before creating a draft; files can also be placed in the `themes` folder above. For Obsidian themes, select `manifest.json` with a sibling `theme.css`, or select CSS directly. Import maps recognizable colors only, never executes CSS, and does not promise the original layout or plugin styles. Built-in colors remain available.
 
 ## Resource use
 
 The UI redraws on demand. Tab switches reuse layout and highlighting where possible, with less-used derived data released when cache budgets are exceeded. The library scans metadata without loading every document. Disabling interaction animations removes hover and press transition frames.
 
-These are **idle memory measurements of a 0.1.4 candidate development build from the current source on 2026-10-15**, in MiB: Windows 11, default Win32 / Direct2D software rendering, light theme, 125% system scaling, word wrap and readable width enabled. The 1280 × 800 window remains visible in the background and is not minimized. The measurement fixture gives its owned window a non-activation flag to avoid taking focus during normal computer use. Each scenario starts three times in separate profiles, idles for 10 seconds after loading, then collects 20 samples at 0.5-second intervals per run. Entries are the median of the per-run medians.
+These are **historical idle memory measurements of a 0.1.4 candidate development build on 2026-10-15, not measurements of 0.2.0**, in MiB: Windows 11, default Win32 / Direct2D software rendering, light theme, 125% system scaling, word wrap and readable width enabled. The 1280 × 800 window remains visible in the background and is not minimized. The measurement fixture gives its owned window a non-activation flag to avoid taking focus during normal computer use. Each scenario starts three times in separate profiles, idles for 10 seconds after loading, then collects 20 samples at 0.5-second intervals per run. Entries are the median of the per-run medians.
 
 | Scenario | Total working set | Private working set | Private commit |
 | --- | ---: | ---: | ---: |
@@ -124,7 +124,7 @@ EUI-Edits focuses on local text editing. It provides no knowledge-base managemen
 
 ## Development
 
-Building requires Windows, Visual Studio 2022 / 2026 or Build Tools with the C++ desktop workload and Windows SDK, a CMake version supporting that generator, and PowerShell 5.1+. Checks also need Python 3; packaging uses MSVC's `dumpbin.exe`. Dependency sources are included in the repository.
+Building requires Windows, Visual Studio 2022 / 2026 or Build Tools with the C++ desktop workload and Windows SDK, a CMake version supporting that generator, and PowerShell 7. Checks also need Python 3; packaging uses MSVC's `dumpbin.exe`. Dependency sources are included in the repository.
 
 Run from PowerShell at the repository root:
 
@@ -133,10 +133,10 @@ Run from PowerShell at the repository root:
 .\scripts\check-neoeditor.ps1
 
 # Build Release x64 and produce a single EXE (the maintainer verifies its hash before and after publication)
-.\scripts\package-neoeditor.ps1 -Version 0.1.4
+.\scripts\package-neoeditor.ps1 -Version 0.2.0
 ```
 
-The output is `out/euiedits-0.1.4-single-exe/EUI-Edits-0.1.4-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
+The output is `out/euiedits-0.2.0-single-exe/EUI-Edits-0.2.0-windows-x64.exe`. Packaging selects Win32 / Direct2D, statically links the framework and MSVC runtime, embeds icons and licenses, and checks versions, DLL dependencies, and license export. Real-window interaction acceptance is separate.
 
 Scripts locate tools automatically; override with `-CMake` or `-Generator`, plus `-Python` for checks or `-Dumpbin` for packaging. For another build, select a fresh package output with `-OutputDirectory`; existing release files are never overwritten. After moving the source tree, use a fresh build directory rather than a CMake cache containing old paths. The packaging script contains Chinese comments; run it with PowerShell 7 (`pwsh`) — Windows PowerShell 5.1 reads the BOM-less script as ANSI and reports a parse error.
 

@@ -1,6 +1,7 @@
 #include "state/app_actions.h"
 #include "core/platform/platform.h"
 #include "model/attachment.h"
+#include "model/heading_anchor.h"
 #include "model/session_storage.h"
 #include "model/atomic_write.h"
 #include "model/png_encode.h"
@@ -31,6 +32,14 @@
 #endif
 
 namespace neo {
+
+namespace {
+thread_local std::function<void(const std::string&)> beforeSaveVerification;
+}
+
+void testing::setBeforeSaveVerification(std::function<void(const std::string&)> hook) {
+    beforeSaveVerification = std::move(hook);
+}
 
 namespace {
 
@@ -363,8 +372,8 @@ bool saveToPath(AppState& state, const std::string& path, const filesafety::Fing
         else showToast(state, i18n::tr("safety.save_failed"), guardRejected ? current.error : error);
         return false;
     }
-    state.path = path;
     // Do not baseline a competing post-save write as our own saved version.
+    if (beforeSaveVerification) beforeSaveVerification(path);
     const textfile::ForcedEncoding savedEncoding{state.doc.encoding, state.doc.ansiCodePage};
     auto verified = filesafety::load(path, &savedEncoding);
     const auto& verifiedDoc = verified.result.document;
@@ -372,7 +381,19 @@ bool saveToPath(AppState& state, const std::string& path, const filesafety::Fing
         verifiedDoc.hadBom == state.doc.hadBom && verifiedDoc.encoding == state.doc.encoding &&
         (state.doc.encoding != textfile::Encoding::Ansi || verifiedDoc.ansiCodePage == state.doc.ansiCodePage) &&
         (state.doc.text.find('\n') == std::string::npos || verifiedDoc.lineEnding == state.doc.lineEnding);
-    state.diskFingerprint = sameSavedVersion ? verified.fingerprint : filesafety::Fingerprint{};
+    if (!sameSavedVersion) {
+        // The write completed, but we cannot confirm that this manuscript is
+        // still on disk. Retain its recovery body and veto close continuation.
+        // Save As must also keep the original path until verification succeeds.
+        if (!state.dirty()) state.savedRevision = state.revision == 0 ? 1 : state.revision - 1;
+        state.suppressRecovery = false;
+        persistDocumentSession(state);
+        if (verified.result.ok) showConflict(state, path, verified.fingerprint);
+        else showToast(state, i18n::tr("safety.save_failed"), i18n::tr("safety.save_unverified"));
+        return false;
+    }
+    state.path = path;
+    state.diskFingerprint = verified.fingerprint;
     state.savedRevision = state.revision;
     state.recovered = false;
     state.recoveredFrom.clear();
@@ -400,6 +421,21 @@ bool saveDocument(AppState& state) {
         showConflict(state, state.path, current); return false;
     }
     return saveToPath(state, state.path, current);
+}
+
+bool convertDocumentToUtf8(AppState& state) {
+    if (documentModalOpen(state) || state.unavailable) return false;
+    if (state.doc.encoding == textfile::Encoding::Utf8 && state.doc.ansiCodePage == 0) return true;
+    state.doc.encoding = textfile::Encoding::Utf8;
+    state.doc.ansiCodePage = 0;
+    // Recovery caches the entire Document by revision, including encoding.
+    // Keep text, BOM presence, line endings and the text undo history intact.
+    ++state.revision;
+    state.suppressRecovery = false;
+    persistDocumentSession(state);
+    showToast(state, i18n::tr("menu.convert_utf8"), i18n::tr("safety.encoding_converted"));
+    app::requestUpdate();
+    return true;
 }
 
 bool requestCloseDocument(AppState& state) {
@@ -726,6 +762,15 @@ void rebuildRows(AppState& state) {
 // 采纳/请求共享扫描快照（阶段 B）。不做 mergeRelatedVaultRoots（那是调用方的职责），
 // 因为本函数会被每帧的 tickVaultScan 调用，而合并要做文件系统规范化，不能进每帧路径。
 void adoptVaultScan(AppState& state, bool resetScroll) {
+    vaultcache::activateRoot(state.vaultRoot);
+    // Inactive tabs retain browsing preferences, not old full page snapshots.
+    // Otherwise each visited tab could pin another generation outside the cache budget.
+    for (auto& item : state.inactiveTabs) {
+        item.second.vaultScan.reset();
+        item.second.rows = {};
+        item.second.rows.shrink_to_fit();
+        item.second.vaultRowsGeneration = 0;
+    }
     if (state.vaultRoot.empty()) {
         state.vaultScan.reset();
         state.vaultRowsGeneration = 0;
@@ -768,6 +813,7 @@ void adoptVaultScan(AppState& state, bool resetScroll) {
     } else if (!view.scan->warning.empty()) {
         showToast(state, i18n::tr("safety.vault_partial"), view.scan->warning);
     }
+    vaultcache::setExpanded(state.vaultRoot, state.expanded);
     vaultcache::prune(state.vaultRoot);
 }
 
@@ -776,9 +822,25 @@ void tickVaultScan(AppState& state) {
     if (state.vaultRoot.empty()) {
         return;
     }
+    vaultcache::setExpanded(state.vaultRoot, state.expanded);
     const vaultcache::ScanView view = vaultcache::query(state.vaultRoot);
     if (view.scan && (!state.vaultScan || view.generation != state.vaultRowsGeneration)) {
         adoptVaultScan(state, false);
+    }
+    // Only expanded directories are read. A path can be expanded before its
+    // parent page arrives (opened document/reveal), so retry after each publish.
+    for (const std::string& relative : state.expanded) {
+        const auto latest = vaultcache::query(state.vaultRoot);
+        if (!latest.scan || latest.scanning) break;
+        const auto hasUnloaded = [&](const auto& self, const std::vector<vault::Entry>& entries) -> bool {
+            for (const auto& entry : entries) {
+                if (!entry.isDir) continue;
+                if (entry.relative == relative) return !entry.childrenLoaded && entry.pageError.empty();
+                if (relative.rfind(entry.relative + "/", 0) == 0 && self(self, entry.children)) return true;
+            }
+            return false;
+        };
+        if (hasUnloaded(hasUnloaded, latest.scan->roots)) vaultcache::requestPage(state.vaultRoot, relative);
     }
 }
 
@@ -800,6 +862,7 @@ void requestVaultRefresh(AppState& state) {
     if (state.vaultRoot.empty()) {
         return;
     }
+    vaultcache::activateRoot(state.vaultRoot);
     vaultcache::requestScan(state.vaultRoot);
 }
 
@@ -814,42 +877,12 @@ void refreshVault(AppState& state, bool resetScroll) {
         return;
     }
 
-    // 新建/重命名/删除等文件操作要求列表立刻反映结果：同步扫一次并发布进共享缓存。
-    // 选目录、地址栏换根与切页使用 prepareVault/adoptVaultScan。
-    tracelog::Span span("vault-scan");
-    vaultcache::requestScanSync(state.vaultRoot);
-    span.note("root=" + std::to_string(state.vaultRoot.size()));
-    const vaultcache::ScanView view = vaultcache::query(state.vaultRoot);
-    if (!view.scan) {
-        state.rows.clear();
-        return;
-    }
-    state.vaultScan = view.scan;
-    state.vaultRowsGeneration = view.generation;
-    if (!view.scan->ok) {
-        state.rows.clear();
-        showToast(state, i18n::tr("safety.vault_failed"), view.scan->error);
-        return;
-    }
-
-    if (resetScroll) {
-        state.vaultScroll = 0.0f;
-    }
-    // 首次有快照时展开当前文档所在目录链。
-    const std::string docRelative = vaultRelativePath(state, state.path);
-    if (!docRelative.empty() && docRelative != "." && docRelative.rfind("..", 0) != 0) {
-        for (std::size_t i = 0; i < docRelative.size(); ++i) {
-            if (docRelative[i] == '/') {
-                state.expanded.insert(docRelative.substr(0, i));
-            }
-        }
-    }
-
-    rebuildRows(state);
-    if (!view.scan->warning.empty()) {
-        showToast(state, i18n::tr("safety.vault_partial"), view.scan->warning);
-    }
-    vaultcache::prune(state.vaultRoot);
+    // A refresh never enumerates on the caller thread. The currently published
+    // page remains visible until a new shallow snapshot is ready.
+    if (resetScroll) state.vaultScroll = 0.0f;
+    adoptVaultScan(state, resetScroll);
+    const auto view = vaultcache::query(state.vaultRoot);
+    if (view.scan && !view.scanning) requestVaultRefresh(state);
 }
 
 void chooseVaultDirectory(AppState& state) {
@@ -901,7 +934,9 @@ void toggleFolder(AppState& state, const std::string& relative) {
         state.expanded.erase(relative);
     } else {
         state.expanded.insert(relative);
+        vaultcache::requestPage(state.vaultRoot, relative);
     }
+    vaultcache::setExpanded(state.vaultRoot, state.expanded);
     rebuildRows(state);
 }
 
@@ -956,12 +991,23 @@ void navigateToVaultPath(AppState& state, std::string text) {
         return;
     }
 
-    // 目标在当前文档库之内：展开到那一层就行，不动根（从根往里跳是常见操作，
-    // 直接换根会把上面几层弄丢）。文件顺带打开。
+    // 已加载的库内目录保留所在根并展开；未加载目录可直接进入，不补扫之前的页。
+    // 文件仍可直接打开正文。
     if (!state.vaultRoot.empty()) {
         const std::string relative = vaultRelativePath(state, textfile::pathToUtf8(target));
         const bool inside = !relative.empty() && relative != "." && relative.rfind("..", 0) != 0;
-        if (inside) {
+        const auto containsLoaded = [&](const auto& self, const std::vector<vault::Entry>& entries) -> bool {
+            for (const auto& entry : entries) {
+                if (entry.relative == relative) return true;
+                if (entry.isDir && self(self, entry.children)) return true;
+            }
+            return false;
+        };
+        // An address jump must not wait for every preceding page to be loaded.
+        // Known items preserve the containing root; an unseen target starts a
+        // fresh shallow browse at its own directory below.
+        const bool loaded = state.vaultScan && containsLoaded(containsLoaded, state.vaultScan->roots);
+        if (inside && (loaded || file)) {
             state.filter.clear();
             expandAlongPath(state, directory ? relative + "/" : relative);
             state.vaultPendingReveal = relative;
@@ -974,7 +1020,7 @@ void navigateToVaultPath(AppState& state, std::string text) {
         }
     }
 
-    // 目标在库外：目录直接换根；文件则换到它所在目录，再把文件打开。
+    // 库外目标或尚未加载的库内目录：直接进入目标目录；文件打开正文。
     const std::filesystem::path root = directory ? target : target.parent_path();
     state.vaultRoot = textfile::pathToUtf8(root);
     state.vaultAddress = state.vaultRoot;
@@ -1018,10 +1064,21 @@ std::string parentRelativeOf(const std::string& relative) {
     return slash == std::string::npos ? std::string{} : relative.substr(0, slash);
 }
 
+void refreshVaultLevel(AppState& state, const std::string& relative) {
+    if (relative.empty() || !state.vaultScan) {
+        refreshVault(state, false);
+    } else {
+        // A file action only invalidates its direct parent, never the whole tree.
+        refreshTabPresentation(state);
+        vaultcache::requestPage(state.vaultRoot, relative, true);
+    }
+}
+
 // 刷新列表、展开到目标并把目标行滚进视野（新建/重命名成功后的公共收尾）。
 void revealEntry(AppState& state, const std::string& relative, bool isDir) {
     state.filter.clear();
     expandAlongPath(state, isDir ? relative + "/" : relative);
+    vaultcache::setExpanded(state.vaultRoot, state.expanded);
     state.vaultPendingReveal = relative;
     rebuildRows(state);
     app::requestUpdate();
@@ -1098,15 +1155,15 @@ void vaultCreateFile(AppState& state, const std::string& parentRelative, std::st
         showToast(state, i18n::tr("safety.cannot_create"), i18n::format("safety.name_exists", {{"name", name}}));
         return;
     }
-    // 空文档落盘走 textfile::save：BOM/换行口径与打开保存的其余路径一致。
+    // 原子占用新名称；检查后出现的竞争文件不能被空文档覆盖。
     textfile::Document empty;
     empty.lineEnding = textfile::LineEnding::Lf;
     std::string saveError;
-    if (!textfile::save(textfile::pathToUtf8(target), empty, saveError)) {
+    if (!textfile::create(textfile::pathToUtf8(target), empty, saveError)) {
         showToast(state, i18n::tr("safety.create_failed"), saveError);
         return;
     }
-    refreshVault(state, false);
+    refreshVaultLevel(state, parentRelative);
     revealEntry(state, relative, false);
     requestOpenPath(state, textfile::pathToUtf8(target));
 }
@@ -1126,7 +1183,7 @@ void vaultCreateFolder(AppState& state, const std::string& parentRelative, std::
                   error ? error.message() : i18n::format("safety.name_exists", {{"name", name}}));
         return;
     }
-    refreshVault(state, false);
+    refreshVaultLevel(state, parentRelative);
     revealEntry(state, relative, true);
     showToast(state, i18n::tr("safety.folder_created"), name);
 }
@@ -1259,7 +1316,7 @@ bool vaultRenameEntry(AppState& state, const std::string& oldRelative, std::stri
         else movedExpanded.insert(entry);
     }
     state.expanded = std::move(movedExpanded);
-    refreshVault(state, false);
+    refreshVaultLevel(state, parentRelativeOf(oldRelative));
     const bool isDir = std::filesystem::is_directory(target, error);
     revealEntry(state, newRelative, isDir);
     state.vaultSelectedPath = newRelative;
@@ -1293,7 +1350,7 @@ void vaultDeleteEntry(AppState& state, const std::string& relative, bool isDir) 
     }
     persistDocumentSession(state);
     if (result.status == platform::DeleteStatus::Cancelled) {
-        refreshVault(state, false);
+        refreshVaultLevel(state, parentRelativeOf(relative));
         app::requestUpdate();
         const bool documentMissing = affectsCurrentDocument && pathDefinitelyMissing(state.path);
         if (documentMissing) {
@@ -1307,7 +1364,7 @@ void vaultDeleteEntry(AppState& state, const std::string& relative, bool isDir) 
         return;
     }
     if (result.status == platform::DeleteStatus::Error) {
-        refreshVault(state, false);
+        refreshVaultLevel(state, parentRelativeOf(relative));
         app::requestUpdate();
         const bool documentMissing = affectsCurrentDocument && pathDefinitelyMissing(state.path);
         if (documentMissing) {
@@ -1330,22 +1387,21 @@ void vaultDeleteEntry(AppState& state, const std::string& relative, bool isDir) 
         showToast(state, result.message.empty() ? i18n::tr("safety.delete_done") : i18n::tr("safety.delete_permanent"),
                   result.message.empty() ? relative : i18n::format("safety.delete_detail", {{"path", relative}, {"detail", result.message}}));
     }
-    refreshVault(state, false);
+    refreshVaultLevel(state, parentRelativeOf(relative));
     app::requestUpdate();
 }
 
 void openLinkTarget(AppState& state, std::string target, const std::string& docDir) {
-    // 首尾空白与自动链接的尖括号剥掉；URL 编码的空格最常见，先解掉。
+    if (documentModalOpen(state)) return;
+    // A newer navigation supersedes an unresolved link from this document.
+    cancelPendingLinkAnchor(state);
+    // Preserve external URLs, including their encoded bytes and fragments.
     const std::size_t begin = target.find_first_not_of(" \t\r\n<");
     const std::size_t end = target.find_last_not_of(" \t\r\n>");
     if (begin == std::string::npos) {
         return;
     }
     target = target.substr(begin, end - begin + 1);
-    for (std::size_t pos = target.find("%20"); pos != std::string::npos;
-         pos = target.find("%20", pos + 1)) {
-        target.replace(pos, 3, " ");
-    }
     if (target.empty()) {
         return;
     }
@@ -1361,9 +1417,25 @@ void openLinkTarget(AppState& state, std::string target, const std::string& docD
         return;
     }
 
-    // 本地路径：链接里的 Windows 反斜杠统一成正斜杠再解析。
-    std::replace(target.begin(), target.end(), '\\', '/');
-    const std::filesystem::path raw = textfile::pathFromUtf8(target);
+    const auto local = parseLocalHeadingLink(target);
+    if (!local) {
+        showToast(state, i18n::tr("safety.link_failed"), target);
+        return;
+    }
+    const auto queueAnchor = [&] {
+        if (!local->hasFragment) return;
+        state.pendingLinkAnchor = local->fragment;
+        state.linkAnchorPending = true;
+        state.pendingLinkTabId = state.tabId;
+        state.pendingLinkPath = state.path;
+        state.pendingOutlineJumpByte = -1;
+        state.pendingLinkJumpRevision = static_cast<unsigned long long>(-1);
+        app::requestUpdate();
+    };
+    if (local->path.empty()) { queueAnchor(); return; }
+    std::string localPath = local->path;
+    std::replace(localPath.begin(), localPath.end(), '\\', '/');
+    const std::filesystem::path raw = textfile::pathFromUtf8(localPath);
     std::vector<std::filesystem::path> bases;
     if (raw.is_absolute()) {
         bases.push_back({});
@@ -1379,18 +1451,74 @@ void openLinkTarget(AppState& state, std::string target, const std::string& docD
     for (const std::filesystem::path& base : bases) {
         std::filesystem::path candidate = base.empty() ? raw : base / raw;
         if (std::filesystem::is_regular_file(candidate, error)) {
-            requestOpenPath(state, textfile::pathToUtf8(candidate));
+            if (loadDocument(state, textfile::pathToUtf8(candidate))) {
+                if (!local->hasFragment) cancelPendingLinkAnchor(state);
+                else queueAnchor();
+            }
             return;
         }
         if (!candidate.has_extension()) {
             candidate += ".md";
             if (std::filesystem::is_regular_file(candidate, error)) {
-                requestOpenPath(state, textfile::pathToUtf8(candidate));
+                if (loadDocument(state, textfile::pathToUtf8(candidate))) {
+                    if (!local->hasFragment) cancelPendingLinkAnchor(state);
+                    else queueAnchor();
+                }
                 return;
             }
         }
     }
     showToast(state, i18n::tr("safety.link_missing"), target);
+}
+
+void resolvePendingLinkAnchor(AppState& state, const LpPlan& plan, const std::string& planText) {
+    if (!state.linkAnchorPending) return;
+    if (state.pendingLinkTabId != state.tabId || state.pendingLinkPath != state.path) {
+        cancelPendingLinkAnchor(state);
+        return;
+    }
+    if (planText != state.doc.text) return;
+    if (state.pendingOutlineJumpByte >= 0 && state.pendingLinkJumpRevision == state.revision) return;
+    const int target = state.pendingLinkAnchor.empty() ? 0 :
+        (state.markdownCapable() ? findHeadingAnchor(plan, planText, state.pendingLinkAnchor) : -1);
+    if (target < 0) {
+        const std::string missing = state.pendingLinkAnchor;
+        cancelPendingLinkAnchor(state);
+        showToast(state, i18n::tr("safety.link_failed"),
+                  i18n::format("safety.anchor_missing", {{"heading", missing}}));
+    } else {
+        state.pendingOutlineJumpByte = target;
+        state.pendingLinkJumpRevision = state.revision;
+        state.findEditorFocusPending = true;
+        app::requestUpdate();
+    }
+}
+
+void cancelPendingLinkAnchor(AppState& state) {
+    state.cancelLinkAnchor();
+}
+
+int takePendingOutlineJump(AppState& state) {
+    if (state.pendingOutlineJumpByte < 0) return -1;
+    if (state.linkAnchorPending) {
+        if (state.pendingLinkTabId != state.tabId || state.pendingLinkPath != state.path) {
+            cancelPendingLinkAnchor(state);
+            return -1;
+        }
+        if (state.pendingLinkJumpRevision != state.revision) {
+            state.pendingOutlineJumpByte = -1;
+            state.pendingLinkJumpRevision = static_cast<unsigned long long>(-1);
+            app::requestUpdate(); // Resolve the retained fragment against the new text plan.
+            return -1;
+        }
+    }
+    const int target = state.pendingOutlineJumpByte;
+    if (state.linkAnchorPending) cancelPendingLinkAnchor(state);
+    else {
+        state.pendingOutlineJumpByte = -1;
+        state.pendingLinkJumpRevision = static_cast<unsigned long long>(-1);
+    }
+    return target;
 }
 
 void performPending(AppState& state, PendingAction action) {

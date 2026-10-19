@@ -108,7 +108,9 @@ inline Rect Runtime::visualDirtyRectForElement(
         const auto instance = instances_.texts.find(element.id);
         const LayoutRect frame = instance != instances_.texts.end() ? instance->second.frame.value() : element.frame;
         const Transform transform = instance != instances_.texts.end() ? instance->second.transform.value() : element.transform;
-        local = transformRect({frame.x, frame.y, frame.width, frame.height}, frame, transform);
+        const float fontSize = instance != instances_.texts.end() ? instance->second.fontSize : element.fontSize;
+        const bool italic = instance != instances_.texts.end() ? instance->second.fontItalic : element.fontItalic;
+        local = textVisualRect(frame, transform, fontSize, italic);
     } else if (element.kind == ElementKind::Image || element.kind == ElementKind::Svg) {
         const auto instance = instances_.images.find(element.id);
         const LayoutRect frame = instance != instances_.images.end() ? instance->second.frame.value() : element.frame;
@@ -943,12 +945,8 @@ inline void Runtime::updateText(
     bool snapFrame) {
     runtime::TextInstance& instance = instances_.text(element.id);
     const Rect beforeRect = applyRenderTransformToLogicalRect(
-        transformRect({instance.frame.value().x,
-                       instance.frame.value().y,
-                       instance.frame.value().width,
-                       instance.frame.value().height},
-                      instance.frame.value(),
-                      instance.transform.value()),
+        textVisualRect(instance.frame.value(), instance.transform.value(),
+                       instance.fontSize, instance.fontItalic),
         dpiScale,
         inheritedTransform);
 
@@ -961,6 +959,7 @@ inline void Runtime::updateText(
         instance.fontFamily != element.fontFamily ||
         instance.fontSize != element.fontSize ||
         instance.fontWeight != element.fontWeight ||
+        instance.fontItalic != element.fontItalic ||
         instance.maxWidth != element.maxWidth ||
         instance.wrap != element.wrap ||
         instance.horizontalAlign != element.horizontalAlign ||
@@ -977,6 +976,7 @@ inline void Runtime::updateText(
         instance.fontFamily = element.fontFamily;
         instance.fontSize = element.fontSize;
         instance.fontWeight = element.fontWeight;
+        instance.fontItalic = element.fontItalic;
         instance.maxWidth = element.maxWidth;
         instance.wrap = element.wrap;
         instance.horizontalAlign = element.horizontalAlign;
@@ -997,12 +997,8 @@ inline void Runtime::updateText(
 
     if (changed || contentChanged) {
         const Rect afterRect = applyRenderTransformToLogicalRect(
-            transformRect({instance.frame.value().x,
-                           instance.frame.value().y,
-                           instance.frame.value().width,
-                           instance.frame.value().height},
-                          instance.frame.value(),
-                          instance.transform.value()),
+            textVisualRect(instance.frame.value(), instance.transform.value(),
+                       instance.fontSize, instance.fontItalic),
             dpiScale,
             inheritedTransform);
         addDirtyUnion(beforeRect, afterRect);

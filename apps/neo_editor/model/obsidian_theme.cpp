@@ -267,15 +267,7 @@ bool color(const std::string& raw, eui::Color& out) {
     return true;
 }
 
-bool mappedColor(const Vars& vars, const std::vector<const char*>& candidates, eui::Color& out) {
-    for (const char* candidate : candidates) {
-        std::string resolved;
-        if (token(vars, candidate, resolved) && color(resolved, out)) return true;
-    }
-    return false;
-}
-
-void mapColors(const Vars& vars, ThemeVariant& variant, int& skipped) {
+void mapColors(const Vars& vars, ThemeVariant& variant, ThemeFileData& data, bool light, bool hasSide) {
     struct Entry { const char* field; std::vector<const char*> candidates; };
     const Entry entries[] = {
         {"panel", {"--background-secondary"}},
@@ -287,6 +279,7 @@ void mapColors(const Vars& vars, ThemeVariant& variant, int& skipped) {
         {"border", {"--background-modifier-border"}},
         {"rowHover", {"--background-modifier-hover"}},
         {"rowActive", {"--background-modifier-active-hover"}},
+        {"selectionBackground", {"--text-selection"}},
         {"codeBackground", {"--code-background"}},
         {"codeText", {"--code-normal"}},
         {"divider", {"--hr-color"}},
@@ -298,59 +291,39 @@ void mapColors(const Vars& vars, ThemeVariant& variant, int& skipped) {
         {"tokenOperator", {"--code-operator"}},
         {"tokenFunction", {"--code-function"}},
         {"tokenProperty", {"--code-property"}},
-        {"iconFolder", {"--icon-color"}},
-        {"iconFile", {"--icon-color"}},
     };
-    for (const Entry& entry : entries) {
-        eui::Color parsed;
-        if (mappedColor(vars, entry.candidates, parsed)) variant.colors[entry.field] = parsed;
-        else ++skipped;
+    for (const auto& field : kThemeColorFields) {
+        if (std::string(field.name).rfind("icon", 0) == 0) continue;
+        ThemeImportEntry report{light, field.name, "", "未映射此颜色", false};
+        if (!hasSide) report.reason = "未提供该明暗模式";
+        else for (const auto& entry : entries) {
+            if (std::string(entry.field) != field.name) continue;
+            report.reason = "未提供对应变量";
+            for (const char* candidate : entry.candidates) {
+                if (!vars.count(candidate)) continue;
+                report.source = candidate;
+                std::string resolved;
+                eui::Color parsed;
+                if (!token(vars, candidate, resolved)) report.reason = "变量引用无法解析";
+                else if (color(resolved, parsed)) {
+                    variant.colors[field.name] = parsed;
+                    report.reason = "读取成功";
+                    report.imported = true;
+                    break;
+                } else {
+                    const auto value = lower(trim(resolved));
+                    const bool known = !value.empty() && (value[0] == '#' || value.rfind("rgb(", 0) == 0 ||
+                        value.rfind("rgba(", 0) == 0 || value.rfind("hsl(", 0) == 0 || value.rfind("hsla(", 0) == 0);
+                    report.reason = known ? "颜色值无效" : "不支持的颜色表达式";
+                }
+            }
+            break;
+        }
+        if (!report.imported) ++data.skippedCssDeclarations;
+        data.importReport.push_back(std::move(report));
     }
 }
 
-void mapTypography(const Vars& vars, ThemeTypography& out) {
-    const auto unitless = [&](const char* key, std::optional<float>& field, float lo, float hi) {
-        std::string text;
-        double value = 0;
-        if (token(vars, key, text) && number(text, value) && value >= lo && value <= hi)
-            field = static_cast<float>(value);
-    };
-    const auto length = [&](const char* key, const char* suffix, std::optional<float>& field,
-                            float scale, float lo, float hi) {
-        std::string text;
-        if (!token(vars, key, text)) return;
-        text = trim(text);
-        const std::size_t n = std::char_traits<char>::length(suffix);
-        if (text.size() <= n || text.substr(text.size() - n) != suffix) return;
-        double value = 0;
-        if (number(text.substr(0, text.size() - n), value)) {
-            value *= scale;
-            if (value >= lo && value <= hi) field = static_cast<float>(value);
-        }
-    };
-    unitless("--line-height-normal", out.bodyLineHeight, 0.5f, 4.0f);
-    length("--p-spacing", "rem", out.blockGap, 1.0f, 0.0f, 4.0f);
-    length("--radius-s", "px", out.radius, 1.0f / 16.0f, 0.0f, 2.0f);
-    length("--code-size", "em", out.codeSizeFactor, 1.0f, 0.5f, 2.0f);
-    length("--h1-size", "em", out.h1SizeFactor, 1.0f, 0.5f, 4.0f);
-    length("--h2-size", "em", out.h2SizeFactor, 1.0f, 0.5f, 4.0f);
-    length("--h3-size", "em", out.h3SizeFactor, 1.0f, 0.5f, 4.0f);
-    unitless("--h1-line-height", out.h1LineHeightFactor, 1.0f, 4.0f);
-    unitless("--h2-line-height", out.h2LineHeightFactor, 1.0f, 4.0f);
-    unitless("--h3-line-height", out.h3LineHeightFactor, 1.0f, 4.0f);
-    // A CSS font stack cannot be passed to the renderer as a single font name.
-    for (const auto& font : {std::make_pair("--font-text-override", &ThemeTypography::bodyFontFamily),
-                             std::make_pair("--font-monospace-override", &ThemeTypography::codeFontFamily)}) {
-        std::string text;
-        if (token(vars, font.first, text) && text.find(',') == std::string::npos) {
-            text = trim(text);
-            if (text.size() >= 2 && (text.front() == '"' || text.front() == '\'') &&
-                text.back() == text.front()) text = text.substr(1, text.size() - 2);
-            if (!text.empty() && text.find('(') == std::string::npos)
-                out.*font.second = text;
-        }
-    }
-}
 
 } // namespace
 
@@ -361,8 +334,9 @@ bool parse(const std::string& css, const std::string& name,
     Vars common, light, dark;
     const std::string clean = stripComments(css);
     scanRules(clean, 0, clean.size(), common, light, dark);
-    const bool hasLight = !light.empty();
-    const bool hasDark = !dark.empty();
+    const bool commonOnly = light.empty() && dark.empty() && !common.empty();
+    const bool hasLight = !light.empty() || commonOnly;
+    const bool hasDark = !dark.empty() || commonOnly;
     if (!hasLight && !hasDark) {
         error = i18n::tr("obsidian.no_variables");
         return false;
@@ -373,10 +347,8 @@ bool parse(const std::string& css, const std::string& name,
     }
     out.version = 2;
     out.name = name;
-    if (hasLight) mapColors(light, out.light, out.skippedCssDeclarations);
-    if (hasDark) mapColors(dark, out.dark, out.skippedCssDeclarations);
-    if (hasLight) mapTypography(light, out.light.typography);
-    if (hasDark) mapTypography(dark, out.dark.typography);
+    mapColors(light, out.light, out, true, hasLight);
+    mapColors(dark, out.dark, out, false, hasDark);
     if (out.light.colors.empty() && out.dark.colors.empty()) {
         error = i18n::tr("obsidian.no_colors");
         out = ThemeFileData{};

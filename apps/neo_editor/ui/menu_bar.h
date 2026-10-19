@@ -6,6 +6,7 @@
 #include "ui/tab_bar.h"
 #include "ui/widgets.h"
 #include "ui/ui_language.h"
+#include "platform/window_chrome.h"
 
 #include <algorithm>
 #include <array>
@@ -43,7 +44,7 @@ enum class Command {
     None = 0, NewText, NewMarkdown, Open, CloseTab, Exit, Save, SaveAs, OpenVault,
     Undo, Redo, Cut, Copy, SelectAll, Find, Syntax, Mindmap,
     Simple, Vault, Dark, Light, FollowSystem, Lines, Status, Wrap, Readable,
-    LanguageSystem, LanguageChinese, LanguageEnglish, Settings,
+    LanguageSystem, LanguageChinese, LanguageEnglish, Settings, ConvertUtf8,
     FontSizeBase = 100, EncodingBase = 200
 };
 
@@ -67,6 +68,7 @@ inline std::vector<MenuItem> fileMenuItems() {
         action(Command::Exit, "menu.exit").withSeparatorBefore(),
         action(Command::OpenVault, "menu.open_vault").withSeparatorBefore(),
         MenuItem(i18n::tr("menu.reopen_encoding"), std::move(encodings)),
+        action(Command::ConvertUtf8, "menu.convert_utf8"),
     };
 }
 inline std::vector<MenuItem> editMenuItems() {
@@ -89,17 +91,11 @@ inline std::vector<MenuItem> viewMenuItems(const AppState& state) {
             .withCommand(static_cast<int>(Command::FontSizeBase)+index++));
     }
     return {
-        MenuItem(i18n::tr("menu.layout"), {toggle(Command::Simple, "menu.simple", state.mode==EditorMode::Simple),
-                                        toggle(Command::Vault, "menu.vault", state.mode==EditorMode::Vault)}),
+        toggle(Command::Vault, "menu.vault", state.mode==EditorMode::Vault),
         toggle(Command::Lines, "menu.lines", state.showLineNumbers),
         toggle(Command::Status, "menu.status", state.showStatusBar),
         toggle(Command::Wrap, "menu.wrap", state.wordWrap()).withSeparatorBefore(),
         toggle(Command::Readable, "menu.readable", state.readableWidth),
-        // 只读思维导图预览（2026-10-11 计划阶段 C）：v1 只有模态菜单入口，无快捷键。
-        // 光标是否落在闭合 mermaid mindmap 围栏要查输入组件（本层不可见），所以
-        // 菜单项常可用，无效目标由 compose 侧 openMindmapPreview 以 toast 提示（§4.0
-        // 的"置灰**或**提示"取后者）。图片预览开着时不叠加第二层模态。
-        action(Command::Mindmap, "menu.mindmap").withSeparatorBefore(),
         MenuItem(i18n::tr("menu.appearance"), {
             toggle(Command::FollowSystem, "menu.theme_system", state.themeFollowSystem),
             toggle(Command::Dark, "menu.dark", !state.themeFollowSystem && state.theme==ThemeMode::Dark),
@@ -151,6 +147,7 @@ inline void dispatchCommand(AppState& state, int id) {
             break;
         case Command::Save: saveDocument(state); break;
         case Command::SaveAs: saveDocumentAs(state); break;
+        case Command::ConvertUtf8: convertDocumentToUtf8(state); break;
         case Command::OpenVault: chooseVaultDirectory(state); break;
         case Command::Undo: state.pendingEditorCommand=EditorCommand::Undo; break;
         case Command::Redo: state.pendingEditorCommand=EditorCommand::Redo; break;
@@ -164,7 +161,8 @@ inline void dispatchCommand(AppState& state, int id) {
             if (state.imagePreviewPath.empty()) state.mindmapPreviewPending = true;
             break;
         case Command::Simple: case Command::Vault:
-            state.mode=id==static_cast<int>(Command::Vault)?EditorMode::Vault:EditorMode::Simple;
+            state.mode=id==static_cast<int>(Command::Vault) && state.mode!=EditorMode::Vault
+                ? EditorMode::Vault : EditorMode::Simple;
             persistSettings(state); break;
         case Command::Dark: case Command::Light:
             applyTheme(state,id==static_cast<int>(Command::Light)?ThemeMode::Light:ThemeMode::Dark); break;
@@ -195,6 +193,17 @@ inline float menuTitleWidth(const std::string& label, const UiMetrics& metrics) 
     return estimateTextWidth(label, metrics.menuFontSize) + metrics.menuTitlePadding * 2.0f;
 }
 
+// Use one font-derived origin for every title. Centering each label's own ink
+// independently shifts the baseline when its CJK/Latin glyph mix changes.
+inline float menuTitleTextTop(const char* fontFamily, float fontSize, float barHeight) {
+    core::TextStyle reference;
+    reference.text = "Ag中文";
+    reference.fontFamily = fontFamily;
+    reference.fontSize = fontSize;
+    const core::Vec2 ink = core::TextPrimitive::measureSingleLineInk(reference);
+    return (barHeight - ink.x - ink.y) * 0.5f;
+}
+
 // 菜单栏上的一个可点标题（背景命中块 + 文字，跟 contextMenu 的画法一致）。
 // 空回调的 std::function 会被框架当成"没有回调"，所以这里可以无条件挂上。
 inline void menuTitleView(eui::Ui& ui,
@@ -206,6 +215,7 @@ inline void menuTitleView(eui::Ui& ui,
                           float x,
                           float width,
                           float fontSize,
+                          float textTop,
                           bool active,
                           bool interactive,
                           std::function<void()> onClick,
@@ -230,63 +240,14 @@ inline void menuTitleView(eui::Ui& ui,
 
     ui.text(id + ".label")
         .x(x)
-        .y(0.0f)
-        .size(width, height)
+        .y(textTop)
+        .size(width, fontSize * 1.2f)
         .text(label)
         .fontFamily(fontFamily)
         .fontSize(fontSize)
         .color(active ? colors.accent : colors.text)
         .horizontalAlign(eui::HorizontalAlign::Center)
-        .verticalAlign(eui::VerticalAlign::Center)
-        .build();
-}
-
-// 菜单栏右侧的设置按钮：齿轮 + "设置"文字。纯图标那版用户看不惯——
-// 齿轮语义不直观，恢复文字描述后按钮宽度按文字实际宽度算，右缘留边对齐。
-inline float menuSettingsButtonWidth(const UiMetrics& metrics, const char* label) {
-    const float glyph = std::min(16.0f, metrics.menuBarHeight - 14.0f);
-    return 8.0f + glyph + 6.0f + estimateTextWidth(label, metrics.menuFontSize) + 12.0f;
-}
-
-inline void menuSettingsButtonView(eui::Ui& ui,
-                                   const EditorColors& colors,
-                                   const UiMetrics& metrics,
-                                   const std::string& id,
-                                   UiIcon icon,
-                                   const char* label,
-                                   const char* fontFamily,
-                                   float x,
-                                   float width,
-                                   bool active,
-                                   bool interactive,
-                                   std::function<void()> onClick) {
-    const float height = metrics.menuBarHeight;
-    const float glyph = std::min(16.0f, height - 14.0f);
-    ui.rect(id + ".hit")
-        .x(x)
-        .y(0.0f)
-        .size(width, height)
-        .radius(6.0f)
-        .states(active ? rgba(colors.accent.r, colors.accent.g, colors.accent.b, 0.16f)
-                       : transparentColor(),
-                colors.rowHover,
-                colors.pressed)
-        .preserveFocusOnPress()
-        .disabled(!interactive)
-        .onClick(std::move(onClick))
-        .transition(quickTransition())
-        .build();
-    iconView(ui, id + ".glyph", icon, x + 8.0f, (height - glyph) * 0.5f, glyph,
-             active ? colors.accent : colors.text);
-    ui.text(id + ".label")
-        .x(x + 8.0f + glyph + 6.0f)
-        .y(0.0f)
-        .size(std::max(0.0f, width - 8.0f - glyph - 6.0f - 12.0f), height)
-        .text(label)
-        .fontFamily(fontFamily)
-        .fontSize(metrics.menuFontSize)
-        .color(active ? colors.accent : colors.text)
-        .verticalAlign(eui::VerticalAlign::Center)
+        .verticalAlign(eui::VerticalAlign::Top)
         .build();
 }
 
@@ -295,6 +256,8 @@ inline void menuSettingsButtonView(eui::Ui& ui,
 inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen) {
     const EditorColors& colors = editorColors();
     const UiMetrics metrics = uiMetrics(state);
+    const float titleTextTop = menu_detail::menuTitleTextTop(
+        uiFontFamily(state), metrics.menuFontSize, metrics.menuBarHeight);
 
     struct Title {
         MenuKind kind;
@@ -392,14 +355,8 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
                 .fill()
                 .color(colors.toolbar)
                 .build();
-            ui.rect("menubar.hairline")
-                .x(0.0f)
-                .y(metrics.menuBarHeight - 1.0f)
-                .size(screen.width, 1.0f)
-                .color(colors.border)
-                .build();
-
             for (std::size_t index = 0; index < titles.size(); ++index) {
+                platform::chrome::exclude(xs[index], 0, widths[index], metrics.menuBarHeight);
                 const MenuKind kind = titles[index].kind;
                 const bool active = state.openMenu == kind;
                 menu_detail::menuTitleView(
@@ -412,6 +369,7 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
                     xs[index],
                     widths[index],
                     metrics.menuFontSize,
+                    titleTextTop,
                     active,
                     interactive,
                     [&state, &ui, kind] {
@@ -430,34 +388,27 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
             }
 
             const char* settingsLabel = i18n::tr("menu.settings_short");
-            const float settingsWidth = menu_detail::menuSettingsButtonWidth(metrics, settingsLabel);
-            const float settingsX = std::max(10.0f, screen.width - settingsWidth - 10.0f);
-            menu_detail::menuSettingsButtonView(ui,
-                                                colors,
-                                                metrics,
-                                                "menubar.settings",
-                                                UiIcon::Settings,
-                                                settingsLabel,
-                                                uiFontFamily(state),
-                                                settingsX,
-                                                settingsWidth,
-                                                state.settingsOpen,
-                                                interactive,
-                                                [&state, &ui] {
-                                                    state.tabListOpen = false;
-                                                    ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
-                                                    ui.requestFocus(editorInputId(state.tabId) + ".hit");
-                                                    state.openMenu = MenuKind::None;
-                                                    state.settingsOpen = true;
-                                                    app::requestUpdate();
-                                                });
+            const float settingsWidth = menu_detail::menuTitleWidth(settingsLabel, metrics);
+            const float settingsX = cursor;
+            platform::chrome::exclude(settingsX, 0, settingsWidth, metrics.menuBarHeight);
+            menu_detail::menuTitleView(ui, colors, metrics, uiFontFamily(state),
+                "menubar.settings", settingsLabel, settingsX, settingsWidth, metrics.menuFontSize, titleTextTop,
+                state.settingsOpen, interactive, [&state, &ui] {
+                    state.tabListOpen = false;
+                    ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
+                    ui.requestFocus(editorInputId(state.tabId) + ".hit");
+                    state.openMenu = MenuKind::None;
+                    state.settingsOpen = true;
+                    app::requestUpdate();
+                }, {});
 
-            const float menuEnd = cursor - metrics.menuTitleGap;
+            const float menuEnd = settingsX + settingsWidth;
             const float sidebarWidth = state.mode == EditorMode::Vault
                 ? std::min(state.vaultWidth, screen.width * 0.38f) : 0.0f;
             const float tabsLeft = std::max(menuEnd + 12.0f,
                                             state.mode == EditorMode::Vault ? sidebarWidth + 1.0f : 0.0f);
-            tabBarView(ui, state, screen, tabsLeft, settingsX - 8.0f);
+            const float tabsRight = screen.width - platform::chrome::controlsWidth - platform::chrome::dragWidth;
+            tabBarView(ui, state, screen, tabsLeft, tabsRight);
         })
         .build();
 }

@@ -38,6 +38,7 @@ namespace {
 int failures = 0, recoveryCalls = 0, clearRecoveryCalls = 0, closeRequests = 0;
 bool recoveryAvailable = false;
 std::string lastRecoveryOrigin;
+neo::textfile::Document lastRecoveryDocument;
 neo::settings::RecoverySnapshot recoverySnapshot;
 neo::dialogs::PickResult nextSavePick{false, true, {}, {}};
 void check(bool condition, const char* message) {
@@ -77,8 +78,10 @@ std::string configDirectory() { return {}; }
 bool flush() { return true; }
 // 跟随系统主题的替身：单测统一按亮色解析。
 bool systemThemePrefersLight() { return true; }
-bool writeRecovery(const std::string& text, const std::string& originPath, const textfile::Document*) {
-    ++recoveryCalls; lastRecoveryOrigin = originPath; return true;
+bool writeRecovery(const std::string& text, const std::string& originPath, const textfile::Document* document) {
+    ++recoveryCalls; lastRecoveryOrigin = originPath;
+    if (document) lastRecoveryDocument = *document;
+    return true;
 }
 bool readRecovery(RecoverySnapshot& out) {
     if (!recoveryAvailable) return false;
@@ -260,6 +263,31 @@ int main() {
         if (entry.path().filename().wstring().find(L".neo-tmp-") != std::wstring::npos) ++temporaryFiles;
     }
     check(temporaryFiles == 0, "rejected and failed saves remove their own temporary files");
+
+    // A competing creator can arrive after the temporary file is complete.
+    // Publishing must reject that name without changing the competitor's bytes.
+    const auto createdPath = dir / fs::u8path("新建竞争.md");
+    neo::textfile::Document newDocument;
+    newDocument.text = "our new document\n";
+    const auto createdUtf8 = neo::textfile::pathToUtf8(createdPath);
+    error.clear();
+    check(!neo::textfile::create(createdUtf8, newDocument, error, [&] {
+        put(createdPath, "competitor bytes\n");
+        return true;
+    }) && !error.empty(), "create-only reports a collision after writing its temporary file");
+    check(get(createdPath) == "competitor bytes\n", "create-only preserves the competing writer's bytes");
+    check(!neo::textfile::create(createdUtf8, newDocument, error),
+          "create-only also rejects a target that existed before the call");
+    check(get(createdPath) == "competitor bytes\n", "preexisting target remains untouched");
+    const auto freshPath = dir / fs::u8path("新建成功.md");
+    error.clear();
+    check(neo::textfile::create(neo::textfile::pathToUtf8(freshPath), newDocument, error) &&
+              get(freshPath) == newDocument.text, "create-only publishes a complete new document");
+    temporaryFiles = 0;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (entry.path().filename().wstring().find(L".neo-tmp-") != std::wstring::npos) ++temporaryFiles;
+    }
+    check(temporaryFiles == 0, "create-only success and collision leave no temporary files");
 
     // New/open preserves the old buffer; closing its tab still uses the save gate.
     state = opened(file);
@@ -454,6 +482,265 @@ int main() {
     nextSavePick = {false, true, {}, {}};
     check(!neo::saveDocumentAs(nativeModal) && !nativeModal.savePickerOpen,
         "canceled picker clears its modal guard");
+
+    // A successful write is not enough to clear the draft when read-back
+    // verification observes a competing writer, deletion or unreadable payload.
+    for (int fault = 0; fault != 3; ++fault) {
+        resetSessionWriterForCloseScenario();
+        put(file, "verification baseline\n");
+        auto unverified = opened(file);
+        const auto manuscript = unverified.doc.text;
+        const int closesBefore = closeRequests;
+        const int clearsBefore = clearRecoveryCalls;
+        const int recoveryBefore = recoveryCalls;
+        neo::testing::setBeforeSaveVerification([&](const std::string& path) {
+            const auto target = neo::textfile::pathFromUtf8(path);
+            if (fault == 0) put(target, "competing post-save writer\n");
+            else if (fault == 1) fs::remove(target);
+            else put(target, std::string("\xff\xfe\x00", 3)); // invalid forced UTF-8
+        });
+        check(!neo::requestCloseDocument(unverified), "verification case starts with a dirty close confirmation");
+        neo::resolveDocumentConfirmation(unverified, neo::filesafety::UnsavedChoice::Save);
+        neo::testing::setBeforeSaveVerification({});
+        check(unverified.dirty() && unverified.doc.text == manuscript && !unverified.suppressRecovery,
+              "unverified save retains the manuscript and dirty recovery eligibility");
+        check(!unverified.closeApproved && !unverified.sessionClosePending && closeRequests == closesBefore,
+              "post-save verification failure vetoes close continuation");
+        check(recoveryCalls > recoveryBefore && clearRecoveryCalls == clearsBefore,
+              "post-save verification failure persists rather than clears recovery");
+        check(unverified.saveConflictOpen == (fault == 0),
+              "verified competing content is a conflict; unreadable or missing content is a verification failure");
+    }
+    resetSessionWriterForCloseScenario();
+    put(file, "original Save As source\n");
+    auto unverifiedCopy = opened(file);
+    const auto copyPathBefore = unverifiedCopy.path;
+    const auto copyDestination = dir / "unverified-copy.txt";
+    nextSavePick = {true, false, neo::textfile::pathToUtf8(copyDestination), {}};
+    neo::testing::setBeforeSaveVerification([&](const std::string& path) {
+        put(neo::textfile::pathFromUtf8(path), "competing copy\n");
+    });
+    check(!neo::saveDocumentAs(unverifiedCopy) && unverifiedCopy.path == copyPathBefore && unverifiedCopy.dirty(),
+          "unverified Save As preserves the original document association and dirty state");
+    neo::testing::setBeforeSaveVerification({});
+    check(get(file) == "original Save As source\n" && get(copyDestination) == "competing copy\n",
+          "failed Save As verification does not rewrite either source or competing destination");
+
+    // Encoding conversion changes metadata/recovery revision, never reloads
+    // disk text or resets the user's text undo state.
+    resetSessionWriterForCloseScenario();
+    const auto encodedFile = dir / "convert-utf8.txt";
+    put(encodedFile, "plain ANSI source\r\n");
+    auto converted = opened(encodedFile);
+    converted.doc.encoding = neo::textfile::Encoding::Ansi;
+    converted.doc.ansiCodePage = 936;
+    converted.doc.hadBom = false;
+    converted.doc.lineEnding = neo::textfile::LineEnding::CrLf;
+    converted.doc.text = "中文 emoji 😀\n";
+    const auto conversionRevision = converted.revision;
+    const auto conversionSaved = converted.savedRevision;
+    converted.editorStateDirty = false;
+    check(!neo::saveDocument(converted) && get(encodedFile) == "plain ANSI source\r\n",
+          "original ANSI save rejects an unrepresentable emoji without overwriting");
+    check(neo::convertDocumentToUtf8(converted) && converted.dirty() &&
+          converted.revision == conversionRevision + 1 && converted.savedRevision == conversionSaved &&
+          converted.doc.encoding == neo::textfile::Encoding::Utf8 && converted.doc.ansiCodePage == 0 &&
+          converted.doc.text == "中文 emoji 😀\n" && !converted.doc.hadBom &&
+          converted.doc.lineEnding == neo::textfile::LineEnding::CrLf && !converted.editorStateDirty,
+          "UTF-8 conversion preserves text and layout ownership, marks metadata dirty and advances revision");
+    check(lastRecoveryDocument.encoding == neo::textfile::Encoding::Utf8 &&
+          lastRecoveryDocument.text == converted.doc.text,
+          "conversion publishes new encoding and current text to recovery");
+    check(neo::convertDocumentToUtf8(converted) && converted.revision == conversionRevision + 1,
+          "repeating UTF-8 conversion is a no-op");
+    nextSavePick = {false, true, {}, {}};
+    check(!neo::saveDocumentAs(converted) && converted.dirty() &&
+          converted.doc.encoding == neo::textfile::Encoding::Utf8 && get(encodedFile) == "plain ANSI source\r\n",
+          "canceling Save As preserves the explicit conversion intent and original disk file");
+    neo::atomicwrite::testing::failBeforeReplace(true);
+    check(!neo::saveDocument(converted) && converted.dirty() && get(encodedFile) == "plain ANSI source\r\n",
+          "failed converted save retains draft and original disk bytes");
+    neo::atomicwrite::testing::failBeforeReplace(false);
+    check(neo::saveDocument(converted) && !converted.dirty() && get(encodedFile) == "中文 emoji 😀\r\n",
+          "normal save commits UTF-8 text with original line-ending policy");
+    const auto reopenedUtf8 = neo::textfile::load(neo::textfile::pathToUtf8(encodedFile));
+    check(reopenedUtf8.ok && reopenedUtf8.document.encoding == neo::textfile::Encoding::Utf8 &&
+          reopenedUtf8.document.text == converted.doc.text,
+          "converted UTF-8 bytes reopen without losing the manuscript");
+
+    // Exercise the complete metadata conversion with actual UTF-16 files, not
+    // synthetic ANSI metadata. BOM presence and byte order are independent of
+    // the in-memory UTF-8 manuscript and its retained editor history.
+    for (const auto encoding : {neo::textfile::Encoding::Utf16Le, neo::textfile::Encoding::Utf16Be}) {
+        for (const bool bom : {false, true}) {
+            resetSessionWriterForCloseScenario();
+            const auto conversionFile = dir / (std::string(encoding == neo::textfile::Encoding::Utf16Le ?
+                "convert-le-" : "convert-be-") + (bom ? "bom.txt" : "no-bom.txt"));
+            const auto conversionPath = neo::textfile::pathToUtf8(conversionFile);
+            neo::textfile::Document source;
+            source.text = "中文🙂\n第二行\n";
+            source.encoding = encoding;
+            source.hadBom = bom;
+            source.lineEnding = bom ? neo::textfile::LineEnding::CrLf : neo::textfile::LineEnding::Lf;
+            std::string encodingError;
+            check(neo::textfile::save(conversionPath, source, encodingError),
+                  "write a real UTF-16 source with explicit BOM and line-ending policy");
+            const neo::textfile::ForcedEncoding forced{encoding, 0};
+            const auto loaded = neo::filesafety::load(conversionPath, &forced);
+            check(loaded.result.ok, "read the UTF-16 source and establish its actual disk fingerprint");
+            if (!loaded.result.ok) continue;
+            neo::AppState metadata;
+            metadata.path = conversionPath;
+            metadata.doc = loaded.result.document;
+            metadata.diskFingerprint = loaded.fingerprint;
+            metadata.revision = metadata.savedRevision = 1;
+            using InputModel = components::input_detail::InputModel;
+            metadata.editorMemory = std::make_unique<InputModel::InputState>();
+            auto* retained = metadata.editorMemory.get();
+            InputModel::loadDocument(*retained, metadata.doc.text);
+            const auto appendEdit = [&](const std::string& text) {
+                const int end = static_cast<int>(retained->text.size());
+                retained->cursor = retained->selectionStart = retained->selectionEnd = end;
+                InputModel::beginEdit(*retained, end, end);
+                retained->text += text;
+                retained->cursor = retained->selectionStart = retained->selectionEnd =
+                    static_cast<int>(retained->text.size());
+                InputModel::endEdit(*retained);
+            };
+            appendEdit("保留历史\n");
+            const auto manuscript = retained->text;
+            appendEdit("重做内容\n");
+            const auto redoManuscript = retained->text;
+            check(InputModel::undoEdit(*retained) && retained->text == manuscript,
+                  "conversion fixture retains both a real undo and redo record");
+            metadata.doc.text = retained->text;
+            ++metadata.revision;
+            const auto undoCount = retained->undoStack.size();
+            const auto redoCount = retained->redoStack.size();
+            const auto inputRevision = retained->textRevision;
+            check(undoCount == 1 && redoCount == 1, "conversion starts with nonempty editor undo and redo history");
+            check(neo::convertDocumentToUtf8(metadata) && metadata.doc.encoding == neo::textfile::Encoding::Utf8 &&
+                  metadata.doc.hadBom == bom && metadata.doc.lineEnding == source.lineEnding &&
+                  metadata.editorMemory.get() == retained && !metadata.editorStateDirty &&
+                  retained->textRevision == inputRevision && retained->undoStack.size() == undoCount &&
+                  retained->redoStack.size() == redoCount,
+                  "UTF-16 conversion preserves BOM intent, line endings and the retained editor history");
+            check(neo::saveDocument(metadata) && !metadata.dirty(), "converted UTF-16 document saves and verifies as UTF-8");
+            const std::string physicalText = bom ? "中文🙂\r\n第二行\r\n保留历史\r\n" : manuscript;
+            const std::string expectedBytes = (bom ? std::string("\xef\xbb\xbf", 3) : std::string{}) + physicalText;
+            check(get(conversionFile) == expectedBytes,
+                  "converted bytes contain only the intended UTF-8 BOM and original line-ending policy");
+            const auto reopened = neo::textfile::load(conversionPath);
+            check(reopened.ok && reopened.document.encoding == neo::textfile::Encoding::Utf8 &&
+                  reopened.document.hadBom == bom && reopened.document.lineEnding == source.lineEnding &&
+                  reopened.document.text == manuscript,
+                  "converted UTF-16 source reopens with exact UTF-8 metadata and normalized manuscript");
+            check(metadata.editorMemory.get() == retained && retained->undoStack.size() == undoCount &&
+                  retained->redoStack.size() == redoCount &&
+                  InputModel::redoEdit(*retained) && retained->text == redoManuscript &&
+                  InputModel::undoEdit(*retained) && retained->text == manuscript &&
+                  InputModel::undoEdit(*retained) && retained->text == source.text,
+                  "metadata conversion and save preserve executable redo and undo history in order");
+        }
+    }
+
+    const auto linkedSource = dir / "linked-source.md";
+    const auto linkedTarget = dir / "linked#target.md";
+    put(linkedSource, "# 起点\n\n## 中文 标题\ncontent\n");
+    put(linkedTarget, "# Other\n\n## Destination\nbody\n");
+    neo::AppState linked;
+    check(neo::loadDocument(linked, neo::textfile::pathToUtf8(linkedSource)), "load heading link source");
+    const auto linkedRevision = linked.revision;
+    const auto linkedId = linked.tabId;
+    const auto linkedText = linked.doc.text;
+    neo::openLinkTarget(linked, "#%E4%B8%AD%E6%96%87%20%E6%A0%87%E9%A2%98", neo::textfile::pathToUtf8(dir));
+    check(linked.linkAnchorPending && linked.tabId == linkedId && linked.revision == linkedRevision &&
+          linked.doc.text == linkedText && !linked.dirty(), "same-page anchor queues without editing or switching document");
+    const auto linkedPlan = neo::buildLpPlan(linked.doc.text);
+    neo::resolvePendingLinkAnchor(linked, linkedPlan, "stale plan text");
+    check(linked.linkAnchorPending && linked.pendingOutlineJumpByte == -1,
+          "stale plan cannot resolve a pending heading link");
+    neo::resolvePendingLinkAnchor(linked, linkedPlan, linked.doc.text);
+    check(linked.linkAnchorPending && linked.pendingOutlineJumpByte == static_cast<int>(linkedText.find("## 中文")) &&
+          linked.pendingLinkJumpRevision == linkedRevision && !linked.dirty(),
+          "current plan resolves same-page heading and binds the jump to document revision");
+    check(neo::takePendingOutlineJump(linked) == static_cast<int>(linkedText.find("## 中文")) &&
+          !linked.linkAnchorPending && linked.pendingOutlineJumpByte == -1,
+          "heading request is cleared only when its jump is consumed");
+    neo::openLinkTarget(linked, "linked%23target.md#destination", neo::textfile::pathToUtf8(dir));
+    check(linked.path == neo::textfile::pathToUtf8(linkedTarget) && linked.tabId != linkedId && linked.linkAnchorPending,
+          "cross-page anchor opens the decoded filename and queues the target's heading");
+    const auto targetTabId = linked.tabId;
+    check(neo::activateDocumentTab(linked, linkedId) && !linked.linkAnchorPending &&
+          linked.pendingOutlineJumpByte == -1,
+          "pending cross-page anchor does not bleed into the source tab");
+    check(neo::activateDocumentTab(linked, targetTabId) && linked.linkAnchorPending &&
+          linked.pendingLinkTabId == targetTabId,
+          "returning to the target tab retains its own unresolved heading request");
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    check(linked.pendingOutlineJumpByte == static_cast<int>(linked.doc.text.find("## Destination")) && !linked.dirty(),
+          "cross-page heading resolves after its own document plan is ready");
+    linked.doc.text = "# Inserted\n\n## Destination\nbody\n";
+    ++linked.revision;
+    linked.savedRevision = linked.revision; // Model an external file-check refresh of a clean tab.
+    check(neo::takePendingOutlineJump(linked) == -1 && linked.linkAnchorPending &&
+          linked.pendingOutlineJumpByte == -1,
+          "revision change invalidates the byte offset but retains the heading request");
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    check(linked.pendingOutlineJumpByte == static_cast<int>(linked.doc.text.find("## Destination")) &&
+          neo::takePendingOutlineJump(linked) == static_cast<int>(linked.doc.text.find("## Destination")) &&
+          !linked.linkAnchorPending,
+          "retained request resolves against refreshed text and is consumed once");
+    neo::openLinkTarget(linked, "#destination", neo::textfile::pathToUtf8(dir));
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    linked.pendingOutlineJumpByte = -1;
+    linked.pendingLinkJumpRevision = static_cast<unsigned long long>(-1); // editorStateDirty reset.
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    check(linked.linkAnchorPending &&
+          neo::takePendingOutlineJump(linked) == static_cast<int>(linked.doc.text.find("## Destination")),
+          "editor reset can discard a resolved byte and the retained request resolves again");
+    neo::openLinkTarget(linked, "#absent", neo::textfile::pathToUtf8(dir));
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    check(!linked.linkAnchorPending && linked.pendingOutlineJumpByte == -1 && !linked.dirty(),
+          "missing heading clears the request without moving or modifying text");
+    const auto missingToast = linked.toastMessage;
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    check(!linked.linkAnchorPending && linked.toastMessage == missingToast,
+          "missing heading terminates rather than repeatedly showing a toast");
+    neo::openLinkTarget(linked, "#", neo::textfile::pathToUtf8(dir));
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    check(neo::takePendingOutlineJump(linked) == 0 && !linked.linkAnchorPending,
+          "empty fragment navigates to document start and consumes the request");
+    neo::openLinkTarget(linked, "#destination", neo::textfile::pathToUtf8(dir));
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    neo::cancelPendingLinkAnchor(linked); // User clicked an outline entry instead.
+    linked.pendingOutlineJumpByte = 2;
+    check(neo::takePendingOutlineJump(linked) == 2 && !linked.linkAnchorPending,
+          "manual outline navigation cancels the older link request");
+    neo::openLinkTarget(linked, "#destination", neo::textfile::pathToUtf8(dir));
+    linked.path = neo::textfile::pathToUtf8(linkedSource); // Same tab now identifies a different document.
+    neo::resolvePendingLinkAnchor(linked, neo::buildLpPlan(linked.doc.text), linked.doc.text);
+    check(!linked.linkAnchorPending && linked.pendingOutlineJumpByte == -1,
+          "document identity change cancels an unresolved link request");
+
+    // A resolved byte offset must still carry document identity when consumed;
+    // checking identity only during parsing would allow a late tab/path switch.
+    for (const bool changeTab : {false, true}) {
+        neo::AppState identity;
+        identity.path = neo::textfile::pathToUtf8(linkedSource);
+        identity.doc.text = "# Start\n\n## Destination\n";
+        identity.revision = identity.savedRevision = 1;
+        neo::openLinkTarget(identity, "#destination", neo::textfile::pathToUtf8(dir));
+        neo::resolvePendingLinkAnchor(identity, neo::buildLpPlan(identity.doc.text), identity.doc.text);
+        check(identity.linkAnchorPending && identity.pendingOutlineJumpByte > 0,
+              "identity fixture has a fully resolved heading request before switching documents");
+        if (changeTab) ++identity.tabId;
+        else identity.path = neo::textfile::pathToUtf8(linkedTarget);
+        check(neo::takePendingOutlineJump(identity) == -1 && !identity.linkAnchorPending &&
+              identity.pendingOutlineJumpByte == -1 && identity.pendingLinkTabId == 0 &&
+              identity.pendingLinkPath.empty(),
+              "consuming a resolved heading after tab or path identity changes cancels the entire request");
+    }
 
     // Delete only this unique, verified temporary-directory child.
     fs::remove_all(dir);

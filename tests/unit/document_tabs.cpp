@@ -334,19 +334,9 @@ int main() {
                 ui.begin("vault-alignment");
                 neo::vaultPanelView(ui, library, width, 600.0f);
                 ui.end(); ui.layout(width, 600.0f);
-                for (const char* tab : {"vault.tab.files", "vault.tab.outline"}) {
-                    const std::string id(tab);
-                    const auto* hit = ui.find(id + ".hit");
-                    const auto* icon = ui.find(id + ".icon");
-                    const auto* label = ui.find(id + ".label");
-                    check(hit && icon && label &&
-                          std::fabs((icon->frame.x + label->frame.x + label->frame.width) * 0.5f
-                                    - (hit->frame.x + hit->frame.width * 0.5f)) < 0.1f &&
-                          core::TextPrimitive::measureTextWidth(label->text, label->fontFamily, label->fontSize)
-                              <= label->frame.width + 0.1f &&
-                          label->verticalAlign == eui::VerticalAlign::Center,
-                          "translated sidebar tabs center the measured icon and label group");
-                }
+                const auto* title = ui.find("vault.files.title");
+                check(!title && !ui.find("vault.tab.outline.hit") && ui.find("vault.head"),
+                      "file sidebar starts with controls, without obsolete tabs or title space");
                 for (const char* tooltip : {"vault.mode.tooltip", "vault.parent.tooltip", "vault.choose.tooltip"}) {
                     const std::string id(tooltip);
                     const auto* panel = ui.find(id + ".bg");
@@ -461,6 +451,134 @@ int main() {
     neo::loadDocument(barState, path(barA)); const auto barAId = barState.tabId;
     neo::loadDocument(barState, path(barB)); const auto barBId = barState.tabId;
     neo::loadDocument(barState, path(barC)); const auto barCId = barState.tabId;
+    const auto activeTextBeforeReorder = barState.doc.text;
+    check(neo::moveDocumentTabToIndex(barState, barAId, 2) &&
+          barState.tabOrder == std::vector<std::uint64_t>({barBId, barCId, barAId}) &&
+          barState.tabId == barCId && barState.doc.text == activeTextBeforeReorder,
+          "cross-slot reorder changes only tab order, not active document");
+    check(!neo::moveDocumentTabToIndex(barState, barAId, 2) &&
+          !neo::moveDocumentTabToIndex(barState, 999999, 0) &&
+          !neo::moveDocumentTabToIndex(barState, barAId, 3),
+          "same-slot and invalid reorders are no-ops");
+    check(neo::moveDocumentTabToIndex(barState, barAId, 0) &&
+          barState.tabOrder == std::vector<std::uint64_t>({barAId, barBId, barCId}),
+          "reorder restores the original order");
+    check(neo::tab_bar_detail::dragTargetIndex(205.0f, 20.0f, 0.0f, 0.0f, 3) == 1 &&
+          neo::tab_bar_detail::dragTargetIndex(-50.0f, 20.0f, 0.0f, 0.0f, 3) == 0 &&
+          neo::tab_bar_detail::dragTargetIndex(1000.0f, 20.0f, 0.0f, 0.0f, 3) == 2,
+          "drag slots clamp to the visible document order");
+
+    neo::AppState dragState;
+    neo::loadDocument(dragState, path(barA)); const auto dragA = dragState.tabId;
+    neo::loadDocument(dragState, path(barB)); const auto dragB = dragState.tabId;
+    neo::loadDocument(dragState, path(barC)); const auto dragC = dragState.tabId;
+    neo::activateDocumentTab(dragState, dragA);
+    eui::Ui dragUi;
+    const eui::Screen dragScreen{320.0f, 400.0f};
+    const auto composeDragBar = [&] {
+        dragUi.begin("document-tabs-drag");
+        neo::tabBarView(dragUi, dragState, dragScreen, 0.0f, 320.0f);
+        dragUi.layout(320.0f, 400.0f);
+    };
+    const auto hitRect = [](const auto* element) {
+        return core::Rect{element->frame.x, element->frame.y,
+                          element->frame.width, element->frame.height};
+    };
+    composeDragBar();
+    const auto dragAHitId = "menubar.tabs." + std::to_string(dragA) + ".tooltip.hit";
+    const auto* dragAHit = dragUi.find(dragAHitId);
+    check(dragAHit && dragAHit->onPress && dragAHit->onDragUpdate && dragAHit->onRelease,
+          "tab title exposes press, drag and release callbacks");
+    if (dragAHit && dragAHit->onPress && dragAHit->onDragUpdate && dragAHit->onRelease) {
+        core::PointerEvent press;
+        press.x = 40.0; press.y = 16.0; press.action = core::PointerAction::Press;
+        press.button = core::PointerButton::Left; press.buttons = core::PointerButtons(core::PointerButton::Left);
+        dragAHit->onPress(press, hitRect(dragAHit));
+        core::dsl::DragEvent motion;
+        motion.x = 245.0; motion.y = 16.0; motion.totalX = 205.0;
+        motion.button = core::PointerButton::Left;
+        motion.buttons = core::PointerButtons(core::PointerButton::Left);
+        check(dragAHit->onDragUpdate(motion) &&
+              dragState.tabOrder == std::vector<std::uint64_t>({dragA, dragB, dragC}),
+              "drag preview leaves the model order untouched");
+        composeDragBar();
+        const auto* movedHit = dragUi.find(dragAHitId);
+        if (movedHit && movedHit->onHoverChanged) movedHit->onHoverChanged(true);
+        check(dragUi.state<std::uint64_t>("menubar.tabs.hovered") == 0 &&
+              !dragUi.find("menubar.tabs.tooltip"),
+              "drag hover cannot restore a tooltip over the moving tab");
+        const auto* edgeTimer = dragUi.find("menubar.tabs.drag.timer");
+        check(movedHit && movedHit->onRelease &&
+              dragUi.find("menubar.tabs.dragGhost") && edgeTimer && edgeTimer->onTimer,
+              "recomposed preview keeps the source hit identity and an edge timer");
+        if (edgeTimer && edgeTimer->onTimer) edgeTimer->onTimer();
+        check(dragState.tabScroll > 0.0f &&
+              dragState.tabOrder == std::vector<std::uint64_t>({dragA, dragB, dragC}),
+              "stationary edge timer scrolls without committing order");
+        composeDragBar();
+        movedHit = dragUi.find(dragAHitId);
+        if (movedHit && movedHit->onRelease) {
+            core::PointerEvent release;
+            release.x = 245.0; release.y = 16.0; release.action = core::PointerAction::Release;
+            release.button = core::PointerButton::Left;
+            movedHit->onRelease(release, hitRect(movedHit));
+        }
+        check(dragState.tabOrder == std::vector<std::uint64_t>({dragB, dragA, dragC}) &&
+              dragState.tabId == dragA,
+              "valid drag release commits one reorder without activating a different document");
+    }
+
+    composeDragBar();
+    const auto dragBPrefix = "menubar.tabs." + std::to_string(dragB);
+    const auto* dragBHit = dragUi.find(dragBPrefix + ".tooltip.hit");
+    if (dragBHit && dragBHit->onPress && dragBHit->onDragUpdate) {
+        core::PointerEvent press;
+        press.x = 40.0; press.y = 16.0; press.action = core::PointerAction::Press;
+        press.button = core::PointerButton::Left; press.buttons = core::PointerButtons(core::PointerButton::Left);
+        dragBHit->onPress(press, hitRect(dragBHit));
+        core::dsl::DragEvent motion;
+        motion.x = 220.0; motion.y = 16.0; motion.totalX = 180.0;
+        motion.button = core::PointerButton::Left;
+        motion.buttons = core::PointerButtons(core::PointerButton::Left);
+        dragBHit->onDragUpdate(motion);
+        check(neo::tab_bar_detail::requestDragCancelOnEscape(), "Escape requests drag cancellation");
+        composeDragBar();
+        const auto* canceledHit = dragUi.find(dragBPrefix + ".tooltip.hit");
+        const auto* canceledSurface = dragUi.find(dragBPrefix + ".surface");
+        if (canceledSurface && canceledSurface->onClick) canceledSurface->onClick();
+        if (canceledHit && canceledHit->onRelease) {
+            core::PointerEvent release;
+            release.x = 40.0; release.y = 16.0; release.action = core::PointerAction::Release;
+            release.button = core::PointerButton::Left;
+            canceledHit->onRelease(release, hitRect(canceledHit));
+        }
+        check(dragState.tabOrder == std::vector<std::uint64_t>({dragB, dragA, dragC}) &&
+              dragState.tabId == dragA &&
+              !neo::tab_bar_detail::requestDragCancelOnEscape(),
+              "canceled drag suppresses late click and release without changing order");
+    }
+    composeDragBar();
+    dragBHit = dragUi.find(dragBPrefix + ".tooltip.hit");
+    if (dragBHit && dragBHit->onPress && dragBHit->onDragUpdate && dragBHit->onRelease) {
+        core::PointerEvent press;
+        press.x = 40.0; press.y = 16.0; press.action = core::PointerAction::Press;
+        press.button = core::PointerButton::Left; press.buttons = core::PointerButtons(core::PointerButton::Left);
+        dragBHit->onPress(press, hitRect(dragBHit));
+        core::dsl::DragEvent motion;
+        motion.x = 220.0; motion.y = 16.0; motion.totalX = 180.0;
+        motion.button = core::PointerButton::Left;
+        motion.buttons = core::PointerButtons(core::PointerButton::Left);
+        dragBHit->onDragUpdate(motion);
+        core::PointerEvent cancel;
+        cancel.x = 40.0; cancel.y = 16.0; cancel.action = core::PointerAction::Cancel;
+        cancel.button = core::PointerButton::Left;
+        dragBHit->onRelease(cancel, hitRect(dragBHit));
+        cancel.action = core::PointerAction::Release;
+        dragBHit->onRelease(cancel, hitRect(dragBHit));
+        check(dragState.tabOrder == std::vector<std::uint64_t>({dragB, dragA, dragC}) &&
+              dragState.tabId == dragA && !neo::tab_bar_detail::dragInProgress,
+              "capture cancellation and late release cannot activate or reorder a tab");
+    }
 
     eui::Ui narrowTabUi;
     narrowTabUi.begin("document-tabs-narrow-card");
@@ -516,11 +634,11 @@ int main() {
     neo::loadDocument(revealState, path(barB)); const auto revealBId = revealState.tabId;
     neo::loadDocument(revealState, path(barC)); const auto revealCId = revealState.tabId;
     eui::Ui revealUi;
-    const eui::Screen revealScreen{256.0f, 400.0f}; // 200 DIP tab region after the two trailing actions.
+    const eui::Screen revealScreen{256.0f, 400.0f}; // 192 DIP tab region after the two trailing actions.
     revealUi.begin("document-tabs-reveal");
     neo::tabBarView(revealUi, revealState, revealScreen, 0.0f, 256.0f);
     check(std::fabs(revealState.tabScroll - 336.0f) < 0.01f,
-          "initial tab-bar compose reveals the active tail page in the 200 DIP region");
+          "initial tab-bar compose reveals the active tail page in the 192 DIP region");
 
     neo::tab_bar_detail::closeTabFromBar(revealState, revealCId, true, 186.0f, 16.0f);
     check(!neo::documentTab(revealState, revealCId) && revealState.tabId == revealBId &&
@@ -539,11 +657,19 @@ int main() {
     neo::tabBarView(revealUi, revealState, revealScreen, 0.0f, 256.0f);
     revealUi.layout(revealScreen);
     const auto* revealedActive = revealUi.find("menubar.tabs." + std::to_string(revealBId) + ".surface");
-    check(std::fabs(revealState.tabScroll - 156.0f) < 0.01f && revealedActive &&
-          std::fabs(revealedActive->frame.x - 24.0f) < 0.01f &&
-          revealedActive->frame.x + revealedActive->frame.width <= 200.01f &&
+    check(std::fabs(revealState.tabScroll - 160.0f) < 0.01f && revealedActive &&
+          std::fabs(revealedActive->frame.x - 16.0f) < 0.01f &&
+          revealedActive->frame.x + revealedActive->frame.width <= 192.01f &&
           !revealState.closeAnchorRevealPending,
           "real tab-bar compose consumes a cleared chain and reveals the active card inside the region");
+    const auto* bottomLeft = revealUi.find("menubar.tabs.region.bottom.left");
+    const auto* bottomRight = revealUi.find("menubar.tabs.region.bottom.right");
+    const auto* activeFace = revealUi.find("menubar.tabs." + std::to_string(revealBId) + ".face");
+    check(revealedActive && !bottomLeft && !bottomRight && activeFace &&
+          revealedActive->border.width == 0.0f &&
+          !revealUi.find("menubar.tabs." + std::to_string(revealBId) + ".right.edge") &&
+          activeFace->frame.width == revealedActive->frame.width + 16.0f,
+          "active tab uses one shoulder-to-shoulder face without bottom or duplicate side strokes");
 
     barState.doc.text += " dirty C"; ++barState.revision;
     neo::tab_bar_detail::closeTabFromBar(barState, barCId, true, 162.0f, 16.0f);

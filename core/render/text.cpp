@@ -50,6 +50,14 @@ constexpr int kGrayAtlasMaxSize = 2048;
 constexpr int kColorAtlasSize = 1024;
 constexpr FT_Int32 kGlyphLoadFlags = FT_LOAD_DEFAULT | FT_LOAD_COLOR | FT_LOAD_NO_SVG | FT_LOAD_TARGET_LIGHT;
 
+bool isItalicFace(FT_Face face) {
+    if (!face) return false;
+    if (face->style_flags & FT_STYLE_FLAG_ITALIC) return true;
+    std::string name = face->style_name ? face->style_name : "";
+    for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return name.find("italic") != std::string::npos || name.find("oblique") != std::string::npos;
+}
+
 struct FontFace {
     std::string path;
     FT_Face face = nullptr;
@@ -60,6 +68,7 @@ struct FontFace {
     float lineGap = 0.0f;
     float glyphScale = 1.0f;
     bool colored = false;
+    bool italic = false;
 
     FontFace() = default;
     FontFace(const FontFace&) = delete;
@@ -85,6 +94,7 @@ struct FontFace {
         lineGap = other.lineGap;
         glyphScale = other.glyphScale;
         colored = other.colored;
+        italic = other.italic;
         other.face = nullptr;
         return *this;
     }
@@ -1238,6 +1248,7 @@ bool loadFontFace(const std::string& path, float fontSize, FontFace& face) {
 
     face.path = path;
     face.face = loadedFace;
+    face.italic = isItalicFace(loadedFace);
     face.fileBytes = std::move(storage);
     face.size = fontSize;
     face.glyphScale = glyphScale;
@@ -1842,6 +1853,7 @@ struct TextPrimitive::Impl {
     void setFontFamily(const std::string& fontFamily);
     void setFontSize(float fontSize);
     void setFontWeight(int fontWeight);
+    void setFontItalic(bool value);
     void setColor(const Color& color);
     void setMaxWidth(float maxWidth);
     void setWrap(bool wrap);
@@ -2007,6 +2019,12 @@ void TextPrimitive::Impl::setFontWeight(int fontWeight) {
     style_.fontWeight = fontWeight;
     fontDirty_ = true;
     invalidateLayout();
+}
+
+void TextPrimitive::Impl::setFontItalic(bool value) {
+    if (style_.fontItalic == value) return;
+    style_.fontItalic = value;
+    invalidateVertices(); // Slant only changes ink, never advances/caret/wrapping.
 }
 
 void TextPrimitive::Impl::setColor(const Color& color) {
@@ -2539,6 +2557,7 @@ bool TextPrimitive::Impl::ensureGlyph(const ShapedGlyph& shaped) {
     Glyph glyph;
     glyph.advance = shaped.advance;
     glyph.colored = face.colored;
+    glyph.italicFace = face.italic;
 
     if (shaped.codepoint == ' ' || shaped.codepoint == '\t') {
         cacheGlyph(shaped.key, glyph);
@@ -2804,6 +2823,13 @@ void TextPrimitive::Impl::rebuildVertices() {
             Vec2 p2{x1, y1};
             Vec2 p3{x0, y1};
 
+            // Keep the baseline and all layout advances unchanged. Real italic
+            // faces already contain the slant; upright CJK fallback still needs it.
+            // Color emoji stay upright. Both D2D and GL consume these same quads.
+            if (style_.fontItalic && !glyph.italicFace && !glyph.colored) {
+                const float baseline = lineY + ascent_;
+                for (Vec2* p : {&p0, &p1, &p2, &p3}) p->x += (baseline-p->y) * 0.20f;
+            }
             if (hasTransformMatrix_) {
                 p0 = core::transformPoint(transformMatrix_, p0.x, p0.y);
                 p1 = core::transformPoint(transformMatrix_, p1.x, p1.y);
@@ -2928,11 +2954,7 @@ bool faceLooksItalic(const std::string& path) {
     if (openFontFace(library, path, &face, storage) != 0 || face == nullptr) {
         return false;
     }
-    bool italic = (face->style_flags & FT_STYLE_FLAG_ITALIC) != 0;
-    if (!italic && face->style_name != nullptr) {
-        const std::string name = face->style_name;
-        italic = name.find("talic") != std::string::npos || name.find("blique") != std::string::npos;
-    }
+    const bool italic = isItalicFace(face);
     FT_Done_Face(face);
     return italic;
 }
@@ -3197,6 +3219,7 @@ void TextPrimitive::setWrap(bool wrap) { impl_->setWrap(wrap); }
 void TextPrimitive::setHorizontalAlign(HorizontalAlign align) { impl_->setHorizontalAlign(align); }
 void TextPrimitive::setVerticalAlign(VerticalAlign align) { impl_->setVerticalAlign(align); }
 void TextPrimitive::setLineHeight(float lineHeight) { impl_->setLineHeight(lineHeight); }
+void TextPrimitive::setFontItalic(bool value) { impl_->setFontItalic(value); }
 void TextPrimitive::setStyle(const TextStyle& style) { impl_->setStyle(style); }
 void TextPrimitive::setVisualScale(float originX, float originY, float scale) { impl_->setVisualScale(originX, originY, scale); }
 void TextPrimitive::setTransform(const Transform& transform, const Rect& frame) { impl_->setTransform(transform, frame); }
@@ -3263,6 +3286,49 @@ Vec2 TextPrimitive::measureTextSize(const TextStyle& style) {
     scaled.maxWidth = style.maxWidth > 0.0f ? style.maxWidth * scale : 0.0f;
     const Vec2 size = Impl::measureTextSize(scaled);
     return Vec2{size.x / scale, size.y / scale};
+}
+
+Vec2 TextPrimitive::measureSingleLineInk(const TextStyle& style) {
+    std::scoped_lock lock(textCacheMutex());
+    const float scale = std::max(.1f, layoutPixelScale());
+    Impl probe;
+    probe.style_ = style;
+    probe.style_.fontSize = std::max(1.0f, style.fontSize * scale);
+    probe.style_.wrap = false;
+    probe.style_.maxWidth = 0;
+    if (!probe.loadFont()) return {0, style.fontSize};
+    // Weak ownership follows the font-stack cache, including unavailable-font
+    // fingerprint refresh. Configuration generation also invalidates old bounds.
+    struct CachedInk {
+        std::weak_ptr<void> holder;
+        std::uint64_t generation;
+        std::string text;
+        float size;
+        int weight;
+        bool italic;
+        Vec2 pixels;
+    };
+    static std::vector<CachedInk> cache;
+    const auto generation = fontResolutionGeneration().load(std::memory_order_relaxed);
+    for (const auto& entry : cache) {
+        if (!textCacheDisabled() && entry.generation == generation && entry.holder.lock() == probe.fontInfoStorage_ &&
+            entry.size == probe.style_.fontSize && entry.weight == style.fontWeight &&
+            entry.italic == style.fontItalic && entry.text == style.text)
+            return {entry.pixels.x / scale, entry.pixels.y / scale};
+    }
+    probe.rebuildLayout();
+    Vec2 bounds{0, probe.style_.fontSize};
+    if (!probe.lines_.empty() && probe.lines_.front().hasInk)
+        bounds = {probe.lines_.front().inkTop, probe.lines_.front().inkBottom};
+    if (!textCacheDisabled() && style.text.size() <= 4096) {
+        cache.erase(std::remove_if(cache.begin(), cache.end(), [generation](const CachedInk& entry) {
+            return entry.generation != generation || entry.holder.expired();
+        }), cache.end());
+        if (cache.size() >= 128) cache.erase(cache.begin());
+        cache.push_back({probe.fontInfoStorage_, generation, style.text, probe.style_.fontSize,
+                         style.fontWeight, style.fontItalic, bounds});
+    }
+    return {bounds.x / scale, bounds.y / scale};
 }
 
 TextAtlasDebugStats TextPrimitive::debugAtlasStats() {

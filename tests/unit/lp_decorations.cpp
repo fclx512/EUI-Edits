@@ -1398,6 +1398,277 @@ void testPartialViaCache() {
     check(neo::lp::planCache().version == versionB, "同文本重建缓存不应当推进 version");
 }
 
+// A changing preedit may reuse the previous temporary plan only within the
+// same document revision and one physical source line. Every candidate is
+// compared with a fresh full parser; the counters prove which path was used.
+void testPreeditPlanViaCache() {
+    using EditInfo = components::input_detail::DecoratorEditInfo;
+    const auto colors = neo::editorColors(neo::ThemeMode::Dark);
+    const auto style = neo::markdownStyle(16, "monospace", "monospace", colors);
+    const auto doc = [](const std::string& preedit) {
+        return std::string("# 标题\n\n前段 **标记**\n\n输入 ") + preedit + " 尾\n\n后段\n";
+    };
+    neo::lp::invalidatePlanCache();
+    auto step = [&](const std::string& label, const std::string& text,
+                    unsigned long long revision, bool committed, bool expectPartial) {
+        EditInfo info;
+        info.textRevision = revision;
+        info.committed = committed;
+        const auto retained = neo::lp::decorationCache().snapshot;
+        const auto retainedRows = retained ? retained->copyRows() : std::vector<IncDeco>{};
+        const auto before = neo::planDebugStats();
+        const auto& plan = neo::lp::cachedPlan(text, &info);
+        const auto after = neo::planDebugStats();
+        const std::string difference = planFieldDiff(plan, neo::buildLpPlan(text));
+        check(difference.empty(), label + ": cached plan differs from full oracle: " + difference);
+        check(plan.stats.partial == expectPartial &&
+              after.partial == before.partial + (expectPartial ? 1u : 0u) &&
+              after.full == before.full + (expectPartial ? 0u : 1u),
+              label + ": unexpected partial/full path (reason: " + neo::planRejectReason() + ")");
+        check(neo::lp::planCache().builtCommitted == committed &&
+              neo::lp::planCache().textRevision == revision,
+              label + ": cache must retain exact commit and document revision provenance");
+        const int cursor = IncModel::clampUtf8Boundary(text, static_cast<int>(text.size() / 2));
+        const auto decorBefore = neo::lp::decorationDebugStats();
+        const auto snapshot = neo::lp::cachedDecorationSnapshot(plan,
+            neo::lp::planCache().version, cursor, style, "monospace", neo::ThemeMode::Dark,
+            {}, nullptr, text, &colors, &info);
+        const auto decorAfter = neo::lp::decorationDebugStats();
+        std::vector<IncDeco> full;
+        neo::lp::buildDecorations(neo::buildLpPlan(text), style, cursor, full,
+                                  "monospace", {}, nullptr, text, &colors);
+        check(*snapshot == full, label + ": decorations differ from full oracle");
+        check(decorAfter.incremental == decorBefore.incremental + (expectPartial ? 1u : 0u) &&
+              decorAfter.full == decorBefore.full + (expectPartial ? 0u : 1u),
+              label + ": unexpected decoration path: " + neo::lp::decorationRejectReason());
+        check(!retained || *retained == retainedRows, label + ": old snapshot was mutated");
+        check(neo::lp::decorationCache().builtCommitted == committed,
+              label + ": temporary decorations must not acquire committed provenance");
+    };
+
+    step("preedit first n", doc("n"), 7, false, false);
+    step("preedit n to ni", doc("ni"), 7, false, true);
+    step("preedit ni to Chinese", doc("你"), 7, false, true);
+    step("preedit Chinese to emoji", doc("你😀"), 7, false, true);
+    step("preedit emoji to shorter Chinese", doc("中"), 7, false, true);
+    // 中 (E4 B8 AD) and 亭 (E4 BA AD) share bytes on both sides of
+    // the change. The derived edit must expand to whole UTF-8 code points.
+    step("preedit shared UTF-8 bytes", doc("亭"), 7, false, true);
+
+    // A missing previous decoration generation still requires a full build.
+    neo::lp::invalidateDecorationCache();
+    EditInfo preeditInfo;
+    preeditInfo.textRevision = 7;
+    preeditInfo.committed = false;
+    const auto decorBefore = neo::lp::decorationDebugStats();
+    const auto& current = neo::lp::planCache().plan;
+    const auto snapshot = neo::lp::cachedDecorationSnapshot(current,
+        neo::lp::planCache().version, 0, style, "monospace", neo::ThemeMode::Dark,
+        {}, nullptr, doc("亭"), &colors, &preeditInfo);
+    const auto decorAfter = neo::lp::decorationDebugStats();
+    std::vector<IncDeco> fullDecorations;
+    neo::lp::buildDecorations(current, style, 0, fullDecorations, "monospace",
+                              {}, nullptr, doc("亭"), &colors);
+    check(*snapshot == fullDecorations && decorAfter.full == decorBefore.full + 1 &&
+          decorAfter.incremental == decorBefore.incremental,
+          "preedit decorations without a previous generation must use the full oracle");
+
+    step("empty preedit cancellation", doc(""), 7, true, false);
+    step("new preedit begins", doc("n"), 7, false, false);
+    step("new preedit changes", doc("ni"), 7, false, true);
+    step("IME result commits", doc("你"), 8, true, false);
+    step("changed body revision", doc("你中"), 9, false, false);
+    step("preedit resumes on new revision", doc("你文"), 9, false, true);
+
+    // Source-line boundaries remain valid edits: first byte, last byte before
+    // LF, and the document's final byte without a trailing LF.
+    neo::lp::invalidatePlanCache();
+    step("line-start initial", "前段\n\nn正文\n\n后段\n", 20, false, false);
+    step("line-start change", "前段\n\nni正文\n\n后段\n", 20, false, true);
+    neo::lp::invalidatePlanCache();
+    step("line-end initial", "前段\n\n正文 n\n\n后段\n", 21, false, false);
+    step("line-end change", "前段\n\n正文 ni\n\n后段\n", 21, false, true);
+    neo::lp::invalidatePlanCache();
+    step("EOF initial", "前段\n\n尾段 n", 22, false, false);
+    step("EOF change", "前段\n\n尾段 ni", 22, false, true);
+
+    // Model the temporary display text after replacing a selected Chinese
+    // and emoji range. This is a plan-cache sequence, not native selection or
+    // IME input; the first preedit must be full, then its changes may be local.
+    neo::lp::invalidatePlanCache();
+    step("selection committed baseline", "前段\n\n选区 中文😀 后文\n\n尾段\n", 23, true, false);
+    step("selection replaced by short preedit", "前段\n\n选区 n 后文\n\n尾段\n", 23, false, false);
+    step("selection preedit extends", "前段\n\n选区 ni 后文\n\n尾段\n", 23, false, true);
+    step("selection preedit becomes Chinese", "前段\n\n选区 你 后文\n\n尾段\n", 23, false, true);
+
+    // Document-wide md4c state can cross paragraph boundaries. The existing
+    // partial proof must reject even a single-line preedit in another block.
+    neo::lp::invalidatePlanCache();
+    step("reference-definition initial", "前段\n\n[x]: /url\n\n正文 n\n\n后段\n", 24, false, false);
+    check(neo::lp::planCache().plan.stats.linkRefDef,
+          "reference-definition fixture must carry the document-wide risk flag");
+    step("reference-definition fallback", "前段\n\n[x]: /url\n\n正文 ni\n\n后段\n", 24, false, false);
+    check(neo::planRejectReason().find("链接引用定义") != std::string::npos,
+          "reference-definition preedit must fall back for the intended risk");
+    neo::lp::invalidatePlanCache();
+    step("HTML-risk initial", "前段\n\n<script>\n内容\n</script>\n\n正文 n\n\n后段\n", 25, false, false);
+    check(neo::lp::planCache().plan.stats.htmlBlockRisk,
+          "HTML fixture must carry the document-wide risk flag");
+    step("HTML-risk fallback", "前段\n\n<script>\n内容\n</script>\n\n正文 ni\n\n后段\n", 25, false, false);
+    check(neo::planRejectReason().find("HTML") != std::string::npos,
+          "HTML-risk preedit must fall back for the intended risk");
+
+    neo::lp::invalidatePlanCache();
+    step("cross-line initial", "前段 n\n后段 m\n\n结尾\n", 10, false, false);
+    step("cross-line preedit change", "前段 ni\n后段 mi\n\n结尾\n", 10, false, false);
+    neo::lp::invalidatePlanCache();
+    step("newline initial", doc("n"), 11, false, false);
+    step("newline introduced", doc("n\n新行"), 11, false, false);
+    neo::lp::invalidatePlanCache();
+    step("fence initial", "前段\n\n```cpp\nx n\n```\n\n尾段\n", 12, false, false);
+    step("fence preedit change", "前段\n\n```cpp\nx ni\n```\n\n尾段\n", 12, false, false);
+    neo::lp::invalidatePlanCache();
+    step("missing-info initial", doc("n"), 13, false, false);
+    const auto noInfoBefore = neo::planDebugStats();
+    const auto& noInfo = neo::lp::cachedPlan(doc("ni"), nullptr);
+    const auto noInfoAfter = neo::planDebugStats();
+    check(!noInfo.stats.partial && noInfoAfter.full == noInfoBefore.full + 1 &&
+          planFieldDiff(noInfo, neo::buildLpPlan(doc("ni"))).empty(),
+          "missing edit info must use the full parser and equal its oracle");
+    neo::lp::invalidatePlanCache();
+}
+
+// Same-text cache hits must not manufacture provenance. Presentation changes,
+// skipped generations and document switches must still invalidate reuse.
+void testPreeditDecorationGuards() {
+    using EditInfo = components::input_detail::DecoratorEditInfo;
+    auto colors = neo::editorColors(neo::ThemeMode::Dark);
+    auto style = neo::markdownStyle(16, "monospace", "monospace", colors);
+    std::string dir;
+    std::set<int> folds;
+    unsigned long long themeRev = 100;
+    EditInfo info;
+    info.committed = false;
+    info.textRevision = 50;
+    const auto doc = [](const std::string& value) {
+        return "# 标题\n\n输入 **" + value + "** 尾\n\n"
+            "- [ ] 任务\n\n[链接](target.md) 与 `代码`\n\n"
+            "| 中文 | emoji |\n| --- | --- |\n| 中 | 🙂 |\n\n尾段\n";
+    };
+    auto publish = [&](const std::string& text, int expected, bool copiedPlan = false) {
+        const auto& cached = neo::lp::cachedPlan(text, &info);
+        const auto copy = copiedPlan ? cached : neo::LpPlan{};
+        const auto& plan = copiedPlan ? copy : cached;
+        const int cursor = static_cast<int>(text.find("尾"));
+        const auto before = neo::lp::decorationDebugStats();
+        const auto snap = neo::lp::cachedDecorationSnapshot(plan,
+            neo::lp::planCache().version, cursor, style, "monospace", neo::ThemeMode::Dark,
+            dir, &folds, text, &colors, &info, themeRev);
+        const auto after = neo::lp::decorationDebugStats();
+        std::vector<IncDeco> oracle;
+        neo::lp::buildDecorations(neo::buildLpPlan(text), style, cursor, oracle,
+                                  "monospace", dir, &folds, text, &colors);
+        check(*snap == oracle, "preedit guard oracle: " + text.substr(0, 40));
+        check(after.incremental - before.incremental == (expected == 1 ? 1u : 0u) &&
+              after.full - before.full == (expected == 0 ? 1u : 0u),
+              "preedit guard path expected " + std::to_string(expected));
+    };
+    neo::lp::invalidatePlanCache();
+    publish(doc("中"), 0);
+    publish(doc("文"), 1);
+    publish(doc("文🙂"), 1); // shifted links, table cells and hidden markers
+    publish(doc("中"), 1);
+    publish(doc("中"), -1); // identical bytes reuse their generation
+    ++themeRev;
+    colors.text = eui::Color{0.25f, 0.5f, 0.75f, 1.0f};
+    style = neo::markdownStyle(16, "monospace", "monospace", colors);
+    publish(doc("你"), 0);
+    style.bodySize = 18;
+    publish(doc("你好"), 0);
+    style.codeFontFamily = "Consolas";
+    publish(doc("你"), 0);
+    dir = "preedit-other-directory";
+    publish(doc("中文"), 0);
+    folds.insert(0);
+    publish(doc("中"), 0);
+    publish(doc("文"), 1);
+    folds.clear();
+    publish(doc("你"), 0);
+    ++info.textRevision;
+    publish(doc("中文"), 0);
+    publish(doc("中"), 1);
+    // Plan advanced without a matching decoration: previous decorations no
+    // longer belong to prevPlan, even though the revision did not change.
+    neo::lp::cachedPlan(doc("跳过"), &info);
+    publish(doc("文"), 0);
+    publish(doc("中"), 0, true); // foreign plan cannot borrow cached proof
+    neo::lp::invalidatePlanCache();
+    publish(doc("你"), 0); // tab/document switch with the same revision
+    info.committed = true;
+    publish(doc("你"), -1); // same bytes do not stamp a new commit chain
+    ++info.textRevision;
+    publish(doc("提交"), 0); // commit without a trusted delta stays full
+    info.committed = false;
+    publish(doc("n"), 0);
+    publish(doc("ni"), 1);
+    neo::lp::invalidatePlanCache();
+}
+
+// Exercise real displayState composition replacement, including reverse UTF-8
+// selection and changing widths, against fresh full decoration/layout oracles.
+void testPreeditDecorationLayout() {
+    using namespace components::input_detail;
+    const std::string body = "# 标题\n\n前段\n\n输入 **中文🙂** 尾\n\n"
+        "- [ ] 任务\n\n[链接](target.md) 与 `代码`\n\n尾段\n";
+    const auto colors = neo::editorColors(neo::ThemeMode::Dark);
+    const auto style = neo::markdownStyle(16, "monospace", "monospace", colors);
+    for (bool reverse : {false, true}) {
+        neo::lp::invalidatePlanCache();
+        IncModel::InputState state;
+        IncModel::loadDocument(state, body);
+        const int beg = static_cast<int>(body.find("中文🙂"));
+        const int end = beg + static_cast<int>(std::string("中文🙂").size());
+        IncModel::moveCursorTo(state, reverse ? end : beg, false);
+        IncModel::moveCursorTo(state, reverse ? beg : end, true);
+        for (const std::string composition : {"n", "ni", "你", "你🙂", "中", "亭"}) {
+            state.compositionText = composition;
+            ++state.compositionRevision;
+            auto& display = IncModel::displayState(state, true);
+            DecoratorEditInfo info;
+            info.textRevision = state.textRevision;
+            info.committed = false;
+            LineDecorationChanges changes;
+            info.changes = &changes;
+            const auto& plan = neo::lp::cachedPlan(display.text, &info);
+            const auto snap = neo::lp::cachedDecorationSnapshot(plan, neo::lp::planCache().version,
+                state.cursor, style, "monospace", neo::ThemeMode::Dark, {}, nullptr,
+                display.text, &colors, &info);
+            std::vector<IncDeco> full;
+            neo::lp::buildDecorations(neo::buildLpPlan(display.text), style, state.cursor,
+                full, "monospace", {}, nullptr, display.text, &colors);
+            check(*snap == full, "display-state preedit decorations equal full oracle");
+            check(changes.previous.expired() && changes.next.expired(),
+                  "preedit must not publish committed cursor/layout change receipts");
+            for (float width : {180.0f, 600.0f}) {
+                IncModel::InputLayout::build(display, width, 100, width + 20, 10, 10, 10,
+                    20, "monospace", 16, true, LineDecorationView(snap.get()), snap, &changes);
+                const auto lines = IncModel::measureLines(display.text, "monospace", 16, width, &full);
+                check(display.cachedLines.size() == lines.size(), "preedit visual row count");
+                for (std::size_t i = 0; i < std::min(lines.size(), display.cachedLines.size()); ++i) {
+                    const auto diff = lineFieldDiff(display.cachedLines[i], lines[i]);
+                    check(diff.empty(), "preedit layout row " + std::to_string(i) + ": " + diff);
+                }
+            }
+            check(state.text == body && !state.pendingEdit.valid,
+                  "composition must preserve committed body and edit provenance");
+        }
+        state.compositionText.clear();
+        check(&IncModel::displayState(state, false) == &state && state.text == body,
+              "composition cancellation restores the committed state");
+    }
+    neo::lp::invalidatePlanCache();
+}
+
 // ── T12/T5：安全正文 2k / 20k / 100k 行的全量 vs 局部耗时（只记录不断言毫秒）──
 void testPartialPerf() {
     using Clock = std::chrono::steady_clock;
@@ -2355,7 +2626,8 @@ void testCompletedTaskInlineRunBoundaries() {
     check(bold->style.get().weight == 700,
           "completed task merge should preserve the strong style on bold text");
     check(code->style.get().fontFamily == style.codeFontFamily &&
-              sameColor(code->style.get().background, style.codeBackground),
+              sameColor(code->style.get().background, style.inlineCodeBackground) &&
+              sameColor(code->style.get().borderColor, style.inlineCodeBorder) && code->style.get().borderWidth == 1,
           "completed task inline code should retain its local code font and background");
     check(lead->style.get().background.a == 0.0f && middle->style.get().background.a == 0.0f &&
               link->style.get().background.a == 0.0f && wiki->style.get().background.a == 0.0f &&
@@ -2488,13 +2760,15 @@ void testHeadingHierarchyAndInlineSpanBoundaries() {
           "underline should apply only to its own text while inheriting heading bold");
     check(innerRun != nullptr && innerRun->style.get().weight == 700 && innerRun->style.get().underline &&
               innerRun->style.get().fontFamily == style.codeFontFamily &&
-              sameColor(innerRun->style.get().background, style.codeBackground),
+              sameColor(innerRun->style.get().background, style.inlineCodeBackground) &&
+              sameColor(innerRun->style.get().borderColor, style.inlineCodeBorder) && innerRun->style.get().borderWidth == 1,
           "nested inline code should inherit underline and heading bold while keeping local code styling");
     check(tailRun != nullptr && tailRun->style.get().underline && tailRun->style.get().background.a == 0.0f,
           "underline should continue after nested code without inheriting its background");
     check(outerRun != nullptr && outerRun->style.get().weight == 700 && !outerRun->style.get().underline &&
               outerRun->style.get().fontFamily == style.codeFontFamily &&
-              sameColor(outerRun->style.get().background, style.codeBackground),
+              sameColor(outerRun->style.get().background, style.inlineCodeBackground) &&
+              sameColor(outerRun->style.get().borderColor, style.inlineCodeBorder) && outerRun->style.get().borderWidth == 1,
           "adjacent code should keep code styling without inheriting the preceding underline");
     check(suffixRun != nullptr && !suffixRun->style.get().underline && suffixRun->style.get().background.a == 0.0f,
           "styles should stop at the end of the adjacent code span");
@@ -3872,7 +4146,7 @@ int main() {
         check(undone && flip.text == flipOriginal, "Ctrl+Z 撤销路径应恢复原文本");
     }
 
-    // ── ⑪ S3d 斜体（降级版）：字体真有斜体字面才生成段 ──
+    // ── ⑪ 斜体：真斜体优先，缺字面时保留倾斜意图 ──
     {
         const std::string kItalicDoc =
             "有 *斜体* 的段落\n"
@@ -3898,7 +4172,7 @@ int main() {
             neo::lp::buildDecorations(italicPlan, style, 0, table, "C:/Windows/Fonts/times.ttf");
             bool hasItalicRun = false;
             for (const LineRun& run : table[0].runs) {
-                if (slice(kItalicDoc, run.beg, run.end) == "斜体" && run.style.get().fontFamily == timesItalic) {
+                if (slice(kItalicDoc, run.beg, run.end) == "斜体" && run.style.get().fontFamily == timesItalic && run.style.get().italic) {
                     hasItalicRun = true;
                 }
             }
@@ -3907,7 +4181,7 @@ int main() {
             bool mergedBoldItalic = false;
             for (const LineRun& run : table[2].runs) {
                 if (slice(kItalicDoc, run.beg, run.end) == "粗斜" && run.style.get().weight >= 700 &&
-                    run.style.get().fontFamily == timesItalic) {
+                    run.style.get().fontFamily == timesItalic && run.style.get().italic) {
                     mergedBoldItalic = true;
                 }
             }
@@ -3916,15 +4190,16 @@ int main() {
             std::printf("  (跳过斜体装饰判据：本机没有 C:/Windows/Fonts/times.ttf)\n");
         }
 
-        // 没有斜体字面的字体：`*斜体*` 不生成段（内容保持原样），粗体不受影响。
+        // 没有斜体字面的字体也生成倾斜段，并与粗体独立合并。
         {
             std::vector<LineDecoration> table;
             neo::lp::buildDecorations(italicPlan, style, 0, table, "C:/Windows/Fonts/simhei.ttf");
-            check(table[0].runs.empty(), "字体没有斜体字面时，斜体段落不应产出任何样式段");
+            check(table[0].runs.size() == 1 && table[0].runs[0].style.get().italic &&
+                  table[0].runs[0].style.get().fontFamily.empty(), "缺少斜体字面时保留常规字体和倾斜意图");
             bool boldWithoutItalic = false;
             for (const LineRun& run : table[2].runs) {
                 if (slice(kItalicDoc, run.beg, run.end) == "粗斜" && run.style.get().weight >= 700 &&
-                    run.style.get().fontFamily.empty()) {
+                    run.style.get().fontFamily.empty() && run.style.get().italic) {
                     boldWithoutItalic = true;
                 }
             }
@@ -5666,6 +5941,9 @@ int main() {
     testPartialProofBoundaries();
     testPartialOracle();
     testPartialViaCache();
+    testPreeditPlanViaCache();
+    testPreeditDecorationGuards();
+    testPreeditDecorationLayout();
     testPartialPerf();
 
     // ── T16：换到非 markdown 文档时应用层清计划缓存（version 单调不归零）────

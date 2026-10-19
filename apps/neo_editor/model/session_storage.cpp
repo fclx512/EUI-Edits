@@ -6,9 +6,11 @@
 #include "model/text_file.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -234,6 +236,24 @@ bool readFile(const fs::path& path, std::uintmax_t maximum, std::string& output)
     return true;
 }
 
+// Only a failed create-only publication needs byte comparison with its winner.
+// Normal snapshot reuse uses metadata; restore verifies content IDs once.
+bool bodyMatches(const fs::path& path, const std::string& expected) {
+    std::error_code error;
+    if (fs::file_size(path, error) != expected.size() || error) return false;
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return false;
+    std::array<char, 64u * 1024u> chunk{};
+    std::size_t offset = 0;
+    while (offset < expected.size()) {
+        const std::size_t count = std::min(chunk.size(), expected.size() - offset);
+        input.read(chunk.data(), static_cast<std::streamsize>(count));
+        if (!input || std::memcmp(chunk.data(), expected.data() + offset, count) != 0) return false;
+        offset += count;
+    }
+    return input.peek() == std::char_traits<char>::eof() && !input.bad();
+}
+
 bool jsonString(const eui::json::Value& value, std::size_t maximum, std::string& out) {
     return value.type() == eui::json::Type::String && value.string(out) &&
            out.size() <= maximum && validUtf8(out);
@@ -388,6 +408,9 @@ bool parseManifest(const std::string& bytes, const fs::path& directory,
             if (version == kSchemaVersion && body.size() != declaredBytes) {
                 return false;  // 截断/膨胀的 body 与清单声明不符：fail closed，不恢复半个草稿。
             }
+            if (version == kSchemaVersion && bodyNameFromId(contentId(body)) != name) {
+                return false;  // 同长度的合法 UTF-8 篡改也不能作为原草稿恢复。
+            }
             if (body.size() > kMaximumSessionDocumentBytes - totalDocumentBytes) return false;
             totalDocumentBytes += body.size();
             record.document.text = std::move(body);
@@ -469,31 +492,47 @@ bool write(const std::vector<WriteRecord>& records, TabId activeId) {
     if (error) return false;
     const fs::path manifest = directory / kManifestName;
 
-    // 正文按内容寻址：算出的名字已存在就复用（未变页零字节写入），否则原子写新 body。
-    // body 是不可变文件，绝不原地覆盖旧清单引用的文件。
+    // 正文按内容寻址。稳态复用只查大小，不为未变的大文档逐次全量读盘；
+    // 真正恢复时才核对 contentId，同尺寸外部改写不在每轮提交中检测。
     std::vector<std::string> bodyNames(records.size());
     std::vector<fs::path> created;
     std::set<std::string> keep;
+    const auto discardCreated = [&created] {
+        for (const fs::path& candidate : created) {
+            std::error_code ignored;
+            fs::remove(candidate, ignored);
+        }
+    };
     for (std::size_t index = 0; index < records.size(); ++index) {
         const WriteRecord& record = records[index];
         if (!record.dirty) continue;
         const std::string name = bodyNameFromId(contentId(record.document->text));
         bodyNames[index] = name;
-        keep.insert(name);
+        if (!keep.insert(name).second) continue;  // 同一次提交中的相同正文只处理一次。
         const fs::path body = directory / name;
         std::error_code existsError;
-        if (fs::exists(body, existsError) && !existsError) {
-            continue;  // 内容未变：已有同内容 body，直接复用。
+        const bool exists = fs::exists(body, existsError);
+        std::error_code sizeError;
+        const bool wrongSize = exists &&
+            (fs::file_size(body, sizeError) != record.document->text.size() || sizeError);
+        if (existsError || wrongSize) {
+            discardCreated();
+            return false;
         }
-        if (!atomicwrite::writeFile(body, record.document->text)) {
-            for (const fs::path& candidate : created) { std::error_code ignored; fs::remove(candidate, ignored); }
+        if (exists) continue;  // 正常复用零正文读写。
+        // Another instance may publish the name after the check above. Never
+        // replace its file: a matching winner is reusable, a mismatch is kept
+        // as evidence and leaves the old manifest untouched.
+        if (!atomicwrite::writeFileCreateOnly(body, record.document->text)) {
+            if (bodyMatches(body, record.document->text)) continue;
+            discardCreated();
             return false;
         }
         created.push_back(body);
     }
 
     if (!writeManifest(manifest, records, activeId, bodyNames)) {
-        for (const fs::path& candidate : created) { std::error_code ignored; fs::remove(candidate, ignored); }
+        discardCreated();
         return false;
     }
 

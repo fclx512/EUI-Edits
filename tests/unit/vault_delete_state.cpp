@@ -23,6 +23,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <set>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -387,21 +388,22 @@ void completeVaultListing(TempTree& tree) {
     check(!error && writeSample(deep / "last.txt"), "create document below the former depth cap");
 
     const auto all = neo::vault::scan(neo::textfile::pathToUtf8(root));
-    check(all.ok, "complete listing scan completes");
-    check(containsEntry(all.roots, ".hidden/build/node_modules/pkg/deep.md") &&
-              containsEntry(all.roots, "depth/d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/d10/d11/last.txt"),
-          "dot directories, build directories, and paths beyond eight levels remain scannable");
-    check(containsEntry(all.roots, "unknown.bin") && all.fileCount == 4,
-          "the default complete listing includes unknown regular files without reading contents");
+    check(all.ok, "shallow listing scan completes");
+    check(containsEntry(all.roots, ".hidden") && containsEntry(all.roots, "depth") &&
+              containsEntry(all.roots, "unknown.bin") && all.fileCount == 2,
+          "first batch lists only direct files and unopened directories");
+    const auto deepHidden = neo::vault::scanPage(neo::textfile::pathToUtf8(root),
+                                                 ".hidden/build/node_modules/pkg");
+    const auto deepDepth = neo::vault::scanPage(neo::textfile::pathToUtf8(root),
+                                                "depth/d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/d10/d11");
+    check(containsEntry(deepHidden.roots, ".hidden/build/node_modules/pkg/deep.md") &&
+              containsEntry(deepDepth.roots, "depth/d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/d10/d11/last.txt"),
+          "deep paths remain readable when their exact level is requested");
     std::vector<neo::vault::Row> filteredRows;
     neo::vault::flattenFiltered(all, ".hidden/build", filteredRows);
-    check(filteredRows.size() == 1 &&
-              filteredRows.front().relative == ".hidden/build/node_modules/pkg/deep.md",
-          "path filtering emits only matching visible file rows");
+    check(filteredRows.empty(), "filter excludes files in unopened folders");
     neo::vault::flattenFiltered(all, ".HIDDEN/BUILD", filteredRows);
-    check(filteredRows.size() == 1 &&
-              filteredRows.front().relative == ".hidden/build/node_modules/pkg/deep.md",
-          "path filtering remains ASCII case-insensitive");
+    check(filteredRows.empty(), "case-insensitive filter remains limited to loaded files");
 
     const fs::path many = root / "many";
     fs::create_directories(many, error);
@@ -412,9 +414,19 @@ void completeVaultListing(TempTree& tree) {
         if (!file) { created = false; break; }
     }
     check(created, "create more than the former 20,000-entry listing cap");
-    const auto large = neo::vault::scan(neo::textfile::pathToUtf8(many));
-    check(large.ok && large.fileCount == 20005,
-          "large vault listing retains every entry beyond the former cap");
+    auto large = neo::vault::scan(neo::textfile::pathToUtf8(many));
+    std::set<std::string> loaded;
+    int pageCount = 0;
+    for (;;) {
+        check(large.ok && large.roots.size() <= neo::vault::kPageSize,
+              "each requested batch is bounded to 500 direct entries");
+        for (const auto& entry : large.roots) loaded.insert(entry.relative);
+        ++pageCount;
+        if (!large.hasMore) break;
+        large = neo::vault::scanPage(neo::textfile::pathToUtf8(many), {}, large.cursor);
+    }
+    check(loaded.size() == 20005 && pageCount == 41,
+          "explicit continuation reaches every large-directory entry without duplicates");
 }
 
 void vaultListingOrderMatchesReference(TempTree& tree) {
@@ -446,8 +458,8 @@ void vaultListingOrderMatchesReference(TempTree& tree) {
     std::sort(expectedFiles.begin(), expectedFiles.end(), byName);
     std::sort(expectedDirectories.begin(), expectedDirectories.end(), byName);
     const auto result = neo::vault::scan(utf8(root));
-    check(result.ok && result.warning.empty() && result.directoryCount == 3 && result.fileCount == 40,
-          "sorting fixture retains every file and directory without warnings");
+    check(result.ok && result.warning.empty() && result.directoryCount == 3 && result.fileCount == 10,
+          "root batch counts only its direct entries without warnings");
     check(result.roots.size() == expectedDirectories.size() + expectedFiles.size(),
           "sorting fixture root count is unchanged");
     if (result.roots.size() != expectedDirectories.size() + expectedFiles.size()) return;
@@ -455,10 +467,12 @@ void vaultListingOrderMatchesReference(TempTree& tree) {
         const auto& folder = result.roots[i];
         check(folder.isDir && folder.name == expectedDirectories[i] && folder.relative == folder.name,
               "directories precede files and retain reference order and relative paths");
-        check(folder.children.size() == expectedFiles.size(), "nested sort retains all children");
-        if (folder.children.size() != expectedFiles.size()) continue;
+        check(folder.children.empty() && !folder.childrenLoaded, "nested files stay unloaded by default");
+        const auto childPage = neo::vault::scanPage(utf8(root), folder.relative);
+        check(childPage.roots.size() == expectedFiles.size(), "explicit child batch retains all files");
+        if (childPage.roots.size() != expectedFiles.size()) continue;
         for (std::size_t j = 0; j < expectedFiles.size(); ++j) {
-            const auto& child = folder.children[j];
+            const auto& child = childPage.roots[j];
             check(!child.isDir && child.name == expectedFiles[j] && child.children.empty() &&
                       child.relative == folder.name + "/" + expectedFiles[j],
                   "nested files retain UTF-8 names, reference order and relative paths");

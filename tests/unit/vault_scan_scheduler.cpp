@@ -3,10 +3,13 @@
 #include "core/platform/async.h"
 #include "state/vault_cache.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <set>
@@ -265,6 +268,86 @@ int main() {
         check(!neo::vaultcache::query(root).scan && neo::vaultcache::query(active).scan &&
                   neo::vaultcache::stats().estimatedBytes < asyncBytes,
               "byte budget evicts large inactive snapshot while preserving the active root");
+    }
+
+    // Real directory paging: a cold root reads at most one 500-item batch,
+    // continuation reuses its enumerator, and unopened children stay untouched.
+    neo::vaultcache::resetForTest();
+    {
+        namespace fs = std::filesystem;
+        const fs::path rootPath = fs::temp_directory_path() /
+            ("neo-vault-pages-" + std::to_string(Clock::now().time_since_epoch().count()));
+        fs::create_directories(rootPath / "nested");
+        for (int i = 0; i < 1010; ++i) {
+            std::ofstream(rootPath / ("item-" + std::to_string(i) + ".md")) << i;
+        }
+        std::ofstream(rootPath / "nested" / "not-loaded.md") << "nested";
+        const std::string root = rootPath.string();
+        auto first = neo::vault::scan(root);
+        check(first.ok && first.roots.size() == neo::vault::kPageSize && first.hasMore && first.cursor,
+              "cold scan publishes exactly one direct batch with a continuation");
+        check(std::all_of(first.roots.begin(), first.roots.end(), [](const auto& entry) {
+                  return entry.children.empty();
+              }), "cold scan never descends into child folders");
+        std::vector<neo::vault::Row> filtered;
+        neo::vault::flattenFiltered(first, "nested/not-loaded", filtered);
+        check(filtered.empty(), "filter does not search an unopened child");
+        std::set<std::string> names;
+        auto take = [&](const neo::vault::ScanResult& page) {
+            for (const auto& entry : page.roots) names.insert(entry.relative);
+        };
+        take(first);
+        auto second = neo::vault::scanPage(root, {}, first.cursor);
+        take(second);
+        auto third = neo::vault::scanPage(root, {}, second.cursor);
+        take(third);
+        check(second.ok && second.roots.size() == neo::vault::kPageSize && second.hasMore &&
+                  third.ok && third.roots.size() == 11 && !third.hasMore && names.size() == 1011,
+              "three bounded batches cover direct entries once without duplicates");
+        auto child = neo::vault::scanPage(root, "nested");
+        check(child.ok && child.roots.size() == 1 && child.roots[0].relative == "nested/not-loaded.md",
+              "expanded child reads only its own direct entries");
+        int examined = 0;
+        const auto canceled = neo::vault::scanPage(root, {}, {}, [&] { return ++examined > 2; });
+        check(canceled.cancelled && examined == 3,
+              "a switched root interrupts a batch before scanning the remaining siblings");
+        check(neo::vaultcache::requestScan(root).scheduled &&
+                  pumpUntil([&] { return !neo::vaultcache::query(root).scanning; }),
+              "cache publishes only the root's first batch asynchronously");
+        while (true) {
+            const auto view = neo::vaultcache::query(root);
+            if (!view.scan || !view.scan->hasMore) break;
+            const bool scheduled = neo::vaultcache::requestPage(root, {}).scheduled;
+            check(scheduled, "root continuation schedules once");
+            if (!scheduled) break;
+            const bool settled = pumpUntil([&] { return !neo::vaultcache::query(root).loadingPages; });
+            check(settled, "root continuation publishes");
+            if (!settled) break;
+        }
+        neo::vaultcache::setExpanded(root, {"nested"});
+        check(neo::vaultcache::requestPage(root, "nested").scheduled &&
+                  pumpUntil([&] { return !neo::vaultcache::query(root).loadingPages; }),
+              "expanding a child reads its first batch");
+        auto cached = neo::vaultcache::query(root);
+        auto nested = std::find_if(cached.scan->roots.begin(), cached.scan->roots.end(), [](const auto& entry) {
+            return entry.relative == "nested";
+        });
+        check(nested != cached.scan->roots.end() && nested->childrenLoaded && nested->children.size() == 1,
+              "only the requested child becomes loaded");
+        std::ofstream(rootPath / "nested" / "later.md") << "later";
+        check(neo::vaultcache::requestPage(root, "nested", true).scheduled &&
+                  pumpUntil([&] { return !neo::vaultcache::query(root).loadingPages; }),
+              "targeted child refresh publishes after a file operation");
+        cached = neo::vaultcache::query(root);
+        nested = std::find_if(cached.scan->roots.begin(), cached.scan->roots.end(), [](const auto& entry) {
+            return entry.relative == "nested";
+        });
+        check(nested != cached.scan->roots.end() && nested->children.size() == 2,
+              "child refresh sees the new file without rescanning descendants");
+        neo::vault::closeCursors(first);
+        check(neo::vault::scanPage(root, {}, first.cursor).cancelled,
+              "closing a stale continuation prevents a later page read");
+        fs::remove_all(rootPath);
     }
 
     neo::vaultcache::resetForTest();

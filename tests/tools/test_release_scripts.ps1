@@ -11,6 +11,16 @@ if (Test-Path -LiteralPath $EvidenceDirectory) { throw 'Test evidence directory 
 New-Item -ItemType Directory -Path $EvidenceDirectory | Out-Null
 $pwsh = Join-Path $PSHOME 'pwsh.exe'
 $results = @()
+# Both Windows workflows call this preflight once before candidate preparation.
+# Keep these Python regressions out of the 81 CTest cases and their nested gate.
+$regressionOutput = @(& $Python -B (Join-Path $repo 'tests/python/test_check_i18n.py') -v 2>&1)
+$regressionCode = $LASTEXITCODE
+$regressionOutput | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'i18n-checker-regressions.log') -Encoding utf8
+$results += [ordered]@{ name = 'i18n-checker-regressions'; status = if ($regressionCode -eq 0) { 'PASS' } else { 'FAIL' }; exitCode = $regressionCode }
+if ($regressionCode -ne 0) {
+    $results | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'results.json') -Encoding utf8
+    throw "Translation checker regressions failed with exit code $regressionCode. See $EvidenceDirectory/i18n-checker-regressions.log."
+}
 function Check-Invocation {
     param([string]$Name, [string]$Script, [string[]]$Arguments, [bool]$ShouldPass, [string]$ExpectedText)
     $output = @(& $pwsh -NoProfile -NonInteractive -File (Join-Path $repo "scripts/$Script") @Arguments 2>&1)
@@ -52,6 +62,75 @@ function Check-FailedStage {
     $lockCheck.Dispose()
     $script:results += [ordered]@{ name = $Name; status = 'PASS'; exitCode = $code }
 }
+function Check-I18nRegressionFailure {
+    # Invoke the real CI preflight with a failing Python suite in a separate
+    # repository-shaped fixture. It must stop before any release guard runs.
+    $fixture = Join-Path $EvidenceDirectory 'i18n-regression-failure'
+    foreach ($directory in @('scripts', 'tests/tools', 'tests/python')) {
+        New-Item -ItemType Directory -Path (Join-Path $fixture $directory) -Force | Out-Null
+    }
+    Copy-Item -LiteralPath (Join-Path $repo 'scripts/neoeditor-release-common.ps1') -Destination (Join-Path $fixture 'scripts')
+    Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $fixture 'tests/tools/test_release_scripts.ps1')
+    'print("injected checker regression failure"); raise SystemExit(7)' |
+        Set-Content -LiteralPath (Join-Path $fixture 'tests/python/test_check_i18n.py') -Encoding utf8
+    $run = Join-Path $fixture 'out/run'
+    $output = @(& $pwsh -NoProfile -NonInteractive -File (Join-Path $fixture 'tests/tools/test_release_scripts.ps1') `
+        -EvidenceDirectory $run -Python $Python 2>&1)
+    $code = $LASTEXITCODE
+    $output | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'i18n-regression-failure.log') -Encoding utf8
+    $record = @(Get-Content -LiteralPath (Join-Path $run 'results.json') -Raw | ConvertFrom-Json)
+    if ($code -eq 0 -or $record.Count -ne 1 -or $record[0].status -ne 'FAIL' -or
+        $record[0].exitCode -ne 7 -or ($output -join "`n") -notmatch 'regressions failed with exit code 7') {
+        throw 'CI preflight did not stop on the failing translation checker suite.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $run 'occupied')) { throw 'Failed Python regressions continued into release guard checks.' }
+    $script:results += [ordered]@{ name = 'i18n-regression-failure'; status = 'PASS'; exitCode = $code }
+}
+function Check-BuildRetention {
+    param([string]$Name, [bool]$Keep)
+    # Only tiny simulated trees in this fixture are created/removed. The real
+    # preparation script and receipt run normally; no CMake/MSBuild is invoked.
+    $fixture = Join-Path $EvidenceDirectory $Name
+    & git clone --local --shared --no-checkout $repo $fixture 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot prepare isolated retention fixture.' }
+    foreach ($directory in @('scripts', 'cmake', 'tests/tools')) {
+        New-Item -ItemType Directory -Path (Join-Path $fixture $directory) | Out-Null
+    }
+    Copy-Item -LiteralPath (Join-Path $repo 'scripts/prepare-neoeditor-release.ps1'), (Join-Path $repo 'scripts/neoeditor-release-common.ps1') -Destination (Join-Path $fixture 'scripts')
+    Copy-Item -LiteralPath (Join-Path $repo 'cmake/NeoEditorVersion.cmake') -Destination (Join-Path $fixture 'cmake')
+    Copy-Item -LiteralPath (Join-Path $repo '.gitignore') -Destination $fixture
+    'raise SystemExit(0)' | Set-Content -LiteralPath (Join-Path $fixture 'tests/tools/check_i18n.py') -Encoding utf8
+    @'
+param([string]$BuildDirectory, [string]$CMake, [string]$Python, [string]$Generator, [int]$Parallel)
+New-Item -ItemType Directory -Path $BuildDirectory | Out-Null
+'SIMULATED_CHECK_CACHE' | Set-Content -LiteralPath (Join-Path $BuildDirectory 'CMakeCache.txt')
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $fixture 'scripts/check-neoeditor.ps1') -Encoding utf8
+    @'
+param([string]$Version, [string]$BuildDirectory, [string]$OutputDirectory, [string]$CMake, [string]$Dumpbin, [string]$Generator, [int]$Parallel)
+New-Item -ItemType Directory -Path $BuildDirectory, $OutputDirectory | Out-Null
+'SIMULATED_PACKAGE_CACHE' | Set-Content -LiteralPath (Join-Path $BuildDirectory 'CMakeCache.txt')
+'SIMULATED_ASSET' | Set-Content -LiteralPath (Join-Path $OutputDirectory "EUI-Edits-$Version-windows-x64.exe")
+exit 0
+'@ | Set-Content -LiteralPath (Join-Path $fixture 'scripts/package-neoeditor.ps1') -Encoding utf8
+    $run = Join-Path $fixture 'out/run'
+    $candidate = Join-Path $fixture 'out/candidate'
+    $arguments = @('-NoProfile', '-NonInteractive', '-File', (Join-Path $fixture 'scripts/prepare-neoeditor-release.ps1'),
+        '-Version', $version, '-Python', $Python, '-RunDirectory', $run, '-OutputDirectory', $candidate)
+    if ($Keep) { $arguments += '-KeepBuildDirectories' }
+    $output = @(& $pwsh @arguments 2>&1)
+    $code = $LASTEXITCODE
+    $output | Set-Content -LiteralPath (Join-Path $EvidenceDirectory "$Name.log") -Encoding utf8
+    $record = Get-Content -LiteralPath (Join-Path $run 'result.json') -Raw | ConvertFrom-Json
+    if ($code -ne 0 -or $record.status -ne 'READY_FOR_GUI' -or $record.keepBuildDirectories -ne $Keep -or
+        $record.gui -ne 'NOT_RUN' -or $record.publication -ne 'NOT_RUN') { throw "$Name did not preserve the expected status/retention boundaries." }
+    foreach ($buildName in @('check-build', 'package-build')) {
+        if ((Test-Path -LiteralPath (Join-Path $run $buildName)) -ne $Keep) { throw "${Name}: incorrect build retention for $buildName." }
+        if (-not (Test-Path -LiteralPath (Join-Path $run "$buildName-evidence/CMakeCache.txt"))) { throw "$Name lost the simulated build evidence." }
+    }
+    if ($record.sha256 -ne (Get-FileHash -Algorithm SHA256 -LiteralPath $record.executable).Hash) { throw "$Name lost candidate identity." }
+    $script:results += [ordered]@{ name = $Name; status = 'PASS'; exitCode = $code }
+}
 $absentBuild = Join-Path $EvidenceDirectory 'never-build'
 $emptyOutput = Join-Path $EvidenceDirectory 'empty-output'
 $occupied = Join-Path $EvidenceDirectory 'occupied'
@@ -87,6 +166,9 @@ try {
 } finally { $lock.Dispose() }
 Check-FailedStage 'native-stage-failure' 7 'i18n-preflight failed with exit code 7'
 Check-FailedStage 'source-drift' 0 'Candidate source or Git state changed'
+Check-I18nRegressionFailure
+Check-BuildRetention 'default-build-cleanup' $false
+Check-BuildRetention 'explicit-build-retention' $true
 if (Test-Path -LiteralPath $absentBuild) { throw 'A rejected request created a build tree.' }
 if (Test-Path -LiteralPath $emptyOutput) { throw 'Preflight created a candidate output.' }
 if ((Get-FileHash -LiteralPath $sentinel).Hash -ne $sentinelHash) { throw 'Existing candidate was changed.' }

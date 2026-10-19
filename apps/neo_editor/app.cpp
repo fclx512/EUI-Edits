@@ -17,6 +17,8 @@
 #include "ui/find_bar.h"
 #include "ui/image_preview.h"
 #include "ui/menu_bar.h"
+#include "ui/markdown_toolbar.h"
+#include "ui/window_chrome.h"
 #include "ui/metrics.h"
 #include "ui/mindmap_preview.h"
 #include "ui/overlays.h"
@@ -203,6 +205,11 @@ void restoreSession(neo::AppState& state) {
 
 // 应用级快捷键。控件没消费的按键才会走到这里（input 会自己吃掉编辑类快捷键）。
 void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
+    if (event.isDown() && event.key == eui::InputKey::Escape &&
+        neo::tab_bar_detail::requestDragCancelOnEscape()) {
+        requestUpdate();
+        return;
+    }
     if (state.savePickerOpen || state.sessionClosePending || state.closeApproved) return;
     if (!event.isDown()) {
         return;
@@ -221,6 +228,19 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
     }
     if (state.vaultPromptKind != neo::VaultPromptKind::None) {
         if (event.key == eui::InputKey::Escape) neo::cancelVaultPrompt(state);
+        return;
+    }
+    if (state.linkEditorOpen) {
+        // The modal input handles text, Enter and IME first. Unhandled keys must
+        // not open a find bar or dismiss an underlying panel behind the dialog.
+        if (event.key == eui::InputKey::Escape) neo::cancelLinkEditor(state);
+        return;
+    }
+    if (neo::themeWorkbenchOpen()) {
+        if (event.key == eui::InputKey::Escape) {
+            neo::handleThemeWorkbenchEscape(state);
+            requestUpdate();
+        }
         return;
     }
     // F2 is handled only by the focused library row. A saved selection alone
@@ -259,6 +279,9 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
                     state.pending=neo::PendingAction::None;state.pendingNewMarkdown=false;requestUpdate();
                 } else if (state.languageMenuOpen) {
                     state.languageMenuOpen=false;requestUpdate();
+                } else if (state.markdownHeadingMenuOpen) {
+                    state.markdownHeadingMenuOpen = false;
+                    requestUpdate();
                 } else if (state.settingsOpen) {
                     state.settingsOpen = false;
                     requestUpdate();
@@ -271,10 +294,8 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
                 } else if (state.openMenu != neo::MenuKind::None) {
                     state.openMenu = neo::MenuKind::None;
                     requestUpdate();
-                } else if (state.linkEditorOpen || state.vaultPromptKind != neo::VaultPromptKind::None ||
-                           state.vaultDeletePending) {
-                    // 模态弹窗（编辑链接 / 文档库新建-重命名 / 删除确认）。
-                    state.linkEditorOpen = false;
+                } else if (state.vaultPromptKind != neo::VaultPromptKind::None || state.vaultDeletePending) {
+                    // 文档库新建-重命名 / 删除确认。
                     state.vaultPromptKind = neo::VaultPromptKind::None;
                     state.vaultDeletePending = false;
                     requestUpdate();
@@ -451,7 +472,17 @@ DslAppConfig& appConfigStorage() {
             // 其余可点元素（菜单/按钮/侧栏行）的"手型"统一映射成箭头。
             .interactiveCursor(eui::CursorShape::Arrow)
             .onKeyEvent([](const eui::KeyEvent& event) { handleShortcut(neo::state(), event); })
-            .onCloseRequest([] { return neo::requestCloseDocument(neo::state()); })
+            .onCloseRequest([] {
+                auto& state = neo::state();
+                // The theme decision precedes the document-close transaction.
+                // Its asynchronous completion and per-document confirmations
+                // re-enter WM_CLOSE without requiring the theme decision again.
+                // Cancelling that transaction clears exitClosing, so a later
+                // independent close still checks retained theme drafts.
+                if (!state.closeApproved && !state.sessionClosePending && !state.exitClosing &&
+                    !neo::allowThemeWorkbenchWindowClose(state)) return false;
+                return neo::requestCloseDocument(state);
+            })
             .onShutdown([] {
                 systemAppearanceObserver().stop();
                 // Async workers have already stopped here. Approved WM_CLOSE has
@@ -522,7 +553,7 @@ void vaultWatchTick(neo::AppState& state) {
 // 大纲在 editorView 完成装饰/解析之后投影既有计划，绝不抢在编辑器之前调用
 // cachedPlan：那会把带编辑 delta 的增量重建链截断，退成整篇重解析。
 void refreshOutlineFromEditor(neo::AppState& state) {
-    if (state.vaultTab != neo::VaultTab::Outline || state.mode != neo::EditorMode::Vault) {
+    if (!state.markdownOutlineOpen || neo::markdownImmersive(state)) {
         return;
     }
     if (!state.markdownCapable()) {
@@ -534,24 +565,17 @@ void refreshOutlineFromEditor(neo::AppState& state) {
         return;
     }
     const neo::lp::PlanCache& cache = neo::lp::planCache();
-    if (!cache.valid || cache.text != state.doc.text ||
-        state.outlinePlanVersion == cache.version) {
-        return;
-    }
-    state.outline = neo::outlineFromPlan(state.doc.text, cache.plan);
-    state.outlinePlanVersion = cache.version;
-    app::requestUpdate();  // 本帧侧栏已构建，下一帧展示新目录。
+    if (cache.valid && neo::refreshVisibleOutline(state,cache.text,cache.plan,cache.version))
+        app::requestUpdate();
 }
 
 void applyOutlineJump(eui::Ui& ui, neo::AppState& state) {
-    if (state.pendingOutlineJumpByte < 0) {
-        return;
-    }
+    const int requestedByte = neo::takePendingOutlineJump(state);
+    if (requestedByte < 0) return;
     using InputModel = components::input_detail::InputModel;
     auto& input = ui.state<InputModel::InputState>(neo::editorInputId(state));
     const int target = InputModel::clampUtf8Boundary(
-        input.text, std::clamp(state.pendingOutlineJumpByte, 0, static_cast<int>(input.text.size())));
-    state.pendingOutlineJumpByte = -1;
+        input.text, std::clamp(requestedByte, 0, static_cast<int>(input.text.size())));
 
     // 目标标题可能藏在已折叠的父章节中，只展开它的祖先。
     const neo::lp::PlanCache& cache = neo::lp::planCache();
@@ -629,7 +653,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     vaultWatchTick(state);
     for(const auto& path:core::window::consumeDroppedPaths(core::window::mainWindowHandle())) {
         if (neo::documentModalOpen(state)) continue;
-        if(state.settingsOpen) {neo::showToast(state,neo::i18n::tr("safety.return_editor"),neo::i18n::tr("safety.drop_return"));continue;}
+        if(state.settingsOpen || neo::themeWorkbenchOpen()) {neo::showToast(state,neo::i18n::tr("safety.return_editor"),neo::i18n::tr("safety.drop_return"));continue;}
         neo::requestOpenPath(state,path);
     }
 
@@ -638,7 +662,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     // 与"文件→打开"完全同链。没有请求时这是一次廉价的文件存在性检查。
     // Leave a forwarded request on disk until the current modal transaction
     // ends; consuming it now could replace the user's pending close/open choice.
-    if (!neo::documentModalOpen(state)) {
+    if (!neo::documentModalOpen(state) && !neo::themeWorkbenchOpen()) {
         const std::string forwardedPath = neo::platform::takeSingleInstanceOpenPath();
         if (!forwardedPath.empty()) {
             // 转发打开 = 用户明确要这篇文档：设置页开着也让位回到编辑区
@@ -660,6 +684,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
         state.outlinePlanVersion = static_cast<unsigned long long>(-1);
         state.outlineScroll = 0.0f;
         state.pendingOutlineJumpByte = -1;
+        state.pendingLinkJumpRevision = static_cast<unsigned long long>(-1);
         state.findMatchesRevision = static_cast<unsigned long long>(-1);
         state.findCurrent = -1;
         // 刚换过文档，上一条编辑命令已经没意义了。
@@ -682,7 +707,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     neo::tickRecoveryWrite(state);
     neo::applyFindState(ui, state);
     applyOutlineJump(ui, state);
-    if (state.vaultTab == neo::VaultTab::Outline && state.mode == neo::EditorMode::Vault) {
+    if (state.markdownCapable() && state.markdownOutlineOpen && !state.markdownImmersive) {
         const int cursor = ui.state<components::input_detail::InputModel::InputState>(neo::editorInputId(state)).cursor;
         state.outlineCurrentByte = -1;
         for (const auto& entry : state.outline) {
@@ -691,13 +716,32 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
         }
     }
 
-    const bool vaultMode = state.mode == neo::EditorMode::Vault;
+    const bool immersive = neo::markdownImmersive(state);
+    if ((immersive || state.settingsOpen || neo::themeWorkbenchOpen()) &&
+        (ui.state<neo::tab_bar_detail::DragState>("menubar.tabs.drag").source != 0 ||
+         neo::tab_bar_detail::dragInProgress)) {
+        neo::tab_bar_detail::cancelDrag(ui);
+    }
+    const bool vaultMode = state.mode == neo::EditorMode::Vault && !immersive;
     const float panelWidth = vaultMode
         ? std::min(state.vaultWidth, std::max(0.0f, screen.width * 0.38f)) : 0.0f;
     const float dividerWidth = panelWidth > 0.0f ? 1.0f : 0.0f;
-    const float statusHeight = state.showStatusBar ? metrics.statusBarHeight : 0.0f;
-    const float bodyHeight = std::max(0.0f, screen.height - metrics.menuBarHeight - statusHeight);
+    const float menuHeight = immersive ? 0.0f : metrics.menuBarHeight;
+    const bool fullPage = state.settingsOpen || neo::themeWorkbenchOpen();
+    const float chromeHeight = immersive && !fullPage ? 44.0f : metrics.menuBarHeight;
+    neo::platform::chrome::update(core::window::nativeWindowInfo(core::window::mainWindowHandle()).platformWindow,
+        screen.width, chromeHeight, immersive || fullPage, immersive && !fullPage ? 240.0f : 120.0f);
+    if (fullPage) neo::platform::chrome::exclude(0, 0, screen.width - 140, chromeHeight);
+    const float statusHeight = state.showStatusBar && !immersive ? metrics.statusBarHeight : 0.0f;
+    const float bodyHeight = std::max(0.0f, screen.height - menuHeight - statusHeight);
     const float editorWidth = std::max(0.0f, screen.width - panelWidth - dividerWidth);
+    const float writingHeight = neo::markdownToolbarHeight(state, editorWidth);
+    const float outlineWidth = neo::markdownOutlineWidth(state, editorWidth);
+    // Reserve the TXT capsule's remaining overlap inside the text content;
+    // the input itself spans the editor so its scrollbar stays at the edge.
+    const float capsuleRail = neo::writingCapsuleRailWidth(state, editorWidth - outlineWidth, metrics);
+    const float textWidth = std::max(0.0f, editorWidth - outlineWidth);
+    const float contentWidth = std::max(0.0f, textWidth - capsuleRail);
 
     ui.stack("root")
         .size(screen.width, screen.height)
@@ -708,7 +752,10 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                 .color(colors.window)
                 .build();
 
-            if (state.settingsOpen) {
+            if (neo::themeWorkbenchOpen()) {
+                neo::themeWorkbenchOverlay(ui, state, screen);
+                neo::toastOverlay(ui, state, screen);
+            } else if (state.settingsOpen) {
                 // 设置是同一主窗口内的完整页面。跳过编辑器树，避免背后编辑区可命中；
                 // editor.input 的 retained UI state 仍留在 Ui::StateStore 中。
                 neo::settingsPanelOverlay(ui, state, screen);
@@ -721,7 +768,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                         // 菜单栏本身画在最上层的 menuBarView 里（它要压过菜单弹层的
                         // 全屏关闭遮罩），这里只留出同高的位置。
                         ui.rect("page.menuBar")
-                            .size(screen.width, metrics.menuBarHeight)
+                            .size(screen.width, menuHeight)
                             .color(colors.toolbar)
                             .build();
 
@@ -736,10 +783,14 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                                 }
                                 // When the card spans almost the entire text viewport,
                                 // keep search results visible underneath it.
-                                const float findClearance = state.findOpen && editorWidth < 578.0f
+                                const float findClearance = state.findOpen && contentWidth < 578.0f
                                     ? std::min(neo::findPanelHeight(state) + 24.0f,
                                                std::max(0.0f, bodyHeight - 80.0f)) : 0.0f;
                                 ui.column("editor.region").size(editorWidth, bodyHeight).content([&] {
+                                    if (capsuleRail > 0.0f)
+                                        ui.rect("editor.region.background").size(editorWidth, bodyHeight)
+                                            .ignoreLayout().color(colors.editor).build();
+                                    neo::markdownToolbarView(ui, state, editorWidth);
                                     if (findClearance > 0.0f)
                                         ui.rect("editor.find.clearance").size(editorWidth, findClearance)
                                             .color(colors.editor).build();
@@ -748,7 +799,12 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                                         // 整篇 InputLayout::build（layout）——从 app 侧无法再细分，
                                         // 探测时用暖/冷两轮之差把"重排整篇"从固定开销里分离出来。
                                         neo::tracelog::Span editorSpan("editor-view");
-                                        neo::editorView(ui, state, metrics, editorWidth, bodyHeight - findClearance);
+                                        const float textHeight = std::max(0.0f, bodyHeight - findClearance - writingHeight);
+                                        ui.row("editor.with.outline").size(editorWidth,textHeight).content([&] {
+                                            neo::editorView(ui,state,metrics,textWidth,textHeight,capsuleRail);
+                                            refreshOutlineFromEditor(state);
+                                            if(outlineWidth>0) neo::outlinePanelView(ui,state,outlineWidth,textHeight);
+                                        }).build();
                                     }
                                 }).build();
                                 if (state.findEditorFocusPending) {
@@ -758,7 +814,13 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                                 }
                                 {
                                     neo::tracelog::Span outlineSpan("outline");
-                                    refreshOutlineFromEditor(state);
+                                    if (state.linkAnchorPending) {
+                                        const auto& plan = neo::lp::planCache();
+                                        if (!state.markdownCapable())
+                                            neo::resolvePendingLinkAnchor(state, neo::LpPlan{}, state.doc.text);
+                                        else if (plan.valid)
+                                            neo::resolvePendingLinkAnchor(state, plan.plan, plan.text);
+                                    }
                                 }
                                 // View 菜单排队的思维导图预览（阶段 C）：必须在
                                 // editorView 之后消费——那时 lp 计划已按当前正文
@@ -773,7 +835,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                             })
                             .build();
 
-                        if (state.showStatusBar) {
+                        if (state.showStatusBar && !immersive) {
                             traceComposeStage("status-bar", [&] {
                                 neo::statusBarView(ui, state, screen.width);
                             });
@@ -782,9 +844,16 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                     .build();
 
                 if (state.findOpen) {
-                    const float findWidth = std::min(550.0f, std::max(280.0f, editorWidth - 28.0f));
-                    neo::findBarView(ui, state, findWidth, screen.width - findWidth - 14.0f,
-                                     metrics.menuBarHeight + 12.0f, screen);
+                    const float findWidth = std::min(550.0f, std::max(280.0f, contentWidth - 28.0f));
+                    neo::findBarView(ui, state, findWidth, screen.width - outlineWidth - findWidth - 14.0f,
+                                     menuHeight + writingHeight + 12.0f, screen);
+                }
+                if(state.markdownCapable() && state.markdownOutlineOpen && !immersive && outlineWidth==0) {
+                    const float floatingWidth=std::min(280.0f,editorWidth-24);
+                    ui.stack("outline.floating").position(screen.width-floatingWidth-8,menuHeight+writingHeight)
+                        .size(floatingWidth,bodyHeight-writingHeight).zIndex(700).content([&]{
+                            neo::outlinePanelView(ui,state,floatingWidth,bodyHeight-writingHeight,true);
+                        }).build();
                 }
                 // 弹层最后声明，保证盖在最上层。
                 neo::toastOverlay(ui, state, screen);
@@ -801,10 +870,11 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                 neo::vaultDeleteOverlay(ui, state, screen);
                 // "编辑链接"弹窗（右键菜单 → 编辑链接，2026-09-26）。
                 neo::linkEditorOverlay(ui, state, screen);
+                neo::markdownHeadingMenu(ui, state, screen, panelWidth + dividerWidth, menuHeight);
                 // 菜单栏最后画、zIndex 也最高：菜单展开时的全屏关闭遮罩在它下面，
                 // "点另一个菜单直接切过去"才成立（详见 ui/menu_bar.h）。
                 traceComposeStage("menu-bar", [&] {
-                    neo::menuBarView(ui, state, screen);
+                    if (!immersive) neo::menuBarView(ui, state, screen);
                 });
 
                 // 全屏图片预览（S3f 批次 E）：一切之上的模态层 —— 打开时点哪儿都只
@@ -814,6 +884,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                 if (!state.mindmapPreview.inlineMode) neo::mindmapPreviewOverlay(ui, state, screen);
                 neo::languageOverlay(ui,state,screen);
             }
+            neo::windowChromeView(ui,screen,chromeHeight);
         })
         .build();
     neo::riskOverlay(ui,state,screen);
