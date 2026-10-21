@@ -241,6 +241,78 @@ int main() {
     const auto* closeHit=ui->find("window.close.bg");
     check(closeHit && std::fabs(closeHit->frame.x+closeHit->frame.width-1000)<.01f &&
           closeHit->frame.y==0 && closeHit->frame.height==34, "close hit covers the top-right client pixel");
+    // Exercise the production toolbar, so exclusions track the actual controls
+    // for both writing modes instead of a duplicated hard-coded titlebar span.
+    for (const char* language : {"markdown", "text"}) {
+        state.newDocumentLanguage = language;
+        state.markdownImmersive = true;
+        for (const float width : {380.0f, 608.0f, 1000.0f}) {
+            neo::platform::chrome::beginFrame(width, 44);
+            runtime.compose("immersive-window-controls",width,500,[&](core::dsl::Ui& view,const core::dsl::Screen& screen){
+                ui=&view;
+                neo::markdownToolbarView(view,state,width);
+                neo::windowChromeView(view,screen,44);
+            });
+            const auto caption = [&](float x, float y) {
+                return neo::platform::chrome::captionAt(x,y,width,44);
+            };
+            for (const char* id : {"markdown.typewriter.bg", "markdown.immersive.bg", "window.minimize.bg",
+                                   "window.maximize.bg", "window.close.bg"}) {
+                const auto* button=ui->find(id);
+                check(button && !caption(button->frame.x+1,button->frame.y+1) &&
+                      !caption(button->frame.x+button->frame.width-1,button->frame.y+button->frame.height-1),
+                      "immersive mode and window buttons retain their complete client hit area");
+            }
+            check(caption(width-150,22) && caption(width-220,3) && caption(width-170,41),
+                  "empty immersive titlebar space between and around controls drags the window");
+            check(!caption(width-150,45), "body below immersive titlebar remains client input");
+        }
+    }
+    // Adaptive layout changes visibility only, never the user's view choices.
+    state.newDocumentLanguage = "markdown";
+    state.path.clear();
+    state.markdownImmersive = false;
+    state.mode = neo::EditorMode::Vault;
+    state.showStatusBar = true;
+    state.showLineNumbers = true;
+    state.markdownOutlineOpen = true;
+    state.autoCompactWindow = true;
+    neo::updateCompactWindow(state, 1000);
+    check(!state.compactWindow && neo::vaultPanelVisible(state) && neo::statusBarVisible(state),
+          "wide layout respects manual visibility choices");
+    neo::updateCompactWindow(state, 799);
+    compose(799);
+    check(state.compactWindow && !neo::vaultPanelVisible(state) && !neo::statusBarVisible(state) &&
+          !neo::lineNumbersVisible(state) && neo::markdownToolbarHeight(state, 799) == 0 &&
+          neo::markdownOutlineWidth(state, 1000) == 0 &&
+          neo::writingCapsuleRailWidth(state, 799, neo::uiMetrics(state)) == 0 &&
+          !ui->find("markdown.toolbar"), "narrow layout removes chrome and its occupied space");
+    check(state.mode == neo::EditorMode::Vault && state.showStatusBar && state.showLineNumbers &&
+          state.markdownOutlineOpen, "auto hiding does not overwrite manual preferences");
+    neo::updateCompactWindow(state, 820);
+    check(state.compactWindow, "small width oscillations do not restore panels");
+    neo::updateCompactWindow(state, 880);
+    compose(880);
+    check(!state.compactWindow && neo::vaultPanelVisible(state) && neo::statusBarVisible(state) &&
+          neo::lineNumbersVisible(state) && ui->find("markdown.toolbar"), "widening restores previous visibility");
+    state.mode = neo::EditorMode::Simple;
+    state.showStatusBar = false;
+    state.showLineNumbers = false;
+    state.markdownOutlineOpen = false;
+    neo::updateCompactWindow(state, 700);
+    neo::updateCompactWindow(state, 1000);
+    check(!neo::vaultPanelVisible(state) && !neo::statusBarVisible(state) && !neo::lineNumbersVisible(state) &&
+          !state.markdownOutlineOpen, "manual off remains off after a narrow/wide cycle");
+    neo::updateCompactWindow(state, 700);
+    state.autoCompactWindow = false;
+    neo::updateCompactWindow(state, 700);
+    check(!state.compactWindow && neo::markdownToolbarHeight(state, 700) > 0,
+          "disabling automatic simplification immediately restores normal layout");
+    state.autoCompactWindow = true;
+    state.markdownImmersive = true;
+    neo::updateCompactWindow(state, 700);
+    compose(700);
+    check(ui->find("markdown.immersive.bg"), "manual immersive mode keeps its exit control in a narrow window");
     runtime.shutdown();
     if (!failures) std::cout << "Markdown toolbar, undo, visibility, focus modes and typewriter geometry PASS\n";
     return failures ? 1 : 0;

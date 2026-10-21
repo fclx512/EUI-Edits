@@ -3,6 +3,7 @@
 #include "state/app_actions.h"
 #include "ui/find_bar.h"
 #include "ui/metrics.h"
+#include "ui/window_layout.h"
 #include "ui/tab_bar.h"
 #include "ui/widgets.h"
 #include "ui/ui_language.h"
@@ -44,7 +45,7 @@ enum class Command {
     None = 0, NewText, NewMarkdown, Open, CloseTab, Exit, Save, SaveAs, OpenVault,
     Undo, Redo, Cut, Copy, SelectAll, Find, Syntax, Mindmap,
     Simple, Vault, Dark, Light, FollowSystem, Lines, Status, Wrap, Readable,
-    LanguageSystem, LanguageChinese, LanguageEnglish, Settings, ConvertUtf8,
+    LanguageSystem, LanguageChinese, LanguageEnglish, Settings, ConvertUtf8, AutoCompact,
     FontSizeBase = 100, EncodingBase = 200
 };
 
@@ -94,6 +95,7 @@ inline std::vector<MenuItem> viewMenuItems(const AppState& state) {
         toggle(Command::Vault, "menu.vault", state.mode==EditorMode::Vault),
         toggle(Command::Lines, "menu.lines", state.showLineNumbers),
         toggle(Command::Status, "menu.status", state.showStatusBar),
+        toggle(Command::AutoCompact, "settings.auto_compact", state.autoCompactWindow),
         toggle(Command::Wrap, "menu.wrap", state.wordWrap()).withSeparatorBefore(),
         toggle(Command::Readable, "menu.readable", state.readableWidth),
         MenuItem(i18n::tr("menu.appearance"), {
@@ -108,6 +110,15 @@ inline std::vector<MenuItem> viewMenuItems(const AppState& state) {
             toggle(Command::LanguageChinese, "menu.language_chinese", i18n::preference()=="zh-CN"),
             toggle(Command::LanguageEnglish, "menu.language_english", i18n::preference()=="en")}).withSeparatorBefore(),
         action(Command::Settings, "menu.settings").withShortcut("Ctrl+,"),
+    };
+}
+inline std::vector<MenuItem> compactMenuItems(const AppState& state, float submenuWidth = 0.0f) {
+    const MenuItem::ChildrenPresentation children{submenuWidth, false, false};
+    return {
+        MenuItem(i18n::tr("menu.file"), fileMenuItems()).withChildrenPresentation(children),
+        MenuItem(i18n::tr("menu.edit"), editMenuItems()).withChildrenPresentation(children),
+        MenuItem(i18n::tr("menu.view"), viewMenuItems(state)).withChildrenPresentation(children),
+        action(Command::Settings, "menu.settings"),
     };
 }
 inline int commandAtPath(const std::vector<MenuItem>& items, const std::vector<int>& path) {
@@ -169,6 +180,7 @@ inline void dispatchCommand(AppState& state, int id) {
         case Command::FollowSystem: applyFollowSystemTheme(state); break;
         case Command::Lines: state.showLineNumbers=!state.showLineNumbers; persistSettings(state); break;
         case Command::Status: state.showStatusBar=!state.showStatusBar; applyShowStatusBar(state); break;
+        case Command::AutoCompact: state.autoCompactWindow=!state.autoCompactWindow; persistSettings(state); break;
         case Command::Wrap: state.wrapOverride=state.wordWrap()?0:1; break;
         case Command::Readable: state.readableWidth=!state.readableWidth; persistSettings(state); break;
         case Command::LanguageSystem: applyUiLanguage(state,"system"); break;
@@ -191,6 +203,48 @@ inline void dispatchViewItem(AppState& state, const std::vector<int>& path) {
 
 inline float menuTitleWidth(const std::string& label, const UiMetrics& metrics) {
     return estimateTextWidth(label, metrics.menuFontSize) + metrics.menuTitlePadding * 2.0f;
+}
+struct MenuBarLayout {
+    bool compact = false;
+    std::array<float, 3> titleX{};
+    std::array<float, 3> titleWidth{};
+    float settingsX = 0, settingsWidth = 0;
+    float compactX = 10, compactWidth = 0;
+    float compactPopupWidth = 0, compactSubmenuWidth = 0;
+    float tabsLeft = 0, tabsRight = 0;
+};
+inline MenuBarLayout menuBarLayout(const AppState& state, float screenWidth, const UiMetrics& metrics) {
+    MenuBarLayout layout;
+    const std::array<const char*, 3> labels{{i18n::tr("menu.file"), i18n::tr("menu.edit"), i18n::tr("menu.view")}};
+    float cursor = 10.0f;
+    for (std::size_t index = 0; index < labels.size(); ++index) {
+        layout.titleX[index] = cursor;
+        layout.titleWidth[index] = menuTitleWidth(labels[index], metrics);
+        cursor += layout.titleWidth[index] + metrics.menuTitleGap;
+    }
+    layout.settingsX = cursor;
+    layout.settingsWidth = menuTitleWidth(i18n::tr("menu.settings_short"), metrics);
+    layout.compactWidth = menuTitleWidth(i18n::tr("menu.all"), metrics);
+    // Keep the first two popup levels side by side at the minimum width. A
+    // normal 300-DIP root menu would completely cover its own child menu.
+    layout.compactPopupWidth = std::clamp(screenWidth * 0.32f, 116.0f, 148.0f);
+    layout.compactSubmenuWidth = std::min(300.0f,
+        std::max(1.0f, screenWidth - layout.compactX - layout.compactPopupWidth - 24.0f));
+    const float fullMenuEnd = layout.settingsX + layout.settingsWidth;
+    const float normalTabsRight = screenWidth - platform::chrome::controlsWidth - platform::chrome::dragWidth;
+    // Keep one readable active tab as well as New/List/Pin (28 each and an 8-DIP
+    // gap). Reserving only the actions can leave a 13-DIP sliver for the tab.
+    const float tabAndActions = tabpresentation::layout::tabWidth + 3.0f * 28.0f + 8.0f;
+    layout.compact = state.compactWindow || fullMenuEnd + 12.0f + tabAndActions > normalTabsRight;
+    // A compact header still leaves a draggable strip before the controls.
+    layout.tabsRight = screenWidth - platform::chrome::controlsWidth -
+        (layout.compact ? 32.0f : platform::chrome::dragWidth);
+    const float menuEnd = layout.compact ? layout.compactX + layout.compactWidth : fullMenuEnd;
+    const float sidebarWidth = vaultPanelVisible(state)
+        ? std::min(state.vaultWidth, screenWidth * 0.38f) : 0.0f;
+    layout.tabsLeft = std::max(menuEnd + 12.0f,
+                               vaultPanelVisible(state) ? sidebarWidth + 1.0f : 0.0f);
+    return layout;
 }
 
 // Use one font-derived origin for every title. Centering each label's own ink
@@ -250,6 +304,21 @@ inline void menuTitleView(eui::Ui& ui,
         .verticalAlign(eui::VerticalAlign::Top)
         .build();
 }
+inline void menuChromeTitleView(eui::Ui& ui,
+                                const EditorColors& colors,
+                                const UiMetrics& metrics,
+                                const char* fontFamily,
+                                const std::string& id,
+                                const std::string& label,
+                                float x, float width, float textTop,
+                                bool active, bool interactive,
+                                std::function<void()> onClick,
+                                std::function<void(bool)> onHover = {}) {
+    platform::chrome::exclude(x, 0, width, metrics.menuBarHeight);
+    menuTitleView(ui, colors, metrics, fontFamily, id, label, x, width,
+                  metrics.menuFontSize, textTop, active, interactive,
+                  std::move(onClick), std::move(onHover));
+}
 
 } // namespace menu_detail
 
@@ -267,13 +336,11 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
                                        {MenuKind::Edit, i18n::tr("menu.edit")},
                                        {MenuKind::View, i18n::tr("menu.view")}}};
 
-    std::array<float, 3> xs{};
-    std::array<float, 3> widths{};
-    float cursor = 10.0f;
-    for (std::size_t index = 0; index < titles.size(); ++index) {
-        widths[index] = menu_detail::menuTitleWidth(titles[index].label, metrics);
-        xs[index] = cursor;
-        cursor += widths[index] + metrics.menuTitleGap;
+    const auto layout = menu_detail::menuBarLayout(state, screen.width, metrics);
+    bool& wasCompact = ui.state<bool>("menubar.wasCompact");
+    if (wasCompact != layout.compact) {
+        state.openMenu = MenuKind::None;
+        wasCompact = layout.compact;
     }
 
     // ContextMenuStyle 里没有字号，字号只在 metrics 里——这里覆盖成菜单栏字号，
@@ -289,13 +356,16 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
                            const std::string& id,
                            float x,
                            std::vector<components::ContextMenuItem> items,
-                           std::function<void(const std::vector<int>&)> onSelect) {
+                           std::function<void(const std::vector<int>&)> onSelect,
+                           float popupWidth = 0.0f) {
         components::contextMenu(ui, id)
             .open(state.openMenu == kind)
             .screen(screen.width, screen.height)
             .position(x, metrics.menuBarHeight)
             .dismissTopInset(metrics.menuBarHeight)
-            .size(std::max(metrics.menuWidth, i18n::language()=="en"?300.0f:metrics.menuWidth), metrics.menuItemHeight)
+            .size(popupWidth > 0.0f ? popupWidth :
+                  std::max(metrics.menuWidth, i18n::language()=="en"?300.0f:metrics.menuWidth),
+                  metrics.menuItemHeight)
             .items(std::move(items))
             .theme(menuTokens)
             .transition(animationsEnabled(state) ? quickTransition() : core::Transition::none())
@@ -311,25 +381,34 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
             .build();
     };
 
-    popup(MenuKind::File,
-          "menubar.menu.file",
-          xs[0],
-          menu_detail::fileMenuItems(),
-          [&state](const std::vector<int>& path) {
-              menu_detail::dispatchFileItem(state, path);
-          });
-    popup(MenuKind::Edit,
-          "menubar.menu.edit",
-          xs[1],
-          menu_detail::editMenuItems(),
-          [&state](const std::vector<int>& path) {
-              menu_detail::dispatchEditItem(state, path);
-          });
-    popup(MenuKind::View,
-          "menubar.menu.view",
-          xs[2],
-          menu_detail::viewMenuItems(state),
-          [&state](const std::vector<int>& path) { menu_detail::dispatchViewItem(state, path); });
+    if (layout.compact) {
+        popup(MenuKind::File, "menubar.menu.compact", layout.compactX,
+              menu_detail::compactMenuItems(state, layout.compactSubmenuWidth),
+              [&state, submenuWidth = layout.compactSubmenuWidth](const std::vector<int>& path) {
+                  menu_detail::dispatchCommand(state,
+                      menu_detail::commandAtPath(menu_detail::compactMenuItems(state, submenuWidth), path));
+              }, layout.compactPopupWidth);
+    } else {
+        popup(MenuKind::File,
+              "menubar.menu.file",
+              layout.titleX[0],
+              menu_detail::fileMenuItems(),
+              [&state](const std::vector<int>& path) {
+                  menu_detail::dispatchFileItem(state, path);
+              });
+        popup(MenuKind::Edit,
+              "menubar.menu.edit",
+              layout.titleX[1],
+              menu_detail::editMenuItems(),
+              [&state](const std::vector<int>& path) {
+                  menu_detail::dispatchEditItem(state, path);
+              });
+        popup(MenuKind::View,
+              "menubar.menu.view",
+              layout.titleX[2],
+              menu_detail::viewMenuItems(state),
+              [&state](const std::vector<int>& path) { menu_detail::dispatchViewItem(state, path); });
+    }
 
     // Modal dismiss layer for the tab list. It is inserted before the menu row so
     // menu titles, tab cards, and the list itself remain directly clickable.
@@ -355,60 +434,46 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
                 .fill()
                 .color(colors.toolbar)
                 .build();
-            for (std::size_t index = 0; index < titles.size(); ++index) {
-                platform::chrome::exclude(xs[index], 0, widths[index], metrics.menuBarHeight);
-                const MenuKind kind = titles[index].kind;
-                const bool active = state.openMenu == kind;
-                menu_detail::menuTitleView(
-                    ui,
-                    colors,
-                    metrics,
-                    uiFontFamily(state),
-                    "menubar.title." + std::to_string(index),
-                    titles[index].label,
-                    xs[index],
-                    widths[index],
-                    metrics.menuFontSize,
-                    titleTextTop,
-                    active,
-                    interactive,
-                    [&state, &ui, kind] {
+            const auto openMenu = [&state, &ui](MenuKind kind) {
+                state.tabListOpen = false;
+                ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
+                ui.requestFocus(editorInputId(state.tabId) + ".hit");
+                state.openMenu = state.openMenu == kind ? MenuKind::None : kind;
+                app::requestUpdate();
+            };
+            if (layout.compact) {
+                menu_detail::menuChromeTitleView(ui, colors, metrics, uiFontFamily(state),
+                    "menubar.compact", i18n::tr("menu.all"), layout.compactX, layout.compactWidth,
+                    titleTextTop, state.openMenu == MenuKind::File, interactive,
+                    [openMenu] { openMenu(MenuKind::File); });
+            } else {
+                for (std::size_t index = 0; index < titles.size(); ++index) {
+                    const MenuKind kind = titles[index].kind;
+                    menu_detail::menuChromeTitleView(ui, colors, metrics, uiFontFamily(state),
+                        "menubar.title." + std::to_string(index), titles[index].label,
+                        layout.titleX[index], layout.titleWidth[index], titleTextTop,
+                        state.openMenu == kind, interactive,
+                        [openMenu, kind] { openMenu(kind); },
+                        [&state, kind](bool hovered) {
+                            if (hovered && state.openMenu != MenuKind::None && state.openMenu != kind) {
+                                state.openMenu = kind;
+                                app::requestUpdate();
+                            }
+                        });
+                }
+                menu_detail::menuChromeTitleView(ui, colors, metrics, uiFontFamily(state),
+                    "menubar.settings", i18n::tr("menu.settings_short"),
+                    layout.settingsX, layout.settingsWidth, titleTextTop,
+                    state.settingsOpen, interactive, [&state, &ui] {
                         state.tabListOpen = false;
                         ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
                         ui.requestFocus(editorInputId(state.tabId) + ".hit");
-                        state.openMenu = state.openMenu == kind ? MenuKind::None : kind;
+                        state.openMenu = MenuKind::None;
+                        state.settingsOpen = true;
                         app::requestUpdate();
-                    },
-                    [&state, kind](bool hovered) {
-                        if (hovered && state.openMenu!=MenuKind::None && state.openMenu!=kind) {
-                            state.openMenu=kind;
-                            app::requestUpdate();
-                        }
                     });
             }
-
-            const char* settingsLabel = i18n::tr("menu.settings_short");
-            const float settingsWidth = menu_detail::menuTitleWidth(settingsLabel, metrics);
-            const float settingsX = cursor;
-            platform::chrome::exclude(settingsX, 0, settingsWidth, metrics.menuBarHeight);
-            menu_detail::menuTitleView(ui, colors, metrics, uiFontFamily(state),
-                "menubar.settings", settingsLabel, settingsX, settingsWidth, metrics.menuFontSize, titleTextTop,
-                state.settingsOpen, interactive, [&state, &ui] {
-                    state.tabListOpen = false;
-                    ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
-                    ui.requestFocus(editorInputId(state.tabId) + ".hit");
-                    state.openMenu = MenuKind::None;
-                    state.settingsOpen = true;
-                    app::requestUpdate();
-                }, {});
-
-            const float menuEnd = settingsX + settingsWidth;
-            const float sidebarWidth = state.mode == EditorMode::Vault
-                ? std::min(state.vaultWidth, screen.width * 0.38f) : 0.0f;
-            const float tabsLeft = std::max(menuEnd + 12.0f,
-                                            state.mode == EditorMode::Vault ? sidebarWidth + 1.0f : 0.0f);
-            const float tabsRight = screen.width - platform::chrome::controlsWidth - platform::chrome::dragWidth;
-            tabBarView(ui, state, screen, tabsLeft, tabsRight);
+            tabBarView(ui, state, screen, layout.tabsLeft, layout.tabsRight);
         })
         .build();
 }

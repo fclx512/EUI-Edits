@@ -48,6 +48,7 @@ struct Fixture {
         neo::openThemeWorkbench(state);
     }
     void compose(float width = 1000, float height = 720) {
+        neo::platform::chrome::beginFrame(width, neo::uiMetrics(state).menuBarHeight);
         ui.begin("theme-workbench-headless");
         neo::themeWorkbenchOverlay(ui, state, eui::Screen{width, height});
         ui.end();
@@ -263,6 +264,19 @@ void testSupportedLayoutBounds() {
         f.state.uiFontSize = font;
         for (const auto screen : {eui::Screen{608, 384}, eui::Screen{896, 608}, eui::Screen{1280, 800}}) {
             f.compose(screen.width, screen.height);
+            const auto* header = f.element("themeWorkbench.header");
+            const auto* back = f.element("themeWorkbench.back.bg");
+            const auto caption = [&](float x, float y) {
+                return neo::platform::chrome::captionAt(x, y, screen.width, neo::platform::chrome::titleHeight);
+            };
+            check(caption(250, 16) && header &&
+                      caption(250, header->frame.y + header->frame.height - 2),
+                  "workbench title and upper empty row both move the window");
+            check(back && !caption(back->frame.x + 2, back->frame.y + 2) &&
+                      !caption(back->frame.x + back->frame.width - 2, back->frame.y + back->frame.height - 2),
+                  "entire workbench return button stays interactive");
+            check(!caption(screen.width - 60, 16) && !caption(250, neo::platform::chrome::titleHeight),
+                  "workbench window controls and content are not caption");
             const auto* preview = f.element("themeWorkbench.preview.viewport");
             const auto* panel = f.element("themeWorkbench.panel.surface");
             const auto* footer = f.element("themeWorkbench.footer");
@@ -288,6 +302,9 @@ void testSupportedLayoutBounds() {
             const auto* card = f.element("themeWorkbench.dialog.card");
             const auto* save = f.element("themeWorkbench.save.apply.bg");
             if (!card || !save) return;
+            check(!caption(card->frame.x + 20, card->frame.y + 20) &&
+                      neo::platform::chrome::titleHeight == neo::uiMetrics(f.state).menuBarHeight,
+                  "dialogs covering the workbench header retain client input");
             check(card->frame.x >= 0 && card->frame.y >= 0 && right(card) <= screen.width && bottom(card) <= screen.height &&
                       save->frame.x >= card->frame.x && right(save) <= right(card) && bottom(save) <= bottom(card),
                   "save dialog and its primary action remain inside the supported window");

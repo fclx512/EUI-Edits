@@ -2,8 +2,10 @@
 
 #include "state/app_state.h"
 #include "ui/metrics.h"
+#include "ui/window_layout.h"
 #include "ui/widgets.h"
 #include "components/contextmenu.h"
+#include "platform/window_chrome.h"
 
 namespace neo {
 
@@ -11,11 +13,13 @@ inline bool markdownImmersive(const AppState& state) {
     return state.writingCapable() && state.markdownImmersive;
 }
 inline float markdownToolbarHeight(const AppState& state, float width) {
+    if (state.compactWindow && !markdownImmersive(state)) return 0;
     if (!state.writingCapable()) return 0;
     if (!state.markdownCapable() && !markdownImmersive(state)) return 0;
     return state.markdownCapable() && !markdownImmersive(state) && width < 480 ? 80.0f : 44.0f;
 }
 inline float writingCapsuleRailWidth(const AppState& state, float editorWidth, const UiMetrics& metrics) {
+    if (state.compactWindow) return 0;
     if (!state.writingCapable() || state.markdownCapable() || markdownImmersive(state)) return 0.0f;
     // The capsule begins at editorWidth - 87. Reuse the readable column's
     // existing right margin before shrinking the input. A source-byte count
@@ -49,7 +53,7 @@ inline float writingCapsuleRailWidth(const AppState& state, float editorWidth, c
     return high;
 }
 inline float markdownOutlineWidth(const AppState& state, float width) {
-    return state.markdownCapable() && state.markdownOutlineOpen && !markdownImmersive(state)
+    return state.markdownCapable() && state.markdownOutlineOpen && !state.compactWindow && !markdownImmersive(state)
         && width >= 820 ? std::clamp(width * .24f, 220.0f, 280.0f) : 0.0f;
 }
 
@@ -93,6 +97,7 @@ inline void queueMarkdownTool(AppState& state, EditorCommand command, int kind) 
 }
 
 inline void markdownToolbarView(eui::Ui& ui, AppState& state, float width) {
+    if (state.compactWindow && !markdownImmersive(state)) return;
     if (!state.writingCapable()) return;
     const bool markdown = state.markdownCapable();
     const bool immersive = markdownImmersive(state);
@@ -129,6 +134,12 @@ inline void markdownToolbarView(eui::Ui& ui, AppState& state, float width) {
             format("markdown.code", UiIcon::Code, i18n::tr("writing.code"), EditorCommand::InsertBlock, 1);
         }
         const float x = std::max(12.0f, width - (immersive ? 240 : markdown ? 120 : 84));
+        if (immersive) {
+            // Only the actual controls consume client input. The empty space
+            // between these buttons and the window controls remains draggable.
+            platform::chrome::exclude(x, height - 38, 32, 32);
+            platform::chrome::exclude(x + 36, height - 38, 32, 32);
+        }
         if (!markdown) ui.rect("writing.capsule").position(x-3,height-41).size(74,38)
             .radius(9).color(colors.panel).border(1,colors.border).build();
         writingIconButton(ui, "markdown.typewriter", UiIcon::Typewriter, i18n::tr("writing.typewriter"), x, height-38,

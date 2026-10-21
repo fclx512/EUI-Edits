@@ -312,6 +312,8 @@ struct AppState : DocumentSession {
     // 视图
     EditorMode mode = EditorMode::Simple;
     float vaultWidth = 264.0f;
+    bool autoCompactWindow = true;
+    bool compactWindow = false; // derived from logical width; never persisted
 
     // 界面缩放与字号。uiScale = 1.0 表示跟随系统（框架已乘系统 DPI），
     // 调大是在系统缩放之上额外放大。两者都落盘到 settings.ini。

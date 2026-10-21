@@ -30,16 +30,16 @@ inline void imagePreviewOverlay(eui::Ui& ui, AppState& state, const eui::Screen&
 
     ui.stack("imagePreview")
         .size(screen.width, screen.height)
-        .zIndex(1300)
+        .zIndex(2800)
         .clip()
         .content([&] {
             ui.rect("imagePreview.dim")
                 .size(screen.width, screen.height)
-                .zIndex(1300)
+                .zIndex(2800)
                 .color(core::Color{0.0f, 0.0f, 0.0f, 0.85f})
                 .build();
             ui.image("imagePreview.img")
-                .zIndex(1301)
+                .zIndex(2801)
                 .position((screen.width - width) * 0.5f + view.panX, (screen.height - height) * 0.5f + view.panY)
                 .size(width, height)
                 .source(state.imagePreviewPath)
@@ -48,7 +48,7 @@ inline void imagePreviewOverlay(eui::Ui& ui, AppState& state, const eui::Screen&
                 .build();
             ui.rect("imagePreview.hit")
                 .size(screen.width, screen.height)
-                .zIndex(1302)
+                .zIndex(2802)
                 .color(core::Color{0.0f, 0.0f, 0.0f, 0.0f})
                 .acceptedButtons(core::PointerButton::Left | core::PointerButton::Middle)
                 .dragThreshold(0.0f)

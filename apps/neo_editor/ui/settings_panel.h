@@ -8,6 +8,7 @@
 #include "eui/json.h"
 #include "state/app_actions.h"
 #include "ui/metrics.h"
+#include "ui/settings_header.h"
 #include "ui/widgets.h"
 #include "ui/icons.h"
 #include "ui/ui_language.h"
@@ -1026,7 +1027,7 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
     state.settingsOpenLast = state.settingsOpen;
     if (!state.settingsOpen) return;
 
-    const float headerHeight = std::max(72.0f, metrics.pageTitleFontSize + 36.0f);
+    const float headerHeight = settingsHeaderLayout(state, screen.width).height;
     const bool compactNav = screen.width < 840.0f;
     const float navWidth = compactNav ? 0.0f : 176.0f;
     const float pageTop = headerHeight + (compactNav ? 54.0f : 0.0f);
@@ -1063,29 +1064,12 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
 
     ui.stack("settings.page").size(screen.width, screen.height).zIndex(800).content([&] {
         ui.rect("settings.page.bg").fill().color(colors.window).build();
-        ui.rect("settings.page.header")
-            .size(screen.width, headerHeight).color(colors.toolbar).build();
+        settingsHeaderView(ui, state, screen);
         if (!compactNav) {
             ui.rect("settings.page.navBg")
                 .position(0.0f, headerHeight).size(navWidth, pageHeight)
                 .color(colors.panel).build();
         }
-
-        ui.stack("settings.backToEditor.slot").position(18, (headerHeight-34)*.5f).size(154, 34).content([&] {
-            iconTextButton(ui, "settings.backToEditor", UiIcon::ArrowLeft, i18n::tr("settings.back_editor"), 154,
-                           metrics.panelFontSize, [&state] {
-                               state.settingsOpen = false;
-                               state.fontPicker = FontPickerTarget::None;
-                               state.themeListOpen = false;
-                               app::requestUpdate();
-                           }, uiFont);
-        }).build();
-        ui.text("settings.page.title")
-            .position(194.0f, 0.0f).size(std::max(0.0f, screen.width - 208.0f), headerHeight)
-            .text(state.fontPicker != FontPickerTarget::None ? i18n::tr("settings.choose_font")
-                  : state.themeListOpen ? i18n::tr("settings.theme_library") : i18n::tr("settings.title"))
-            .fontFamily(uiFont).fontSize(metrics.pageTitleFontSize).fontWeight(600)
-            .color(colors.text).verticalAlign(eui::VerticalAlign::Center).build();
 
         const std::vector<std::pair<SettingsCategory, const char*>> categories = {
             {SettingsCategory::Appearance, i18n::tr("settings.appearance")},
@@ -1138,7 +1122,7 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                 const float sectionHeight = metrics.sectionTitleFontSize + 26.0f;
                 const float associationSpace = std::max(0.0f, scrollHeight-sectionHeight-rowHeight);
                 int rowCount = state.settingsCategory == SettingsCategory::Appearance ? 7
-                             : state.settingsCategory == SettingsCategory::Editor ? 5 : 0;
+                             : state.settingsCategory == SettingsCategory::Editor ? 6 : 0;
                 // 行数之外只剩"恢复默认值"一行，所以 +1。
                 const float contentHeight = sectionHeight + rowHeight * (rowCount+1) + 10.0f +
                     (state.settingsCategory == SettingsCategory::FileSystem
@@ -1306,6 +1290,17 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
 
                                 }
                                 if (state.settingsCategory == SettingsCategory::Editor) {
+            rowLabel(ui, colors, metrics, uiFont, "settings.autoCompact", i18n::tr("settings.auto_compact"), i18n::tr("settings.auto_compact_hint"),
+                     0.0f, rowY, labelWidth, geometry);
+            segmentedAt(ui, colors, "settings.autoCompact",
+                        controlX, rowY + hintRowControlY, controlWidth,
+                        {i18n::tr("settings.on"), i18n::tr("settings.off")}, state.autoCompactWindow ? 0 : 1, metrics.panelFontSize,
+                        [&state](int index) {
+                            state.autoCompactWindow = index == 0;
+                            persistSettings(state);
+                            app::requestUpdate();
+                        });
+            rowY += geometry.rowHeight;
             rowLabel(ui, colors, metrics, uiFont, "settings.statusBar", i18n::tr("settings.status_bar"), i18n::tr("settings.status_bar_hint"),
                      0.0f, rowY, labelWidth, geometry);
             segmentedAt(ui, colors, "settings.statusBar",

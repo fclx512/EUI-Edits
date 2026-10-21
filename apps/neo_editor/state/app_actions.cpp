@@ -1566,6 +1566,7 @@ void persistSettings(const AppState& state) {
     data.showStatusBar = state.showStatusBar;
     data.lineNumbers = state.showLineNumbers;
     data.readableWidth = state.readableWidth;
+    data.autoCompactWindow = state.autoCompactWindow;
     data.animations = state.animations;
     data.vaultWidth = state.vaultWidth;
     data.uiScale = state.uiScale;
@@ -1743,6 +1744,8 @@ void resetViewSettings(AppState& state) {
     state.showStatusBar = defaults.showStatusBar;
     state.showLineNumbers = defaults.lineNumbers;
     state.readableWidth = defaults.readableWidth;
+    state.autoCompactWindow = defaults.autoCompactWindow;
+    state.compactWindow = false;
     state.vaultWidth = defaults.vaultWidth;
     state.editorFontSize = defaults.editorFontSize;
     state.uiFontSize = defaults.uiFontSize;

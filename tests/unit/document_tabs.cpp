@@ -474,11 +474,14 @@ int main() {
     neo::loadDocument(dragState, path(barC)); const auto dragC = dragState.tabId;
     neo::activateDocumentTab(dragState, dragA);
     eui::Ui dragUi;
-    const eui::Screen dragScreen{320.0f, 400.0f};
+    // Preserve the 256-DIP drag surface and the original pointer trajectory
+    // while reserving the additional Pin action beside New/List.
+    const float dragBarWidth = 320.0f + neo::tab_bar_detail::TabActionsLayout::width;
+    const eui::Screen dragScreen{dragBarWidth, 400.0f};
     const auto composeDragBar = [&] {
         dragUi.begin("document-tabs-drag");
-        neo::tabBarView(dragUi, dragState, dragScreen, 0.0f, 320.0f);
-        dragUi.layout(320.0f, 400.0f);
+        neo::tabBarView(dragUi, dragState, dragScreen, 0.0f, dragBarWidth);
+        dragUi.layout(dragBarWidth, 400.0f);
     };
     const auto hitRect = [](const auto* element) {
         return core::Rect{element->frame.x, element->frame.y,
@@ -634,9 +637,10 @@ int main() {
     neo::loadDocument(revealState, path(barB)); const auto revealBId = revealState.tabId;
     neo::loadDocument(revealState, path(barC)); const auto revealCId = revealState.tabId;
     eui::Ui revealUi;
-    const eui::Screen revealScreen{256.0f, 400.0f}; // 192 DIP tab region after the two trailing actions.
+    const float revealBarWidth = 256.0f + neo::tab_bar_detail::TabActionsLayout::width;
+    const eui::Screen revealScreen{revealBarWidth, 400.0f}; // 192 DIP region after New/List/Pin and the gap.
     revealUi.begin("document-tabs-reveal");
-    neo::tabBarView(revealUi, revealState, revealScreen, 0.0f, 256.0f);
+    neo::tabBarView(revealUi, revealState, revealScreen, 0.0f, revealBarWidth);
     check(std::fabs(revealState.tabScroll - 336.0f) < 0.01f,
           "initial tab-bar compose reveals the active tail page in the 192 DIP region");
 
@@ -645,7 +649,7 @@ int main() {
           revealState.closeAnchor.enabled,
           "closing the active tail page starts a valid chain on its preceding page");
     revealUi.begin("document-tabs-reveal");
-    neo::tabBarView(revealUi, revealState, revealScreen, 0.0f, 256.0f);
+    neo::tabBarView(revealUi, revealState, revealScreen, 0.0f, revealBarWidth);
     check(revealState.closeAnchor.enabled && !revealState.closeAnchorRevealPending,
           "tab-bar compose retains the close chain while its geometry remains valid");
 
@@ -654,7 +658,7 @@ int main() {
           "explicitly selecting the current page also interrupts the close chain");
     revealState.tabScroll = 0.0f;
     revealUi.begin("document-tabs-reveal");
-    neo::tabBarView(revealUi, revealState, revealScreen, 0.0f, 256.0f);
+    neo::tabBarView(revealUi, revealState, revealScreen, 0.0f, revealBarWidth);
     revealUi.layout(revealScreen);
     const auto* revealedActive = revealUi.find("menubar.tabs." + std::to_string(revealBId) + ".surface");
     check(std::fabs(revealState.tabScroll - 160.0f) < 0.01f && revealedActive &&

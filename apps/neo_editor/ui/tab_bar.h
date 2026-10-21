@@ -29,6 +29,55 @@ inline constexpr float kTabCloseSize = 24.0f;                                 //
 inline constexpr float kTabCloseCenter = tabpresentation::layout::closeCenterInset;  // 162
 inline constexpr float kDragThreshold = 6.0f;
 
+struct TabActionsLayout {
+    static constexpr float width = 28.0f;
+    bool showPin = false, showList = false, showNew = false;
+    float pinX = 0, listX = 0, newX = 0;
+};
+inline TabActionsLayout tabActionsLayout(float left, float right) {
+    TabActionsLayout layout;
+    const float available = std::max(0.0f, right - left);
+    layout.showPin = available >= layout.width;
+    layout.showList = available >= layout.width * 2;
+    layout.showNew = available >= layout.width * 3 + 20;
+    layout.pinX = right - (layout.showPin ? layout.width : 0);
+    layout.listX = layout.pinX - (layout.showList ? layout.width : 0);
+    layout.newX = layout.listX - (layout.showNew ? layout.width : 0);
+    return layout;
+}
+
+inline void pinButtonView(eui::Ui& ui, const EditorColors& colors, float x, float height, bool interactive) {
+    const bool pinned = platform::chrome::alwaysOnTop();
+    platform::chrome::exclude(x + 1, 4, 26, height - 8);
+    ui.rect("menubar.tabs.pin.hit").position(x + 1, 4).size(26, height - 8).radius(7)
+        .states(pinned ? core::mixColor(colors.editor, colors.accent, .18f) : transparentColor(),
+                colors.rowHover, colors.pressed)
+        .preserveFocusOnPress().disabled(!interactive)
+        .onClick([interactive] {
+            if (!interactive) return;
+            platform::chrome::setAlwaysOnTop(!platform::chrome::alwaysOnTop());
+            app::requestUpdate();
+        }).onHover([&ui](bool hovered) {
+            ui.state<bool>("menubar.tabs.pin.hover") = hovered;
+            app::requestUpdate();
+        }).build();
+    iconView(ui, "menubar.tabs.pin.icon", UiIcon::Pin, x + 5, (height - 18) * .5f, 18,
+             pinned ? colors.accent : colors.textMuted);
+    if (ui.state<bool>("menubar.tabs.pin.hover")) {
+        const std::string label = i18n::tr(pinned ? "window.unpin" : "window.pin");
+        const float width = std::max(60.0f, core::TextPrimitive::measureTextWidth(label, kUiFontFamily, 12) + 20);
+        ui.stack("menubar.tabs.pin.tip").position(x + 28 - width, height + 4).size(width, 28)
+            .zIndex(2800).hitTestMode(core::dsl::HitTestMode::None).content([&] {
+                ui.rect("menubar.tabs.pin.tip.bg").fill().radius(5).color(colors.panel)
+                    .border(1, colors.border).build();
+                ui.text("menubar.tabs.pin.tip.label").fill()
+                    .text(label)
+                    .fontSize(12).color(colors.text).horizontalAlign(eui::HorizontalAlign::Center)
+                    .verticalAlign(eui::VerticalAlign::Center).build();
+            }).build();
+    }
+}
+
 struct DragState {
     std::uint64_t source = 0;
     std::uint64_t activeAtStart = 0;
@@ -914,12 +963,13 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
         std::find_if(tabs.begin(), tabs.end(), [&](const TabInfo& tab) {
             return tab.id == drag.source;
         }) == tabs.end())) tab_bar_detail::cancelDrag(ui);
-    const float buttonWidth = 28.0f;
+    const auto actions = tab_bar_detail::tabActionsLayout(left, right);
+    const float buttonWidth = tab_bar_detail::TabActionsLayout::width;
     const float available = std::max(0.0f, right - left);
-    const bool showNew = available >= buttonWidth * 2.0f + 20.0f;
-    const bool showList = available >= buttonWidth;
-    const float listX = right - (showList ? buttonWidth : 0.0f);
-    const float newX = listX - (showNew ? buttonWidth : 0.0f);
+    const bool showNew = actions.showNew;
+    const bool showList = actions.showList;
+    const float listX = actions.listX;
+    const float newX = actions.newX;
     const float regionLeft = left;
     const bool flushVaultEdge = state.mode == EditorMode::Vault &&
         std::fabs(left - (std::min(state.vaultWidth, screen.width * 0.38f) + 1.0f)) < 0.5f;
@@ -1163,7 +1213,7 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
 
     // Rounded action group, separated from both the tab shoulders and the
     // native window controls; keep the existing draggable space to its right.
-    if (showList) {
+    if (actions.showPin) {
         ui.rect("menubar.tabs.actions.bg").position(newX, 3.0f)
             .size(right - newX, metrics.menuBarHeight - 6.0f).radius(10.0f)
             .color(core::mixColor(colors.toolbar, colors.editor, 0.72f))
@@ -1211,6 +1261,8 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
         iconView(ui, "menubar.tabs.list.icon", UiIcon::ChevronDown,
                  listX + 5.0f, (metrics.menuBarHeight - 16.0f) * 0.5f, 16.0f, colors.textMuted);
     }
+
+    if (actions.showPin) tab_bar_detail::pinButtonView(ui, colors, actions.pinX, metrics.menuBarHeight, interactive);
 
     if (state.tabListOpen) {
         ui.rect("menubar.tabs.list.keys").size(0.0f, 0.0f).focusable()

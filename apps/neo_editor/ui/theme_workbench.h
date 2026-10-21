@@ -4,6 +4,7 @@
 // 导入先审阅，候选悬停只试览，保存只新建文件；返回主题库保留会话草稿。
 #include "ui/theme_workbench_dialogs.h"
 #include "ui/theme_workbench_preview.h"
+#include "platform/window_chrome.h"
 
 namespace neo {
 inline void themeWorkbenchOverlay(eui::Ui& ui,AppState& state,const eui::Screen& screen) {
@@ -14,6 +15,12 @@ inline void themeWorkbenchOverlay(eui::Ui& ui,AppState& state,const eui::Screen&
     const float height=std::max(160.0f,screen.height-chromeHeight);
     const bool compact=width<760;
     const float header=d.control+d.pad,tools=d.control+d.gap*2,footer=d.control+d.pad;
+    // Dialogs can reach into this header in short windows. Their shade and
+    // controls must keep client input; the separate top chrome stays movable.
+    if (!s.reviewingImport && !s.saveDialog && !s.closeDialog) {
+        platform::chrome::extendCaptionTo(chromeHeight+header);
+        platform::chrome::exclude(width-d.pad-132,chromeHeight+(header-d.control)*.5f,132,d.control);
+    }
     const float bodyY=header+tools,bodyH=std::max(60.0f,height-bodyY-footer);
     const float panelW=s.panelHidden?0:std::min(std::max(270.0f,d.font*22),width*(compact?.50f:.35f));
     const float previewW=width-panelW;

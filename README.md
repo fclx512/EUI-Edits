@@ -50,9 +50,9 @@ Markdown 覆盖常见写作语法与部分扩展，不保证完整 Obsidian 兼�
 
 ## 开始使用
 
-从[发布页](https://github.com/fclx512/EUI-Edits/releases)选择版本并下载对应的 `EUI-Edits-<版本>-windows-x64.exe`，放在准备长期使用的位置直接运行，无需解压资源目录。本文介绍 0.2.0 源码的功能，可下载版本以发布页为准。程序支持 Windows 10/11 x64，两个系统均已通过实机测试，目前未签名。不同系统、字体与显示设置下的界面和表现可能有所差异。
+从[发布页](https://github.com/fclx512/EUI-Edits/releases)选择版本并下载对应的 `EUI-Edits-<版本>-windows-x64.exe`，放在准备长期使用的位置直接运行，无需解压资源目录。本文介绍 0.2.1 源码的功能，可下载版本以发布页为准。目标平台为 Windows 10/11 x64，目前未签名。本候选的 Windows 10 与跨屏 DPI 验证尚未完成。不同系统、字体与显示设置下的界面和表现可能有所差异。
 
-**0.2.0 更新：** 无边框窗口与标签拖动、新主题工作台与本地自动配色、Markdown 工具栏、打字机与专注模式、右侧大纲、选区内查找替换和标题链接导航；加强保存核对、恢复保护与文档库按需加载。更多变化见[发布说明](apps/neo_editor/RELEASE-NOTES.md)。
+**0.2.1 更新：** 改进无边框页眉拖拽、窄窗菜单和浮层输入，新增“自动收纳”与窗口置顶，缩小最小窗口宽度。发布前的草稿需经审核，可下载版本以发布页为准；更多变化见[发布说明](apps/neo_editor/RELEASE-NOTES.md)。
 
 ### 常用操作
 
@@ -125,7 +125,7 @@ Obsidian 主题可选择 `manifest.json`（同目录需有 `theme.css`）或直�
 | 9 MiB 纯文本，73,728 个文件行 | 118.0 | 87.8 | 101.9 |
 | 9 MiB Markdown，同等行数，每行含列表、强调和行内代码 | 216.6 | 186.2 | 207.0 |
 
-以上数据仅供参考，不代表 0.2.0 的实测结果或内存上限。实际占用会随系统、文档内容、设置及编辑操作变化，可能与表中数值不同；三列指标不能相加。
+以上数据仅供参考，不代表 0.2.1 的实测结果或内存上限。实际占用会随系统、文档内容、设置及编辑操作变化，可能与表中数值不同；三列指标不能相加。
 
 ## 当前范围
 
@@ -149,10 +149,10 @@ EUI-Edits 聚焦本地文本编辑，不提供知识库管理、代码补全、�
 pwsh -NoProfile -File ./scripts/check-neoeditor.ps1
 
 # 构建 Release x64 单 EXE
-pwsh -NoProfile -File ./scripts/package-neoeditor.ps1 -Version 0.2.0
+pwsh -NoProfile -File ./scripts/package-neoeditor.ps1 -Version 0.2.1
 ```
 
-产物为 `out/euiedits-0.2.0-single-exe/EUI-Edits-0.2.0-windows-x64.exe`。源码目录、CMake 目标与脚本名称保留 `neo_editor` 内部标识。
+产物为 `out/euiedits-0.2.1-single-exe/EUI-Edits-0.2.1-windows-x64.exe`。源码目录、CMake 目标与脚本名称保留 `neo_editor` 内部标识。
 
 更多构建参数见[发布构建说明](docs/NeoEditor-发布构建说明-2026-10-02.md)，维护与发版说明见[文档导航](docs/目录说明.md)。
 

@@ -40,7 +40,7 @@ $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encod
     'portable_resource_paths', 'theme_loader', 'theme_workbench', 'theme_workbench_ui', 'input_selection_color', 'image_viewport', 'mindmap_plan', 'mindmap_layout', 'mindmap_preview_state', 'mindmap_preview_ui', 'mindmap_inline_ui', 'mindmap_manual_sample', 'input_line_overlay', 'ime_rect', 'ime_frame_refresh', 'dsl_main_handle', 'win32_input',
     'text_metrics_cache', 'text_font_resolution_scope', 'text_atlas_growth', 'text_atlas_overflow', 'session_write_scheduler',
     'document_tab_cache', 'input_viewport_metrics', 'file_check_scheduler', 'vault_scan_scheduler',
-    'tab_presentation', 'system_appearance', 'input_placeholder_refresh', 'input_vertical_alignment',
+    'tab_presentation', 'system_appearance', 'window_chrome', 'input_placeholder_refresh', 'input_vertical_alignment',
     'input_horizontal_viewport', 'input_callback_layout', 'input_drag_feedback', 'input_pointer_feedback',
     'document_vault_loading', 'virtual_list_wheel', 'win32_event_pump', 'runtime_scroll_sync',
     'main_window_frame_reentry', 'dsl_window_resize_throttle', 'd2d_render_policy', 'd2d_atlas_capacity',

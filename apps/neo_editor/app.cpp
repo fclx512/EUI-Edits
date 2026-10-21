@@ -24,6 +24,7 @@
 #include "ui/overlays.h"
 #include "ui/outline_view.h"
 #include "ui/settings_panel.h"
+#include "ui/window_layout.h"
 #include "ui/status_bar.h"
 #include "ui/vault_menu.h"
 #include "ui/vault_view.h"
@@ -157,6 +158,7 @@ void restoreSession(neo::AppState& state) {
     state.showStatusBar = saved.showStatusBar;
     state.showLineNumbers = saved.lineNumbers;
     state.readableWidth = saved.readableWidth;
+    state.autoCompactWindow = saved.autoCompactWindow;
     state.animations = saved.animations;
     // 主题：0/1 是固定明暗；2（或首启无 theme 键）= 跟随系统，按 Windows
     // 个人化的应用模式解析。跟随系统之后每次启动都重新解析，不落具体模式。
@@ -460,7 +462,7 @@ DslAppConfig& appConfigStorage() {
 #endif
             .clearColor(neo::editorColors().window)
             .windowSize(scaled(896.0f), scaled(608.0f))
-            .minWindowSize(scaled(608.0f), scaled(384.0f))
+            .minWindowSize(scaled(420.0f), scaled(384.0f))
             // 跟随显示器刷新率；空闲时仍按需渲染，不会主动忙等到 240 Hz。
             .fps(0.0)
             // 界面字体（框架全局）必须走 config 传：框架在 initialize() 里会用
@@ -553,7 +555,7 @@ void vaultWatchTick(neo::AppState& state) {
 // 大纲在 editorView 完成装饰/解析之后投影既有计划，绝不抢在编辑器之前调用
 // cachedPlan：那会把带编辑 delta 的增量重建链截断，退成整篇重解析。
 void refreshOutlineFromEditor(neo::AppState& state) {
-    if (!state.markdownOutlineOpen || neo::markdownImmersive(state)) {
+    if (!state.markdownOutlineOpen || state.compactWindow || neo::markdownImmersive(state)) {
         return;
     }
     if (!state.markdownCapable()) {
@@ -717,12 +719,15 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     }
 
     const bool immersive = neo::markdownImmersive(state);
-    if ((immersive || state.settingsOpen || neo::themeWorkbenchOpen()) &&
+    const bool wasCompact = state.compactWindow;
+    neo::updateCompactWindow(state, screen.width);
+    if (state.compactWindow) state.markdownHeadingMenuOpen = false;
+    if ((immersive || state.settingsOpen || neo::themeWorkbenchOpen() || wasCompact != state.compactWindow) &&
         (ui.state<neo::tab_bar_detail::DragState>("menubar.tabs.drag").source != 0 ||
          neo::tab_bar_detail::dragInProgress)) {
         neo::tab_bar_detail::cancelDrag(ui);
     }
-    const bool vaultMode = state.mode == neo::EditorMode::Vault && !immersive;
+    const bool vaultMode = neo::vaultPanelVisible(state) && !immersive;
     const float panelWidth = vaultMode
         ? std::min(state.vaultWidth, std::max(0.0f, screen.width * 0.38f)) : 0.0f;
     const float dividerWidth = panelWidth > 0.0f ? 1.0f : 0.0f;
@@ -730,9 +735,8 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     const bool fullPage = state.settingsOpen || neo::themeWorkbenchOpen();
     const float chromeHeight = immersive && !fullPage ? 44.0f : metrics.menuBarHeight;
     neo::platform::chrome::update(core::window::nativeWindowInfo(core::window::mainWindowHandle()).platformWindow,
-        screen.width, chromeHeight, immersive || fullPage, immersive && !fullPage ? 240.0f : 120.0f);
-    if (fullPage) neo::platform::chrome::exclude(0, 0, screen.width - 140, chromeHeight);
-    const float statusHeight = state.showStatusBar && !immersive ? metrics.statusBarHeight : 0.0f;
+        screen.width, chromeHeight);
+    const float statusHeight = neo::statusBarVisible(state) && !immersive ? metrics.statusBarHeight : 0.0f;
     const float bodyHeight = std::max(0.0f, screen.height - menuHeight - statusHeight);
     const float editorWidth = std::max(0.0f, screen.width - panelWidth - dividerWidth);
     const float writingHeight = neo::markdownToolbarHeight(state, editorWidth);
@@ -740,7 +744,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     // Reserve the TXT capsule's remaining overlap inside the text content;
     // the input itself spans the editor so its scrollbar stays at the edge.
     const float capsuleRail = neo::writingCapsuleRailWidth(state, editorWidth - outlineWidth, metrics);
-    const float textWidth = std::max(0.0f, editorWidth - outlineWidth);
+    const float textWidth = std::max(0.0f, editorWidth - outlineWidth - neo::platform::chrome::resizeInset());
     const float contentWidth = std::max(0.0f, textWidth - capsuleRail);
 
     ui.stack("root")
@@ -835,7 +839,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                             })
                             .build();
 
-                        if (state.showStatusBar && !immersive) {
+                        if (neo::statusBarVisible(state) && !immersive) {
                             traceComposeStage("status-bar", [&] {
                                 neo::statusBarView(ui, state, screen.width);
                             });
@@ -848,7 +852,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                     neo::findBarView(ui, state, findWidth, screen.width - outlineWidth - findWidth - 14.0f,
                                      menuHeight + writingHeight + 12.0f, screen);
                 }
-                if(state.markdownCapable() && state.markdownOutlineOpen && !immersive && outlineWidth==0) {
+                if(state.markdownCapable() && state.markdownOutlineOpen && !state.compactWindow && !immersive && outlineWidth==0) {
                     const float floatingWidth=std::min(280.0f,editorWidth-24);
                     ui.stack("outline.floating").position(screen.width-floatingWidth-8,menuHeight+writingHeight)
                         .size(floatingWidth,bodyHeight-writingHeight).zIndex(700).content([&]{
@@ -887,6 +891,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
             neo::windowChromeView(ui,screen,chromeHeight);
         })
         .build();
+    neo::protectWindowOverlayChrome(state, screen);
     neo::riskOverlay(ui,state,screen);
     neo::confirmOverlay(ui, state, screen);
     traceComposeStage("interaction-defaults", [&] {

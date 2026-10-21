@@ -133,6 +133,7 @@ std::string serializeSettings(const neo::settings::Data& data) {
     out << "show_status_bar=" << (data.showStatusBar ? 1 : 0) << '\n';
     out << "line_numbers=" << (data.lineNumbers ? 1 : 0) << '\n';
     out << "readable_width=" << (data.readableWidth ? 1 : 0) << '\n';
+    out << "auto_compact_window=" << (data.autoCompactWindow ? 1 : 0) << '\n';
     out << "animations=" << (data.animations ? 1 : 0) << '\n';
     out << "attachment_mode=" << data.attachmentMode << '\n';
     out << "theme=" << data.theme << '\n';
@@ -162,7 +163,8 @@ const char* const kDefaultSettingsPrefix =
     "ui_language=system\n"
     "show_status_bar=1\n"
     "line_numbers=1\n"
-    "readable_width=1\n";
+    "readable_width=1\n"
+    "auto_compact_window=1\n";
 
 // 默认 Data 的固定期望值：独立于上面的镜像函数，钉死首次创建的字节形态。
 // 唯一随环境变的是 animations：首启跟随系统"动画效果"开关（CI 虚机常是关的），
@@ -210,9 +212,11 @@ int main(int argc, char** argv) {
     if (!languageCase.empty()) {
         const std::string value = languageCase == "--zh" ? "zh-CN" : languageCase == "--en" ? "en" : "bad-value";
         const std::string expected = languageCase == "--legacy" ? "system" : neo::i18n::normalizePreference(value);
-        check(writeBytes(settingsIni, languageCase == "--legacy" ? "mode=1\n" : "ui_language=" + value + "\n"),
+        check(writeBytes(settingsIni, languageCase == "--legacy" ? "mode=1\n" : "ui_language=" + value + "\nauto_compact_window=0\n"),
               "write language migration fixture");
         check(neo::settings::current().uiLanguage == expected, "read language preference or safe default");
+        check(neo::settings::current().autoCompactWindow == (languageCase == "--legacy"),
+              "legacy settings enable compact layout; explicit off survives loading");
         if (languageCase == "--invalid") neo::settings::current().uiLanguage = "untrusted-value";
         check(neo::settings::flush(), "persist normalized language preference");
         check(readBytes(settingsIni).find("ui_language=" + expected + "\n") != std::string::npos,
@@ -245,6 +249,7 @@ int main(int argc, char** argv) {
     data.uiLanguage = "en";
     data.showStatusBar = false;
     data.readableWidth = false;
+    data.autoCompactWindow = false;
     data.theme = 1;
     data.uiScale = 1.25f;
     data.editorFontSize = 18.0f;

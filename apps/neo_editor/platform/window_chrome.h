@@ -4,6 +4,10 @@
 #include <algorithm>
 #include <vector>
 
+#if defined(_WIN32)
+#include <dwmapi.h>
+#endif
+
 namespace neo::platform::chrome {
 
 // Application-owned chrome; the backend still owns input, DPI, sizing and close
@@ -12,6 +16,7 @@ inline constexpr float controlsWidth = 120;
 inline constexpr float dragWidth = 64;
 struct HitRect { float left, top, right, bottom; };
 inline std::vector<HitRect> interactiveRects;
+inline float logicalWidth = 1, titleHeight = 34;
 inline void exclude(float x, float y, float width, float height) {
     if (width > 0 && height > 0) interactiveRects.push_back({x,y,x+width,y+height});
 }
@@ -21,13 +26,37 @@ inline bool captionAt(float x, float y, float width, float height) {
         if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) return false;
     return true;
 }
+inline void beginFrame(float width, float height, float interactiveRight = controlsWidth) {
+    logicalWidth = width;
+    titleHeight = height;
+    interactiveRects.clear();
+    exclude(width-interactiveRight, 0, interactiveRight, height);
+}
+// Full-page headers can be taller than the window buttons. Register their
+// actual controls separately, so the lower half of a header also moves.
+inline void extendCaptionTo(float bottom) { titleHeight = std::max(titleHeight, bottom); }
 #if defined(_WIN32)
 inline HWND window = nullptr;
-inline float logicalWidth = 1, titleHeight = 34;
-inline float rightInteractiveWidth = controlsWidth;
-inline bool broadDrag = false;
 inline bool dragEscapeArmed = false;
 inline bool dragEscapePressed = false;
+// API results are diagnostics, not proof that the compositor displayed a shadow.
+inline HRESULT frameExtensionResult = E_PENDING, cornerPreferenceResult = E_PENDING;
+inline void applyDwmFrame(HWND hwnd) {
+    static const auto module = LoadLibraryExW(L"dwmapi.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    using ExtendFrame = HRESULT(WINAPI*)(HWND, const MARGINS*);
+    using SetAttribute = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+    static const auto extendFrame = module ? reinterpret_cast<ExtendFrame>(
+        GetProcAddress(module, "DwmExtendFrameIntoClientArea")) : nullptr;
+    static const auto setAttribute = module ? reinterpret_cast<SetAttribute>(
+        GetProcAddress(module, "DwmSetWindowAttribute")) : nullptr;
+    // NCCALCSIZE removes the standard frame. Keep a minimal DWM frame on
+    // Windows 10 as well; the Windows 11 corner preference alone cannot do this.
+    // The client renderer stays opaque; do not use a full-window glass margin.
+    const MARGINS margins{1, 1, 1, 1};
+    frameExtensionResult = extendFrame ? extendFrame(hwnd, &margins) : E_NOTIMPL;
+    const DWORD round = 2;
+    cornerPreferenceResult = setAttribute ? setAttribute(hwnd, 33, &round, sizeof(round)) : E_NOTIMPL;
+}
 inline void armTabDragEscape(bool armed) {
     dragEscapeArmed = armed;
     if (!armed) dragEscapePressed = false;
@@ -35,13 +64,22 @@ inline void armTabDragEscape(bool armed) {
 inline bool tabDragEscapePressed() { return dragEscapePressed; }
 
 inline LRESULT CALLBACK procedure(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR) {
+    // Undocumented UAH caption/frame paint messages (also handled by Chromium's
+    // custom frame). Forwarding them can paint native chrome over our buttons
+    // even after NCCALCSIZE removed the standard title bar. Keep ordinary DWM,
+    // activation and input messages on the backend's existing path.
+    constexpr UINT ncUahDrawCaption = 0xAE, ncUahDrawFrame = 0xAF;
+    if (msg == ncUahDrawCaption || msg == ncUahDrawFrame) return 0;
     if (msg == WM_KEYDOWN && w == VK_ESCAPE && dragEscapeArmed) {
         dragEscapePressed = true;
         return 0;
     }
-    if (msg == WM_NCCALCSIZE && w) {
+    if (msg == WM_ACTIVATE || msg == WM_DWMCOMPOSITIONCHANGED || msg == WM_THEMECHANGED)
+        applyDwmFrame(hwnd);
+    if (msg == WM_NCCALCSIZE) {
+        auto& r = w ? reinterpret_cast<NCCALCSIZE_PARAMS*>(l)->rgrc[0]
+                    : *reinterpret_cast<RECT*>(l);
         if (IsZoomed(hwnd)) {
-            auto& r = reinterpret_cast<NCCALCSIZE_PARAMS*>(l)->rgrc[0];
             const UINT dpi = GetDpiForWindow(hwnd);
             const int x = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
             const int y = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
@@ -53,6 +91,7 @@ inline LRESULT CALLBACK procedure(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_
         POINT p{static_cast<short>(LOWORD(l)), static_cast<short>(HIWORD(l))};
         ScreenToClient(hwnd, &p);
         RECT r{}; GetClientRect(hwnd, &r);
+        if (p.x < 0 || p.y < 0 || p.x >= r.right || p.y >= r.bottom) return HTNOWHERE;
         const float scale = r.right / std::max(1.0f, logicalWidth);
         const int edge = std::max(4, static_cast<int>(6 * GetDpiForWindow(hwnd) / 96.0f));
         if (!IsZoomed(hwnd)) {
@@ -72,34 +111,47 @@ inline LRESULT CALLBACK procedure(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_
     }
     return DefSubclassProc(hwnd, msg, w, l);
 }
-inline void update(void* native, float width, float height, bool broad, float interactiveRight = controlsWidth) {
-    logicalWidth=width; titleHeight=height; broadDrag=broad;
-    rightInteractiveWidth=interactiveRight;
-    interactiveRects.clear();
-    exclude(width-interactiveRight, 0, interactiveRight, height);
+inline void update(void* native, float width, float height, float interactiveRight = controlsWidth) {
+    beginFrame(width, height, interactiveRight);
     auto hwnd=static_cast<HWND>(native);
     if (!hwnd || window==hwnd) return;
     if (!SetWindowSubclass(hwnd, procedure, 0x4E454F43, 0)) return;
     window=hwnd;
-    // Windows 11's DWM owns antialiased corners and the shadow. Older systems
-    // reject attribute 33 harmlessly; no window region or layered-window mask.
-    using SetAttribute = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
-    static const auto setAttribute = reinterpret_cast<SetAttribute>(
-        GetProcAddress(LoadLibraryW(L"dwmapi.dll"), "DwmSetWindowAttribute"));
-    if (setAttribute) { const DWORD round = 2; setAttribute(hwnd, 33, &round, sizeof(round)); }
+    applyDwmFrame(hwnd);
     SetWindowPos(hwnd,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
 }
 inline bool maximized() { return window && IsZoomed(window); }
 inline bool foreground() { return !window || GetForegroundWindow() == window; }
+inline bool alwaysOnTop() {
+    return window && (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+}
+inline bool setAlwaysOnTop(bool enabled) {
+    return window && SetWindowPos(window, enabled ? HWND_TOPMOST : HWND_NOTOPMOST,
+        0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) != FALSE;
+}
+// Keep client scrollbars inside the native sizing strip, at the current
+// system DPI and application UI scale. Maximized windows have no sizing strip.
+inline float resizeInset() {
+    if (!window || IsZoomed(window)) return 0;
+    RECT r{}; GetClientRect(window, &r);
+    const float scale = r.right / std::max(1.0f, logicalWidth);
+    const int edge = std::max(4, static_cast<int>(6 * GetDpiForWindow(window) / 96.0f));
+    return (edge + 1.0f) / std::max(.1f, scale);
+}
 inline void minimize() { if(window) PostMessageW(window,WM_SYSCOMMAND,SC_MINIMIZE,0); }
 inline void maximize() { if(window) PostMessageW(window,WM_SYSCOMMAND,maximized()?SC_RESTORE:SC_MAXIMIZE,0); }
 inline void close() { if(window) PostMessageW(window,WM_CLOSE,0,0); }
 #else
 inline void armTabDragEscape(bool) {}
 inline bool tabDragEscapePressed() { return false; }
-inline void update(void*,float,float,bool,float=controlsWidth) {}
+inline void update(void*, float width, float height, float interactiveRight = controlsWidth) {
+    beginFrame(width, height, interactiveRight);
+}
 inline bool maximized() { return false; }
 inline bool foreground() { return true; }
+inline bool alwaysOnTop() { return false; }
+inline bool setAlwaysOnTop(bool) { return false; }
+inline float resizeInset() { return 0; }
 inline void minimize() {}
 inline void maximize() {}
 inline void close() {}

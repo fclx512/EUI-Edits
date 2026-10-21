@@ -50,9 +50,9 @@ Markdown covers common writing syntax and some extensions; full Obsidian compati
 
 ## Getting started
 
-Choose a version on the [releases page](https://github.com/fclx512/EUI-Edits/releases), download its `EUI-Edits-<version>-windows-x64.exe`, put it where you plan to keep it, and run it directly. No resource folder needs unpacking. This README describes the 0.2.0 source; available downloads are listed on the releases page. The unsigned app supports Windows 10/11 x64 and has been tested on both systems. Appearance and behavior may vary with your system, fonts, and display settings.
+Choose a version on the [releases page](https://github.com/fclx512/EUI-Edits/releases), download its `EUI-Edits-<version>-windows-x64.exe`, put it where you plan to keep it, and run it directly. No resource folder needs unpacking. This README describes the 0.2.1 source; available downloads are listed on the releases page. The unsigned app targets Windows 10/11 x64. Windows 10 and mixed-DPI validation of this candidate remain pending. Appearance and behavior may vary with your system, fonts, and display settings.
 
-**Changes in 0.2.0:** Version 0.2.0 adds a borderless window with draggable tabs, a theme workspace with local palette generation, Markdown tools, Typewriter and Focus modes, a right-side outline, selection-scoped find and replace, and heading-link navigation. It also strengthens save verification and recovery protection, and loads library folders on demand. See the [release notes](apps/neo_editor/RELEASE-NOTES.md) for more changes.
+**0.2.1 update:** Improves borderless header dragging, narrow-window menus and overlay input. Adds automatic compact layout and window pinning, with a smaller minimum window width. Release drafts require review; available downloads are listed on the releases page. See the [release notes](apps/neo_editor/RELEASE-NOTES.md).
 
 ### Common actions
 
@@ -125,7 +125,7 @@ The following are **historical idle memory figures for 0.1.4 on Windows 11**, in
 | 9 MiB plain text, 73,728 file lines | 118.0 | 87.8 | 101.9 |
 | 9 MiB Markdown, same line count, with a list item, emphasis, and inline code on every line | 216.6 | 186.2 | 207.0 |
 
-These figures are for reference only, not measurements of 0.2.0 or memory ceilings. Actual use varies with the system, document content, settings, and editing activity, and may differ from the table. The three metrics cannot be added together.
+These figures are for reference only, not measurements of 0.2.1 or memory ceilings. Actual use varies with the system, document content, settings, and editing activity, and may differ from the table. The three metrics cannot be added together.
 
 ## Current scope
 
@@ -149,10 +149,10 @@ Run from the repository root:
 pwsh -NoProfile -File ./scripts/check-neoeditor.ps1
 
 # Build a Release x64 single EXE
-pwsh -NoProfile -File ./scripts/package-neoeditor.ps1 -Version 0.2.0
+pwsh -NoProfile -File ./scripts/package-neoeditor.ps1 -Version 0.2.1
 ```
 
-The output is `out/euiedits-0.2.0-single-exe/EUI-Edits-0.2.0-windows-x64.exe`. Source folders, CMake targets, and script names retain the internal `neo_editor` identifier.
+The output is `out/euiedits-0.2.1-single-exe/EUI-Edits-0.2.1-windows-x64.exe`. Source folders, CMake targets, and script names retain the internal `neo_editor` identifier.
 
 See the [release build guide](docs/NeoEditor-发布构建说明-2026-10-02.md) for more build options and the [documentation index](docs/目录说明.md) for maintenance and release guidance (Chinese).
 

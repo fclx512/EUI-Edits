@@ -45,6 +45,7 @@ struct Data {
     bool lineNumbers = true;
     // 限制行宽（Obsidian 的"可读行宽"）：内容列收窄居中。
     bool readableWidth = true;
+    bool autoCompactWindow = true;
     // 界面动画（悬停/按压配色过渡、按压缩放等反馈动画）。落盘 key 是
     // animations。首次运行（settings.ini 里还没有这个键）跟随 Windows 的
     // "辅助功能 → 视觉效果 → 动画效果"；之后一律以用户的选择为准。

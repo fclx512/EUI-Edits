@@ -16,7 +16,7 @@ enum class UiIcon {
     ChevronRight, ChevronDown, Previous, Next, Close, Replace,
     Folder, FolderOpen, ArrowLeft, ArrowRight,
     Globe, List, Font, Settings, Plus, Minus, Check, Info, Warning, Sliders,
-    Heading, Bold, Italic, Link, Image, Task, Table, Code, Typewriter, Focus, Maximize, Restore
+    Heading, Bold, Italic, Link, Image, Task, Table, Code, Typewriter, Focus, Maximize, Restore, Pin
 };
 
 
@@ -95,6 +95,10 @@ inline void iconView(eui::Ui& ui, const std::string& id, UiIcon icon,
             else if (kind == UiIcon::File) rules(document_icon::fileRules, document_icon::ruleThickness);
         };
         switch (icon) {
+            case UiIcon::Pin:
+                line(8, 4, 16, 4); line(9, 4, 9, 11); line(15, 4, 15, 11);
+                line(9, 11, 6, 15); line(15, 11, 18, 15); line(6, 15, 18, 15);
+                line(12, 15, 12, 21); break;
             case UiIcon::Heading:
                 line(4, 5, 4, 19); line(14, 5, 14, 19); line(4, 12, 14, 12);
                 line(18, 14, 20, 12); line(20, 12, 20, 20); break;

@@ -10,6 +10,7 @@
 #include "state/app_state.h"
 #include "state/tabs_trace.h"
 #include "ui/metrics.h"
+#include "ui/window_layout.h"
 #include "ui/widgets.h"
 #include "ui/mindmap_inline.h"
 
@@ -195,7 +196,7 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
         // 并居中，行号列与滚动条仍贴两缘。关闭时传 0 = 不限制。
         .maxTextWidth(state.readableWidth && !state.sourceView() && state.wordWrap() ? metrics.editorFontSize * 43.75f : 0.0f)
         // 行号列（画在编辑器左缘留白 + 专属槽位里，随主题的次要文字色）。
-        .lineNumbers(state.showLineNumbers && !(state.writingCapable() && state.markdownImmersive))
+        .lineNumbers(lineNumbersVisible(state) && !(state.writingCapable() && state.markdownImmersive))
         .typewriter(state.writingCapable() && state.markdownTypewriter)
         .focusLine(state.writingCapable() && state.markdownImmersive, animationsEnabled(state))
         .lineNumberColor(colors.textMuted)

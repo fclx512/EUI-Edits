@@ -1,4 +1,5 @@
 #include "ui/mindmap_preview.h"
+#include "ui/image_preview.h"
 #include <cmath>
 #include <iostream>
 
@@ -40,6 +41,8 @@ int main() {
     const auto* label = ui.find("mindmapPreview.node.0.label");
     check(hit && panel && label, "Preview tree must include hit panel and label");
     if (!hit || !panel || !label) return 1;
+    check(hit->zIndex > 2600 && hit->zIndex < 3000,
+          "Full-window preview must receive input above menus and tab popovers, below window controls");
     check(panel->clip, "Map must be clipped to panel");
     check(label->fontSize == neo::uiMetrics(state).editorFontSize, "Zoom must not change font raster size");
     core::PointerEvent click;
@@ -68,5 +71,20 @@ int main() {
     click.x = 0; click.y = 0;
     hit->onPress(click, core::Rect{0, 0, screen.width, screen.height});
     check(!state.mindmapPreview.open && !state.dirty(), "Outside close must preserve clean document");
+    state.imagePreviewPath = "fixture.png";
+    state.imagePreviewWidth = 800;
+    state.imagePreviewHeight = 600;
+    ui.begin("image.ui.test");
+    neo::imagePreviewOverlay(ui, state, screen);
+    ui.end();
+    ui.layout(screen.width, screen.height);
+    const auto* imageHit = ui.find("imagePreview.hit");
+    check(imageHit && imageHit->zIndex > 2600 && imageHit->zIndex < 3000,
+          "Image preview must receive input above menus and tab popovers, below window controls");
+    if (imageHit) {
+        click.x = 500; click.y = 15;
+        imageHit->onPress(click, core::Rect{0, 0, screen.width, screen.height});
+        check(state.imagePreviewPath.empty(), "Caption-area preview click closes without editing the document");
+    }
     return failures ? 1 : 0;
 }

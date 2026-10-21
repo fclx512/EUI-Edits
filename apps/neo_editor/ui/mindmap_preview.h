@@ -160,19 +160,19 @@ inline void mindmapPreviewOverlay(eui::Ui& ui, AppState& state, const eui::Scree
 
     ui.stack("mindmapPreview")
         .size(screen.width, screen.height)
-        .zIndex(1300)
+        .zIndex(2800)
         .clip()
         .content([&] {
             ui.rect("mindmapPreview.dim")
                 .size(screen.width, screen.height)
-                .zIndex(1300)
+                .zIndex(2800)
                 .color(core::Color{0.0f, 0.0f, 0.0f, 0.85f})
                 .build();
 
             ui.stack("mindmapPreview.panel")
                 .position(panelX, panelY)
                 .size(panelWidth, panelHeight)
-                .zIndex(1301)
+                .zIndex(2801)
                 .clip()
                 .content([&] {
                     ui.rect("mindmapPreview.panel.bg")
@@ -318,7 +318,7 @@ inline void mindmapPreviewOverlay(eui::Ui& ui, AppState& state, const eui::Scree
             // 关闭；IME 合成即取消，候选窗抢不走 Esc。
             ui.rect("mindmapPreview.hit")
                 .size(screen.width, screen.height)
-                .zIndex(1302)
+                .zIndex(2802)
                 .color(core::Color{0.0f, 0.0f, 0.0f, 0.0f})
                 .acceptedButtons(core::PointerButton::Left | core::PointerButton::Middle)
                 .dragThreshold(0.0f)

@@ -262,6 +262,8 @@ Data& current() {
                     loaded.lineNumbers = value != "0";
                 } else if (key == "readable_width") {
                     loaded.readableWidth = value != "0";
+                } else if (key == "auto_compact_window") {
+                    loaded.autoCompactWindow = value != "0";
                 } else if (key == "animations") {
                     loaded.animations = value != "0";
                 } else if (key == "attachment_mode") {
@@ -299,6 +301,7 @@ bool flush() {
     output << "show_status_bar=" << (data.showStatusBar ? 1 : 0) << '\n';
     output << "line_numbers=" << (data.lineNumbers ? 1 : 0) << '\n';
     output << "readable_width=" << (data.readableWidth ? 1 : 0) << '\n';
+    output << "auto_compact_window=" << (data.autoCompactWindow ? 1 : 0) << '\n';
     output << "animations=" << (data.animations ? 1 : 0) << '\n';
     output << "attachment_mode=" << data.attachmentMode << '\n';
     output << "theme=" << data.theme << '\n';
