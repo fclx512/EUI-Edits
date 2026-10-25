@@ -57,7 +57,7 @@ inline void ghostButton(eui::Ui& ui, const std::string& id, const std::string& t
                         bool active = false, bool disabled = false, UiIcon icon = UiIcon::None) {
     const eui::Color fg = disabled ? core::mixColor(c.textMuted, c.toolbar, .45f) : active ? c.accent : c.text;
     ui.stack(id).position(x, y).size(std::max(1.0f, w), h).content([&] {
-        auto bg = ui.rect(id + ".bg").fill().radius(6.0f)
+        auto bg = ui.rect(id + ".bg").fill().radius(neo::corner(c, 6.0f))
             .states(active ? accentTint(c, .14f) : transparentColor(),
                     active ? accentTint(c, .20f) : c.rowHover, active ? accentTint(c, .26f) : c.pressed)
             .transition(quickTransition()).preserveFocusOnPress().disabled(disabled);
@@ -80,7 +80,7 @@ inline void primaryButton(eui::Ui& ui, const std::string& id, const std::string&
                           bool disabled = false) {
     const eui::Color base = disabled ? core::mixColor(c.accent, c.toolbar, .55f) : c.accent;
     ui.stack(id).position(x, y).size(std::max(1.0f, w), h).content([&] {
-        auto bg = ui.rect(id + ".bg").fill().radius(6.0f)
+        auto bg = ui.rect(id + ".bg").fill().radius(neo::corner(c, 6.0f))
             .states(base, core::mixColor(base, rgba(1, 1, 1), .10f), core::mixColor(base, rgba(0, 0, 0), .12f))
             .transition(quickTransition()).preserveFocusOnPress().disabled(disabled);
         if (!disabled) bg.cursor(eui::CursorShape::Hand).onClick(std::move(click));
@@ -119,12 +119,12 @@ inline void hairline(eui::Ui& ui, const std::string& id, float x, float y, float
 inline void swatch(eui::Ui& ui, const std::string& id, float x, float y, float w, float h,
                    eui::Color color, const EditorColors& c, float radius = 5.0f) {
     ui.stack(id).position(x, y).size(w, h).clip().content([&] {
-        ui.rect(id + ".a").size(w, h).radius(radius).color(rgba(1, 1, 1)).build();
+        ui.rect(id + ".a").size(w, h).radius(neo::corner(c, radius)).color(rgba(1, 1, 1)).build();
         if (color.a < .995f)
             for (int i = 0; i < 2; ++i)
                 ui.rect(id + ".chk." + std::to_string(i)).position(i ? w * .5f : 0, i ? 0 : h * .5f)
                     .size(w * .5f, h * .5f).color(rgba(.80f, .81f, .83f)).build();
-        ui.rect(id + ".fill").size(w, h).radius(radius).color(color)
+        ui.rect(id + ".fill").size(w, h).radius(neo::corner(c, radius)).color(color)
             .border(1.0f, rgba(c.text.r, c.text.g, c.text.b, .14f)).build();
     }).build();
 }

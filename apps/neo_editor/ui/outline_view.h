@@ -101,7 +101,7 @@ inline void outlinePanelView(eui::Ui& ui, AppState& state, float width, float he
     ui.stack("outline.panel").size(width, height).content([&] {
         if (!floating) ui.rect("outline.paper").fill().color(c.editor).build();
         ui.rect("outline.surface").position(8, 16).size(width-16, cardHeight)
-            .radius(10).color(c.editor).border(1,c.border)
+            .radius(neo::corner(c, 10.0f)).color(c.editor).border(1,c.border)
             .shadow(12,0,3,rgba(0,0,0,.06f)).build();
         ui.text("outline.title").position(20, 22).size(inner-30, 32).text(i18n::tr("outline.title"))
             .fontFamily(uiFontFamily(state)).fontSize(14).fontWeight(600).color(c.text)
@@ -124,7 +124,7 @@ inline void outlinePanelView(eui::Ui& ui, AppState& state, float width, float he
                 const bool active=entry.byteOffset==state.outlineCurrentByte;
                 const float indent=10.0f+(entry.level-1)*12.0f;
                 rowUi.stack(id).size(w,36).content([&, floating]{
-                    rowUi.rect(id+".bg").position(0,2).size(w,32).radius(5)
+                    rowUi.rect(id+".bg").position(0,2).size(w,32).radius(neo::corner(c, 5.0f))
                         .states(active?core::mixColor(c.editor,c.accent,.10f):transparentColor(),c.rowHover,c.pressed)
                         .preserveFocusOnPress().cursor(eui::CursorShape::Hand).onClick([&state,entry,floating]{
                             state.cancelLinkAnchor();state.pendingOutlineJumpByte=entry.byteOffset;
@@ -132,7 +132,7 @@ inline void outlinePanelView(eui::Ui& ui, AppState& state, float width, float he
                             if(floating) state.markdownOutlineOpen=false;
                             app::requestUpdate();
                         }).build();
-                    rowUi.rect(id+".level.bg").position(indent,9).size(25,18).radius(4)
+                    rowUi.rect(id+".level.bg").position(indent,9).size(25,18).radius(neo::corner(c, 4.0f))
                         .color(core::mixColor(c.editor,c.accent,active?.16f:.07f)).build();
                     rowUi.text(id+".level").position(indent,9).size(25,18)
                         .text("H"+std::to_string(entry.level)).fontSize(10).fontWeight(600)

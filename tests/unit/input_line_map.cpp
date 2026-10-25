@@ -481,7 +481,8 @@ void testDecoratedSoftWrap() {
 
 // ── ⑦ 行内样式段：逐段测量拼接出来的 caret 表必须自洽 ──
 // 一行里同时有普通文字、粗体、行内代码（三种字体参数），验证：
-//   * 各段首尾相接、覆盖整行可见文本，x 单调，宽度之和 = 整行宽度；
+//   * 普通段首尾相接，带底色的代码段两侧各留 padding + 1.5 DIP；
+//     各段覆盖整行可见文本，x 单调，文字宽度与预留间距之和 = 整行宽度；
 //   * caret 表与"整行一次性测量"等价（偏移升序、末位 = 可见长度、首位 x = 0）；
 //   * 命中 ↔ 光标往返一致（样式段不破坏 S1 的那条不变量）；
 //   * 段的 x 与 caret 表对得上（否则视图画出来的位置和光标不重合）。
@@ -535,18 +536,35 @@ void testStyledRuns() {
     const auto& line = lines.front();
     check(!line.presentation().runs.empty(), "有样式段的行必须产出可渲染的段");
 
-    // ① 段首尾相接、覆盖整行可见文本、x 单调
+    // ① 普通段无缝；16 号默认底色 chip 的两侧各预留 1.6 + 1.5 = 3.1 DIP。
     std::string joined;
     float previousRight = -1.0f;
+    float previousSpacing = 0.0f;
+    float textWidth = 0.0f;
+    float reservedSpacing = 0.0f;
+    int chipRuns = 0;
     for (const auto& run : line.presentation().runs) {
-        check(near(run.x, previousRight < 0.0f ? 0.0f : previousRight, 0.5f),
-              "段之间不留缝也不重叠（x 应接上一段的右缘）");
+        const bool chip = run.style.get().background.a > 0.0f;
+        const float spacing = detail::inlineChipSpacing(run.style.get(), line.fontSize);
+        check(near(spacing, chip ? 3.1f : 0.0f, 0.01f),
+              "16 号默认底色 chip 每侧恰留 3.1 DIP，普通文字不预留间距");
+        const float expectedX = (previousRight < 0.0f ? 0.0f : previousRight) + previousSpacing + spacing;
+        check(near(run.x, expectedX, 0.01f),
+              "段接缝只保留相邻 chip 的确切间距，普通段无缝且不得重叠");
         check(run.width > 0.0f, "每段都应当有正宽度");
         joined += detail::projectText(text, run.beg, run.end, line.presentation().holes);
         previousRight = run.x + run.width;
+        previousSpacing = spacing;
+        textWidth += run.width;
+        reservedSpacing += spacing * 2.0f;
+        if (chip) ++chipRuns;
     }
+    check(chipRuns == 1 && near(reservedSpacing, 6.2f, 0.01f),
+          "唯一代码 chip 的前后间距均计入布局，总预留恰为 6.2 DIP");
     check(joined == text, "各段文字拼起来 = 本行可见文本（实际=\"" + joined + "\"）");
     check(near(previousRight, line.metrics.width, 0.5f), "最后一段的右缘 = 整行宽度");
+    check(near(textWidth + reservedSpacing, line.metrics.width, 0.01f),
+          "文字推进量加精确 chip 间距等于整行宽度");
 
     // ② caret 表：偏移升序、首位 0/0、末位 = 可见长度
     check(!line.metrics.byteIndices().empty(), "caret 表不应为空");

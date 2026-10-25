@@ -2,6 +2,7 @@
 #pragma once
 
 #include "components/theme.h"
+#include "components/text_alignment.h"
 #include "core/dsl.h"
 #include "eui/signal.h"
 
@@ -64,7 +65,7 @@ public:
         const int selected = count > 0 ? std::clamp(selected_, 0, count - 1) : 0;
         const float tabWidth = count > 0 ? width_ / static_cast<float>(count) : width_;
         const float labelLineHeight = fontSize;
-        const float labelY = std::max(0.0f, (height_ - labelLineHeight) * 0.5f) - metrics_.spacing.micro;
+        const float labelY = text_alignment::singleLineTop(height_, fontSize);
         const std::function<void(int)> onChange = onChange_;
 
         ui_.stack(id_)

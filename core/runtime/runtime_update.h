@@ -312,7 +312,8 @@ inline bool Runtime::canReuseStaticSubtree(
     }
 
     const RenderTransform renderTransform = instances_.renderTransform(element, dpiScale, inheritedTransform);
-    return !renderTransform.active && closeEnough(renderTransform.opacity, 1.0f);
+    return !cached->second.subtreeAnimating &&
+           !renderTransform.active && closeEnough(renderTransform.opacity, 1.0f);
 }
 
 inline bool Runtime::elementHasActiveAnimation(const Element& element) const {
@@ -321,23 +322,30 @@ inline bool Runtime::elementHasActiveAnimation(const Element& element) const {
         element.kind == ElementKind::Stack ||
         element.kind == ElementKind::Flow) {
         const auto item = instances_.layouts.find(element.id);
-        return item != instances_.layouts.end() && isLayoutAnimating(item->second);
+        return item != instances_.layouts.end() &&
+            (isLayoutAnimating(item->second) || item->second.opacity.isActive());
     }
     if (element.kind == ElementKind::Rect) {
         const auto item = instances_.rects.find(element.id);
-        return item != instances_.rects.end() && isRectAnimating(element, item->second);
+        return item != instances_.rects.end() &&
+            (isRectAnimating(item->second) || isRectDecorating(element, item->second));
     }
     if (element.kind == ElementKind::Polygon) {
         const auto item = instances_.polygons.find(element.id);
-        return item != instances_.polygons.end() && isPolygonAnimating(element, item->second);
+        return item != instances_.polygons.end() &&
+            (isPolygonAnimating(item->second) || isPolygonDecorating(element, item->second));
     }
     if (element.kind == ElementKind::Text) {
         const auto item = instances_.texts.find(element.id);
-        return item != instances_.texts.end() && isTextAnimating(item->second);
+        return item != instances_.texts.end() &&
+            (isTextAnimating(item->second) || item->second.color.isActive() ||
+             item->second.opacity.isActive());
     }
     if (element.kind == ElementKind::Image || element.kind == ElementKind::Svg) {
         const auto item = instances_.images.find(element.id);
-        return item != instances_.images.end() && isImageAnimating(item->second);
+        return item != instances_.images.end() &&
+            (isImageAnimating(item->second) || item->second.tint.isActive() ||
+             item->second.opacity.isActive());
     }
     if (element.kind == ElementKind::Shadertoy) {
         const auto item = instances_.shaderToys.find(element.id);
@@ -685,6 +693,7 @@ inline runtime::PaintBoundsInstance Runtime::updateElementTree(
         updateLayoutElement(element, visualDeltaSeconds, dpiScale, inheritedTransform, event, hoverTargetId);
     } else if (element.kind == ElementKind::Rect) {
         updateRect(element, visualDeltaSeconds, dpiScale, inheritedTransform, ancestorFrameChanged);
+        updateReveal(element, event, deltaSeconds, dpiScale, inheritedTransform, disabledTree);
     } else if (element.kind == ElementKind::Polygon) {
         updatePolygon(element, visualDeltaSeconds, dpiScale, inheritedTransform, ancestorFrameChanged);
     } else if (element.kind == ElementKind::Text) {
@@ -773,11 +782,15 @@ inline void Runtime::updateLayoutElement(
     bool changed = false;
     Transform targetTransform = pointerRuntimeTransform(element, event, dpiScale, hoverTargetId);
     targetTransform = core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, targetTransform);
-    changed = instance.transform.setTarget(targetTransform, element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
-    changed = instance.opacity.setTarget(element.opacity, element.transition, shouldAnimate(element, AnimProperty::Opacity)) || changed;
+    changed = setDecorationTarget(instance.transform, targetTransform, element.transition, shouldAnimate(element, AnimProperty::Transform), element.id, TransformDecoration) || changed;
+    const float oldOpacity = instance.opacity.value();
+    changed = setDecorationTarget(instance.opacity, element.opacity, element.transition,
+        shouldAnimate(element, AnimProperty::Opacity), element.id, OpacityDecoration) || changed;
 
-    changed = instance.transform.tick(deltaSeconds) || changed;
-    changed = instance.opacity.tick(deltaSeconds) || changed;
+    changed = tickDecoration(instance.transform, element.id, TransformDecoration, deltaSeconds) || changed;
+    const bool opacityChanged = tickDecoration(instance.opacity, element.id, OpacityDecoration, deltaSeconds) ||
+        !closeEnough(oldOpacity, instance.opacity.value());
+    changed = opacityChanged || changed;
 
     if (changed) {
         const Rect afterRect = applyRenderTransformToLogicalRect(inflateRect(
@@ -787,7 +800,46 @@ inline void Runtime::updateLayoutElement(
             64.0f), dpiScale, inheritedTransform);
         addDirtyUnion(beforeRect, afterRect);
     }
-    animating_ = animating_ || isLayoutAnimating(instance);
+    noteDecoration(isLayoutAnimating(instance) || instance.opacity.isActive());
+}
+
+inline void Runtime::updateReveal(
+    const Element& element, const PointerEvent& event, float deltaSeconds, float dpiScale,
+    const RenderTransform& inheritedTransform, bool disabledTree) {
+    auto& instance = instances_.rect(element.id);
+    if (!element.reveal && !instance.reveal) return;
+    if (!instance.reveal) instance.reveal = std::make_unique<runtime::RevealState>();
+    const LayoutRect logical = instance.frame.value();
+    const Rect frame = toPixelRect(logical, dpiScale);
+    const RenderTransform inherited = instances_.renderTransform(element, dpiScale, inheritedTransform);
+    const VisualPointerPosition visual = visualPointerPosition(inputWindow_, visualPointerScale_);
+    // Preserve each queued client's event position (especially Press origin).
+    // Only a synthetic client-leave event may borrow the non-client visual feed.
+    const bool clientPositionValid = event.x > -999999.0 && event.y > -999999.0;
+    const Vec2 pointerPixels = clientPositionValid
+        ? Vec2{static_cast<float>(event.x), static_cast<float>(event.y)}
+        : Vec2{static_cast<float>(visual.x), static_cast<float>(visual.y)};
+    TransformMatrix inverse;
+    const bool valid = !disabledTree && visualInputEnabled_ && visual.inside &&
+        event.action != PointerAction::Cancel &&
+        inverseMatrix(combinedPrimitiveMatrix(inherited, frame,
+            scaleTransform(instance.transform.value(), dpiScale)), inverse);
+    const Vec2 local = valid ? core::transformPoint(inverse, pointerPixels.x, pointerPixels.y) : Vec2{};
+    const RevealEffect config = element.reveal ? *element.reveal : RevealEffect{};
+    const bool changed = instance.reveal->update(config,
+        {(local.x - frame.x) / dpiScale, (local.y - frame.y) / dpiScale},
+        logical.width, logical.height, instance.interaction.hover,
+        instance.interaction.pressed, valid, deltaSeconds, revealSampleAllowed_);
+    if (changed) {
+        addDirtyRect(visualDirtyRectForElement(element, dpiScale, inheritedTransform));
+        if (config.enabled && valid) revealSampleCommitted_ = true;
+    }
+    if (revealFinalEvent_) {
+        const float wake = instance.reveal->wakeSeconds();
+        nextTimerWakeSeconds_ = std::min(nextTimerWakeSeconds_,
+            std::max(wake, revealCooldownRemaining_));
+    }
+    if (!element.reveal) instance.reveal.reset();
 }
 
 inline void Runtime::updateRect(
@@ -797,6 +849,8 @@ inline void Runtime::updateRect(
     const RenderTransform& inheritedTransform,
     bool snapFrame) {
     runtime::RectInstance& instance = instances_.rect(element.id);
+    const bool previousHover = instance.interaction.hover;
+    const bool previousPress = instance.interaction.pressed;
     instance.interaction = instances_.interaction(element.id).state;
     const Rect beforeRect = applyRenderTransformToLogicalRect(
         visualRect(instance.frame.value(), instance.shadow.value(), instance.blur.value(), instance.transform.value()),
@@ -808,12 +862,34 @@ inline void Runtime::updateRect(
         (!closeEnough(element.color, element.hoverColor) || !closeEnough(element.color, element.pressedColor));
     const float hoverSpeed = element.smoothStateColors ? 12.0f : 0.0f;
     const float pressSpeed = element.smoothStateColors ? 20.0f : 0.0f;
-    const bool hoverChanged = instance.hoverBlend.update(interactive && stateColorsVisible && instance.interaction.hover ? 1.0f : 0.0f,
-                                                         hoverSpeed,
-                                                         deltaSeconds);
-    const bool pressChanged = instance.pressBlend.update(interactive && stateColorsVisible && instance.interaction.pressed ? 1.0f : 0.0f,
-                                                         pressSpeed,
-                                                         deltaSeconds);
+    const float decorationDelta = decorationDeltaSeconds(deltaSeconds);
+    if (hoverSpeed > 0.0f && previousHover != instance.interaction.hover)
+        markNewDecorationTarget(element.id, HoverDecoration);
+    if (pressSpeed > 0.0f && previousPress != instance.interaction.pressed)
+        markNewDecorationTarget(element.id, PressDecoration);
+    const float oldHoverBlend = instance.hoverBlend.value();
+    const float oldPressBlend = instance.pressBlend.value();
+    const float hoverStep = hoverSpeed > 0.0f
+        ? decorationStepSeconds(element.id, HoverDecoration, deltaSeconds) : decorationDelta;
+    const float pressStep = pressSpeed > 0.0f
+        ? decorationStepSeconds(element.id, PressDecoration, deltaSeconds) : decorationDelta;
+    const bool hoverChanged = (decorationSampleAllowed_ || hoverSpeed <= 0.0f) &&
+        instance.hoverBlend.update(interactive && stateColorsVisible && instance.interaction.hover ? 1.0f : 0.0f,
+                                   hoverSpeed, hoverStep);
+    const bool pressChanged = (decorationSampleAllowed_ || pressSpeed <= 0.0f) &&
+        instance.pressBlend.update(interactive && stateColorsVisible && instance.interaction.pressed ? 1.0f : 0.0f,
+                                   pressSpeed, pressStep);
+    const bool smoothHoverChanged = hoverSpeed > 0.0f &&
+        !closeEnough(oldHoverBlend, instance.hoverBlend.value());
+    const bool smoothPressChanged = pressSpeed > 0.0f &&
+        !closeEnough(oldPressBlend, instance.pressBlend.value());
+    if (decorationFrameRateLimit_ > 0.0f && decorationSampleAllowed_ &&
+        (smoothHoverChanged || smoothPressChanged))
+        decorationSampleCommitted_ = true;
+    const float colorInitialStep = smoothHoverChanged || smoothPressChanged
+        ? std::max(smoothHoverChanged ? hoverStep : 0.0f,
+                   smoothPressChanged ? pressStep : 0.0f)
+        : -1.0f;
     const float hover = instance.hoverBlend.value();
     const float press = instance.pressBlend.value();
     const Color hoverColor = stateColorsVisible ? mixColor(element.color, element.hoverColor, hover) : element.color;
@@ -831,25 +907,38 @@ inline void Runtime::updateRect(
         }
     }
 
-    bool changed = hoverChanged || pressChanged || gradientChanged;
-    changed = instance.frame.setTarget(targetFrame, element.transition, !snapFrame && shouldAnimateFrame(element)) || changed;
-    changed = instance.color.setTarget(currentColor, element.transition, shouldAnimate(element, AnimProperty::Color)) || changed;
-    changed = instance.radius.setTarget(element.radius, element.transition, shouldAnimate(element, AnimProperty::Radius)) || changed;
-    changed = instance.blur.setTarget(element.blur, element.transition, shouldAnimate(element, AnimProperty::Blur)) || changed;
-    changed = instance.opacity.setTarget(element.opacity, element.transition, shouldAnimate(element, AnimProperty::Opacity)) || changed;
-    changed = instance.border.setTarget(element.border, element.transition, shouldAnimate(element, AnimProperty::Border)) || changed;
-    changed = instance.shadow.setTarget(element.shadow, element.transition, shouldAnimate(element, AnimProperty::Shadow)) || changed;
-    changed = instance.transform.setTarget(core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
+    const Color oldColor = instance.color.value();
+    const float oldOpacity = instance.opacity.value();
+    const Border oldBorder = instance.border.value();
+    const Shadow oldShadow = instance.shadow.value();
+    bool changed = gradientChanged;
+    changed = setDecorationTarget(instance.frame, targetFrame, element.transition, !snapFrame && shouldAnimateFrame(element), element.id, FrameDecoration) || changed;
+    changed = setDecorationTarget(instance.color, currentColor, element.transition,
+        shouldAnimate(element, AnimProperty::Color), element.id, ColorDecoration,
+        colorInitialStep) || changed;
+    changed = setDecorationTarget(instance.radius, element.radius, element.transition, shouldAnimate(element, AnimProperty::Radius), element.id, RadiusDecoration) || changed;
+    changed = setDecorationTarget(instance.blur, element.blur, element.transition, shouldAnimate(element, AnimProperty::Blur), element.id, BlurDecoration) || changed;
+    changed = setDecorationTarget(instance.opacity, element.opacity, element.transition,
+        shouldAnimate(element, AnimProperty::Opacity), element.id, OpacityDecoration) || changed;
+    changed = setDecorationTarget(instance.border, element.border, element.transition,
+        shouldAnimate(element, AnimProperty::Border), element.id, BorderDecoration) || changed;
+    changed = setDecorationTarget(instance.shadow, element.shadow, element.transition,
+        shouldAnimate(element, AnimProperty::Shadow), element.id, ShadowDecoration) || changed;
+    changed = setDecorationTarget(instance.transform, core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform), element.id, TransformDecoration) || changed;
 
-    const bool frameChanged = instance.frame.tick(deltaSeconds);
-    const bool colorChanged = instance.color.tick(deltaSeconds);
-    const bool radiusChanged = instance.radius.tick(deltaSeconds);
-    const bool blurChanged = instance.blur.tick(deltaSeconds);
-    const bool opacityChanged = instance.opacity.tick(deltaSeconds);
-    const bool borderChanged = instance.border.tick(deltaSeconds);
-    const bool shadowChanged = instance.shadow.tick(deltaSeconds);
-    const bool transformChanged = instance.transform.tick(deltaSeconds);
-    changed = changed || frameChanged || colorChanged || radiusChanged || blurChanged ||
+    const bool frameChanged = tickDecoration(instance.frame, element.id, FrameDecoration, deltaSeconds);
+    const bool colorChanged = tickDecoration(instance.color, element.id, ColorDecoration, deltaSeconds) ||
+        !closeEnough(oldColor, instance.color.value());
+    const bool radiusChanged = tickDecoration(instance.radius, element.id, RadiusDecoration, deltaSeconds);
+    const bool blurChanged = tickDecoration(instance.blur, element.id, BlurDecoration, deltaSeconds);
+    const bool opacityChanged = tickDecoration(instance.opacity, element.id, OpacityDecoration, deltaSeconds) ||
+        !closeEnough(oldOpacity, instance.opacity.value());
+    const bool borderChanged = tickDecoration(instance.border, element.id, BorderDecoration, deltaSeconds) ||
+        !closeEnough(oldBorder, instance.border.value());
+    const bool shadowChanged = tickDecoration(instance.shadow, element.id, ShadowDecoration, deltaSeconds) ||
+        !closeEnough(oldShadow, instance.shadow.value());
+    const bool transformChanged = tickDecoration(instance.transform, element.id, TransformDecoration, deltaSeconds);
+    changed = changed || hoverChanged || pressChanged || frameChanged || colorChanged || radiusChanged || blurChanged ||
               opacityChanged || borderChanged || shadowChanged || transformChanged;
 
     if (changed) {
@@ -874,7 +963,7 @@ inline void Runtime::updateRect(
             addDirtyUnion(beforeRect, afterRect);
         }
     }
-    animating_ = animating_ || isRectAnimating(element, instance);
+    noteDecoration(isRectAnimating(instance) || isRectDecorating(element, instance));
 }
 
 inline void Runtime::updatePolygon(
@@ -884,6 +973,8 @@ inline void Runtime::updatePolygon(
     const RenderTransform& inheritedTransform,
     bool snapFrame) {
     runtime::PolygonInstance& instance = instances_.polygon(element.id);
+    const bool previousHover = instance.interaction.hover;
+    const bool previousPress = instance.interaction.pressed;
     instance.interaction = instances_.interaction(element.id).state;
     const Rect beforeRect = applyRenderTransformToLogicalRect(
         transformRect({instance.frame.value().x, instance.frame.value().y, instance.frame.value().width, instance.frame.value().height},
@@ -897,12 +988,34 @@ inline void Runtime::updatePolygon(
         (!closeEnough(element.color, element.hoverColor) || !closeEnough(element.color, element.pressedColor));
     const float hoverSpeed = element.smoothStateColors ? 12.0f : 0.0f;
     const float pressSpeed = element.smoothStateColors ? 20.0f : 0.0f;
-    const bool hoverChanged = instance.hoverBlend.update(interactive && stateColorsVisible && instance.interaction.hover ? 1.0f : 0.0f,
-                                                         hoverSpeed,
-                                                         deltaSeconds);
-    const bool pressChanged = instance.pressBlend.update(interactive && stateColorsVisible && instance.interaction.pressed ? 1.0f : 0.0f,
-                                                         pressSpeed,
-                                                         deltaSeconds);
+    const float decorationDelta = decorationDeltaSeconds(deltaSeconds);
+    if (hoverSpeed > 0.0f && previousHover != instance.interaction.hover)
+        markNewDecorationTarget(element.id, HoverDecoration);
+    if (pressSpeed > 0.0f && previousPress != instance.interaction.pressed)
+        markNewDecorationTarget(element.id, PressDecoration);
+    const float oldHoverBlend = instance.hoverBlend.value();
+    const float oldPressBlend = instance.pressBlend.value();
+    const float hoverStep = hoverSpeed > 0.0f
+        ? decorationStepSeconds(element.id, HoverDecoration, deltaSeconds) : decorationDelta;
+    const float pressStep = pressSpeed > 0.0f
+        ? decorationStepSeconds(element.id, PressDecoration, deltaSeconds) : decorationDelta;
+    const bool hoverChanged = (decorationSampleAllowed_ || hoverSpeed <= 0.0f) &&
+        instance.hoverBlend.update(interactive && stateColorsVisible && instance.interaction.hover ? 1.0f : 0.0f,
+                                   hoverSpeed, hoverStep);
+    const bool pressChanged = (decorationSampleAllowed_ || pressSpeed <= 0.0f) &&
+        instance.pressBlend.update(interactive && stateColorsVisible && instance.interaction.pressed ? 1.0f : 0.0f,
+                                   pressSpeed, pressStep);
+    const bool smoothHoverChanged = hoverSpeed > 0.0f &&
+        !closeEnough(oldHoverBlend, instance.hoverBlend.value());
+    const bool smoothPressChanged = pressSpeed > 0.0f &&
+        !closeEnough(oldPressBlend, instance.pressBlend.value());
+    if (decorationFrameRateLimit_ > 0.0f && decorationSampleAllowed_ &&
+        (smoothHoverChanged || smoothPressChanged))
+        decorationSampleCommitted_ = true;
+    const float colorInitialStep = smoothHoverChanged || smoothPressChanged
+        ? std::max(smoothHoverChanged ? hoverStep : 0.0f,
+                   smoothPressChanged ? pressStep : 0.0f)
+        : -1.0f;
     const float hover = instance.hoverBlend.value();
     const float press = instance.pressBlend.value();
     const Color hoverColor = stateColorsVisible ? mixColor(element.color, element.hoverColor, hover) : element.color;
@@ -912,18 +1025,26 @@ inline void Runtime::updatePolygon(
         instance.points = element.polygonPoints;
     }
 
-    bool changed = hoverChanged || pressChanged || pointsChanged;
-    changed = instance.frame.setTarget(element.frame, element.transition, !snapFrame && shouldAnimateFrame(element)) || changed;
-    changed = instance.color.setTarget(currentColor, element.transition, shouldAnimate(element, AnimProperty::Color)) || changed;
-    changed = instance.radius.setTarget(element.radius, element.transition, shouldAnimate(element, AnimProperty::Radius)) || changed;
-    changed = instance.opacity.setTarget(element.opacity, element.transition, shouldAnimate(element, AnimProperty::Opacity)) || changed;
-    changed = instance.transform.setTarget(core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
+    const Color oldColor = instance.color.value();
+    const float oldOpacity = instance.opacity.value();
+    bool changed = pointsChanged;
+    changed = setDecorationTarget(instance.frame, element.frame, element.transition, !snapFrame && shouldAnimateFrame(element), element.id, FrameDecoration) || changed;
+    changed = setDecorationTarget(instance.color, currentColor, element.transition,
+        shouldAnimate(element, AnimProperty::Color), element.id, ColorDecoration,
+        colorInitialStep) || changed;
+    changed = setDecorationTarget(instance.radius, element.radius, element.transition, shouldAnimate(element, AnimProperty::Radius), element.id, RadiusDecoration) || changed;
+    changed = setDecorationTarget(instance.opacity, element.opacity, element.transition,
+        shouldAnimate(element, AnimProperty::Opacity), element.id, OpacityDecoration) || changed;
+    changed = setDecorationTarget(instance.transform, core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform), element.id, TransformDecoration) || changed;
 
-    changed = instance.frame.tick(deltaSeconds) || changed;
-    changed = instance.color.tick(deltaSeconds) || changed;
-    changed = instance.radius.tick(deltaSeconds) || changed;
-    changed = instance.opacity.tick(deltaSeconds) || changed;
-    changed = instance.transform.tick(deltaSeconds) || changed;
+    changed = tickDecoration(instance.frame, element.id, FrameDecoration, deltaSeconds) || changed;
+    const bool colorChanged = tickDecoration(instance.color, element.id, ColorDecoration, deltaSeconds) ||
+        !closeEnough(oldColor, instance.color.value());
+    changed = tickDecoration(instance.radius, element.id, RadiusDecoration, deltaSeconds) || changed;
+    const bool opacityChanged = tickDecoration(instance.opacity, element.id, OpacityDecoration, deltaSeconds) ||
+        !closeEnough(oldOpacity, instance.opacity.value());
+    changed = tickDecoration(instance.transform, element.id, TransformDecoration, deltaSeconds) || changed;
+    changed = changed || hoverChanged || pressChanged || colorChanged || opacityChanged;
 
     if (changed) {
         const Rect afterRect = applyRenderTransformToLogicalRect(
@@ -934,7 +1055,7 @@ inline void Runtime::updatePolygon(
             inheritedTransform);
         addDirtyUnion(beforeRect, afterRect);
     }
-    animating_ = animating_ || isPolygonAnimating(element, instance);
+    noteDecoration(isPolygonAnimating(instance) || isPolygonDecorating(element, instance));
 }
 
 inline void Runtime::updateText(
@@ -985,15 +1106,22 @@ inline void Runtime::updateText(
     }
 
     bool changed = false;
-    changed = instance.frame.setTarget(element.frame, element.transition, !snapFrame && shouldAnimateFrame(element)) || changed;
-    changed = instance.color.setTarget(element.textColor, element.transition, shouldAnimate(element, AnimProperty::TextColor)) || changed;
-    changed = instance.opacity.setTarget(element.opacity, element.transition, shouldAnimate(element, AnimProperty::Opacity)) || changed;
-    changed = instance.transform.setTarget(core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
+    changed = setDecorationTarget(instance.frame, element.frame, element.transition, !snapFrame && shouldAnimateFrame(element), element.id, FrameDecoration) || changed;
+    const Color oldColor = instance.color.value();
+    const float oldOpacity = instance.opacity.value();
+    changed = setDecorationTarget(instance.color, element.textColor, element.transition,
+        shouldAnimate(element, AnimProperty::TextColor), element.id, ColorDecoration) || changed;
+    changed = setDecorationTarget(instance.opacity, element.opacity, element.transition,
+        shouldAnimate(element, AnimProperty::Opacity), element.id, OpacityDecoration) || changed;
+    changed = setDecorationTarget(instance.transform, core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform), element.id, TransformDecoration) || changed;
 
-    changed = instance.frame.tick(deltaSeconds) || changed;
-    changed = instance.color.tick(deltaSeconds) || changed;
-    changed = instance.opacity.tick(deltaSeconds) || changed;
-    changed = instance.transform.tick(deltaSeconds) || changed;
+    changed = tickDecoration(instance.frame, element.id, FrameDecoration, deltaSeconds) || changed;
+    const bool colorChanged = tickDecoration(instance.color, element.id, ColorDecoration, deltaSeconds) ||
+        !closeEnough(oldColor, instance.color.value());
+    const bool opacityChanged = tickDecoration(instance.opacity, element.id, OpacityDecoration, deltaSeconds) ||
+        !closeEnough(oldOpacity, instance.opacity.value());
+    changed = colorChanged || opacityChanged || changed;
+    changed = tickDecoration(instance.transform, element.id, TransformDecoration, deltaSeconds) || changed;
 
     if (changed || contentChanged) {
         const Rect afterRect = applyRenderTransformToLogicalRect(
@@ -1003,7 +1131,7 @@ inline void Runtime::updateText(
             inheritedTransform);
         addDirtyUnion(beforeRect, afterRect);
     }
-    animating_ = animating_ || isTextAnimating(instance);
+    noteDecoration(isTextAnimating(instance) || instance.color.isActive() || instance.opacity.isActive());
 }
 
 inline void Runtime::updateImage(
@@ -1019,19 +1147,26 @@ inline void Runtime::updateImage(
         inheritedTransform);
 
     bool changed = false;
-    changed = instance.frame.setTarget(element.frame, element.transition, !snapFrame && shouldAnimateFrame(element)) || changed;
-    changed = instance.tint.setTarget(element.color, element.transition, shouldAnimate(element, AnimProperty::Color)) || changed;
-    changed = instance.radius.setTarget(element.radius, element.transition, shouldAnimate(element, AnimProperty::Radius)) || changed;
-    changed = instance.blur.setTarget(element.blur, element.transition, shouldAnimate(element, AnimProperty::Blur)) || changed;
-    changed = instance.opacity.setTarget(element.opacity, element.transition, shouldAnimate(element, AnimProperty::Opacity)) || changed;
-    changed = instance.transform.setTarget(core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
+    changed = setDecorationTarget(instance.frame, element.frame, element.transition, !snapFrame && shouldAnimateFrame(element), element.id, FrameDecoration) || changed;
+    const Color oldTint = instance.tint.value();
+    const float oldOpacity = instance.opacity.value();
+    changed = setDecorationTarget(instance.tint, element.color, element.transition,
+        shouldAnimate(element, AnimProperty::Color), element.id, ColorDecoration) || changed;
+    changed = setDecorationTarget(instance.radius, element.radius, element.transition, shouldAnimate(element, AnimProperty::Radius), element.id, RadiusDecoration) || changed;
+    changed = setDecorationTarget(instance.blur, element.blur, element.transition, shouldAnimate(element, AnimProperty::Blur), element.id, BlurDecoration) || changed;
+    changed = setDecorationTarget(instance.opacity, element.opacity, element.transition,
+        shouldAnimate(element, AnimProperty::Opacity), element.id, OpacityDecoration) || changed;
+    changed = setDecorationTarget(instance.transform, core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform), element.transition, shouldAnimate(element, AnimProperty::Transform), element.id, TransformDecoration) || changed;
 
-    changed = instance.frame.tick(deltaSeconds) || changed;
-    changed = instance.tint.tick(deltaSeconds) || changed;
-    changed = instance.radius.tick(deltaSeconds) || changed;
-    changed = instance.blur.tick(deltaSeconds) || changed;
-    changed = instance.opacity.tick(deltaSeconds) || changed;
-    changed = instance.transform.tick(deltaSeconds) || changed;
+    changed = tickDecoration(instance.frame, element.id, FrameDecoration, deltaSeconds) || changed;
+    const bool tintChanged = tickDecoration(instance.tint, element.id, ColorDecoration, deltaSeconds) ||
+        !closeEnough(oldTint, instance.tint.value());
+    changed = tickDecoration(instance.radius, element.id, RadiusDecoration, deltaSeconds) || changed;
+    changed = tickDecoration(instance.blur, element.id, BlurDecoration, deltaSeconds) || changed;
+    const bool opacityChanged = tickDecoration(instance.opacity, element.id, OpacityDecoration, deltaSeconds) ||
+        !closeEnough(oldOpacity, instance.opacity.value());
+    changed = tickDecoration(instance.transform, element.id, TransformDecoration, deltaSeconds) || changed;
+    changed = tintChanged || opacityChanged || changed;
 
     if (instance.hasCoverViewport != element.imageHasCoverViewport ||
         !closeEnough(instance.coverViewportSize, element.imageCoverViewportSize) ||
@@ -1084,7 +1219,9 @@ inline void Runtime::updateImage(
             inheritedTransform);
         addDirtyUnion(beforeRect, afterRect);
     }
-    animating_ = animating_ || isImageAnimating(instance);
+    animating_ = animating_ || instance.primitive->isAnimating();
+    noteDecoration(instance.frame.isActive() || instance.radius.isActive() || instance.blur.isActive() ||
+        instance.transform.isActive() || instance.tint.isActive() || instance.opacity.isActive());
 }
 
 inline void Runtime::updateShaderToy(
@@ -1100,19 +1237,22 @@ inline void Runtime::updateShaderToy(
         dpiScale, inheritedTransform);
 
     bool changed = false;
-    changed = instance.frame.setTarget(element.frame, element.transition,
-                                       !snapFrame && shouldAnimateFrame(element)) || changed;
-    changed = instance.radius.setTarget(element.radius, element.transition,
-                                        shouldAnimate(element, AnimProperty::Radius)) || changed;
-    changed = instance.opacity.setTarget(element.opacity, element.transition,
-                                         shouldAnimate(element, AnimProperty::Opacity)) || changed;
-    changed = instance.transform.setTarget(
+    changed = setDecorationTarget(instance.frame, element.frame, element.transition,
+                                       !snapFrame && shouldAnimateFrame(element), element.id, FrameDecoration) || changed;
+    changed = setDecorationTarget(instance.radius, element.radius, element.transition,
+                                        shouldAnimate(element, AnimProperty::Radius), element.id, RadiusDecoration) || changed;
+    const float oldOpacity = instance.opacity.value();
+    changed = setDecorationTarget(instance.opacity, element.opacity, element.transition,
+        shouldAnimate(element, AnimProperty::Opacity), element.id, OpacityDecoration) || changed;
+    changed = setDecorationTarget(instance.transform,
         core::dsl::runtimeTransformForElement(element, instances_.scrollStates, instances_.sliderStates, element.transform),
-        element.transition, shouldAnimate(element, AnimProperty::Transform)) || changed;
-    changed = instance.frame.tick(deltaSeconds) || changed;
-    changed = instance.radius.tick(deltaSeconds) || changed;
-    changed = instance.opacity.tick(deltaSeconds) || changed;
-    changed = instance.transform.tick(deltaSeconds) || changed;
+        element.transition, shouldAnimate(element, AnimProperty::Transform), element.id, TransformDecoration) || changed;
+    changed = tickDecoration(instance.frame, element.id, FrameDecoration, deltaSeconds) || changed;
+    changed = tickDecoration(instance.radius, element.id, RadiusDecoration, deltaSeconds) || changed;
+    const bool opacityChanged = tickDecoration(instance.opacity, element.id, OpacityDecoration, deltaSeconds) ||
+        !closeEnough(oldOpacity, instance.opacity.value());
+    changed = opacityChanged || changed;
+    changed = tickDecoration(instance.transform, element.id, TransformDecoration, deltaSeconds) || changed;
 
     const std::uint64_t graphHash = core::render::shaderToyGraphHash(element.shaderToyGraph);
     if (instance.graphHash != graphHash) {
@@ -1156,9 +1296,7 @@ inline void Runtime::updateShaderToy(
                                event.isRelease(PointerButton::Left),
                                updateFrameToken_, pointerInside);
 
-    const bool active = instance.primitive->isAnimating() || instance.frame.isActive() ||
-                        instance.radius.isActive() || instance.opacity.isActive() ||
-                        instance.transform.isActive();
+    const bool active = instance.primitive->isAnimating();
     if (changed || active) {
         const Rect afterRect = applyRenderTransformToLogicalRect(
             imageVisualRect(instance.frame.value(), instance.transform.value()),
@@ -1166,6 +1304,8 @@ inline void Runtime::updateShaderToy(
         addDirtyUnion(beforeRect, afterRect);
     }
     animating_ = animating_ || active;
+    noteDecoration(instance.frame.isActive() || instance.radius.isActive() ||
+        instance.transform.isActive() || instance.opacity.isActive());
 }
 
 } // namespace core::dsl

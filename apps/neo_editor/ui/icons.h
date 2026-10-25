@@ -12,7 +12,7 @@ namespace neo {
 // Application-owned vector icons, drawn by the native renderer at the current DPI.
 // No bitmap cache or dependency on the UI library's icon font.
 enum class UiIcon {
-    None, Search, Outline, File, TextFile, MarkdownFile, CodeFile, DataFile,
+    None, Search, Outline, File, TextFile, MarkdownFile, CodeFile, DataFile, ImageFile,
     ChevronRight, ChevronDown, Previous, Next, Close, Replace,
     Folder, FolderOpen, ArrowLeft, ArrowRight,
     Globe, List, Font, Settings, Plus, Minus, Check, Info, Warning, Sliders,
@@ -87,6 +87,18 @@ inline void iconView(eui::Ui& ui, const std::string& id, UiIcon icon,
             } else if (kind == UiIcon::DataFile) {
                 polygon("mark.left", document_icon::dataLeft, markColor);
                 polygon("mark.right", document_icon::dataRight, markColor);
+            } else if (kind == UiIcon::ImageFile) {
+                // Application-only photograph mark on the existing folded page.
+                // It does not add a Windows ICO/resource or association family.
+                ui.rect(id + ".photo.frame").position(5.7f*scale, 9.8f*scale)
+                    .size(11.9f*scale, 9.1f*scale).radius(.8f*scale)
+                    .color(rgba(markColor.r,markColor.g,markColor.b,.12f))
+                    .border(.9f*scale,markColor).build();
+                const std::array<core::Vec2,5> mountains{{{6.8f,17.7f},{10.0f,13.4f},
+                    {12.0f,15.5f},{14.2f,12.8f},{16.6f,17.7f}}};
+                polygon("photo.mountains",mountains,markColor);
+                ui.rect(id + ".photo.sun").position(7.3f*scale, 11.0f*scale)
+                    .size(1.8f*scale,1.8f*scale).radius(.9f*scale).color(markColor).build();
             }
             if (kind == UiIcon::TextFile) rules(document_icon::txtRules, document_icon::ruleThickness);
             else if (kind == UiIcon::MarkdownFile) rules(document_icon::mdRules, document_icon::ruleThickness);
@@ -170,7 +182,8 @@ inline void iconView(eui::Ui& ui, const std::string& id, UiIcon icon,
             case UiIcon::TextFile:
             case UiIcon::MarkdownFile:
             case UiIcon::CodeFile:
-            case UiIcon::DataFile: document(icon); break;
+            case UiIcon::DataFile:
+            case UiIcon::ImageFile: document(icon); break;
             case UiIcon::ChevronRight: line(9, 6, 15, 12); line(15, 12, 9, 18); break;
             case UiIcon::ChevronDown: line(6, 9, 12, 15); line(12, 15, 18, 9); break;
             case UiIcon::Previous:
@@ -270,7 +283,7 @@ inline void iconTextButton(eui::Ui& ui, const std::string& id, UiIcon icon,
     const float height = fontSize + 14.0f;
     const float glyph = std::min(18.0f, fontSize + 2.0f);
     ui.stack(id).size(width, height).content([&] {
-        ui.rect(id + ".hit").fill().radius(5).states(rgba(0, 0, 0, 0), colors.rowHover, colors.pressed)
+        ui.rect(id + ".hit").fill().radius(neo::corner(colors, 5.0f)).states(rgba(0, 0, 0, 0), colors.rowHover, colors.pressed)
             .cursor(eui::CursorShape::Hand).preserveFocusOnPress().onClick(std::move(onClick)).build();
         iconView(ui, id + ".icon", icon, 6, (height-glyph)*.5f, glyph, colors.text);
         ui.text(id + ".text").position(glyph+12, 0).size(std::max(0.0f, width-glyph-18), height)
@@ -284,7 +297,7 @@ inline void iconButton(eui::Ui& ui, const std::string& id, UiIcon icon,
                        std::function<void()> onClick) {
     const auto& colors = editorColors();
     ui.stack(id).position(x, y).size(size, size).content([&] {
-        auto hit = ui.rect(id + ".hit").fill().radius(5.0f)
+        auto hit = ui.rect(id + ".hit").fill().radius(neo::corner(colors, 5.0f))
             .states(rgba(0, 0, 0, 0), colors.rowHover, colors.pressed)
             .preserveFocusOnPress().disabled(!enabled);
         if (enabled) hit.cursor(eui::CursorShape::Hand).onClick(std::move(onClick));

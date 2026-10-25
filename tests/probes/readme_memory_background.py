@@ -246,7 +246,8 @@ def main():
                     time.sleep(10); responsive(hwnd)
                     initial = geometry(hwnd, proc.pid); run["geometry"] = initial
                     assert initial["outer_pixels"] == [1280,800] and initial["dpi"] == 120
-                    assert initial["client_pixels"] == [1262,753], "client differs from historical fixture"
+                    # Borderless window: the client area equals the 1280x800 outer fixture.
+                    assert initial["client_pixels"] == [1280,800], "client differs from borderless fixture"
                     handle = kernel.OpenProcess(0x410, False, proc.pid); assert handle
                     started = time.monotonic()
                     for i in range(20):

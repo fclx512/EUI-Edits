@@ -4,10 +4,12 @@
 #include "components/dialog.h"
 #include "components/input.h"
 #include "components/scroll.h"
+#include "components/contextmenu.h"
 #include "core/render/text.h"
 #include "state/app_actions.h"
 #include "state/app_state.h"
 #include "ui/metrics.h"
+#include "ui/popup_presentation.h"
 #include "ui/widgets.h"
 
 #include <algorithm>
@@ -120,7 +122,7 @@ inline void safetyDialog(eui::Ui& ui, AppState& state, const eui::Screen& screen
                     .theme(colors.tokens, !conflict && i == 0)
                     .position(24 + i * (buttonWidth + 8), height - 48)
                     .size(buttonWidth, 32).text(i18n::tr(labels[i]))
-                    .fontSize(buttonFont).radius(6)
+                    .fontSize(buttonFont).radius(neo::corner(colors, 6.0f))
                     .border(1.5f, state.safetyChoice == i ? colors.accent : colors.tokens.border)
                     .onClick([&state, conflict, i] {
                         if (conflict) resolveSaveConflict(state, i);
@@ -169,11 +171,14 @@ inline void languageOverlay(eui::Ui& ui,AppState& state,const eui::Screen& scree
         for(const auto& lang:languageGroups()[i]) children.emplace_back(components::ContextMenuItem(filetypes::label(lang)).withChecked(state.language()==lang));
         items.emplace_back(labels[i],std::move(children));
     }
-    components::contextMenu(ui,"editor.languageMenu").open(state.languageMenuOpen).screen(screen.width,screen.height)
+    const auto menuTokens = editorColors().tokens;
+    auto menu = components::contextMenu(ui,"editor.languageMenu").open(state.languageMenuOpen).screen(screen.width,screen.height)
         .skipClosedContent()
         .position(std::max(0.0f,screen.width-270),std::max(0.0f,screen.height-275)).size(220,32)
-        .theme(editorColors().tokens).zIndex(2500).items(std::move(items))
-        .onSelectPath([&state](const std::vector<int>& path) {
+        .theme(menuTokens).zIndex(2500).items(std::move(items));
+    popup_presentation::apply(menu, state,
+                          menuTokens, state.languageMenuOpen);
+    menu.onSelectPath([&state](const std::vector<int>& path) {
             if(path.empty()) return;
             if(path[0]==0) state.languageOverride.clear();
             else if(path[0]==1) state.languageOverride="text";
@@ -231,7 +236,7 @@ inline void linkEditorOverlay(eui::Ui& ui, AppState& state, const eui::Screen& s
             inputStyle.focusBorder = colors.accent;
             inputStyle.text = colors.text;
             inputStyle.cursor = colors.accent;
-            inputStyle.radius = 6.0f;
+            inputStyle.radius = neo::corner(colors, 6.0f);
             inputStyle.shadow = eui::Shadow{};
             components::input(ui, "editor.linkedit.input")
                 .position(kPad, 54.0f)
@@ -254,7 +259,7 @@ inline void linkEditorOverlay(eui::Ui& ui, AppState& state, const eui::Screen& s
                 .size(104.0f, 32.0f)
                 .text(i18n::tr("safety.cancel"))
                 .fontSize(13.0f)
-                .radius(6.0f)
+                .radius(components::theme::cornerRadius(tokens.metrics, 6.0f))
                 .border(1.0f, tokens.border)
                 .shadow(0.0f, 0.0f, 0.0f, components::theme::color(0.0f, 0.0f, 0.0f, 0.0f))
                 .onClick([&state] { cancelLinkEditor(state); })
@@ -265,7 +270,7 @@ inline void linkEditorOverlay(eui::Ui& ui, AppState& state, const eui::Screen& s
                 .size(104.0f, 32.0f)
                 .text(i18n::tr("safety.ok"))
                 .fontSize(13.0f)
-                .radius(6.0f)
+                .radius(components::theme::cornerRadius(tokens.metrics, 6.0f))
                 .border(1.0f, components::theme::withAlpha(tokens.primary, 0.64f))
                 .shadow(10.0f, 0.0f, 3.0f, components::theme::withAlpha(tokens.primary, 0.18f))
                 .onClick([&state] { confirmLinkEditor(state); })

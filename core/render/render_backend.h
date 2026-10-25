@@ -74,7 +74,22 @@ struct RenderFrameStats {
     std::uint64_t textBatchVertices = 0;
     int backdropCaptures = 0;
     int backdropCaptureReuses = 0;
+    int frozenSceneCaptures = 0;
+    int frozenPanelFilters = 0;
+    int frozenPanelReuses = 0;
+    int frozenFallbacks = 0;
+    int frozenInvalidations = 0;
+    bool frozenCaptureDeferred = false;
+    std::uint64_t frozenBytes = 0;
+    double frozenCaptureMs = 0.0;
+    double frozenFilterMs = 0.0;
+    int stripCaptures = 0, stripFilters = 0, stripReuses = 0;
+    int stripFallbacks = 0, stripInvalidations = 0;
+    bool stripCaptureDeferred = false;
+    std::uint64_t stripBytes = 0;
     int rectDraws = 0;
+    int revealBrushCreates = 0;
+    int revealDraws = 0;
     int polygonDraws = 0;
     int textPrepares = 0;
     int textDraws = 0;
@@ -281,6 +296,16 @@ public:
     virtual void clear(const core::Color& color) = 0;
     virtual void setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) = 0;
     virtual void prepareBackdropBlur(const core::Rect& bounds, float blur, int windowWidth, int windowHeight) = 0;
+    // True requests one clean, complete scene prepass. Before capture a backend
+    // may set frozenCaptureDeferred to observe a stable opening/focus handoff.
+    // After capture, changes invalidate the image until the next opening.
+    virtual bool beginFrozenBackdropFrame(std::uint64_t session, std::uint64_t sceneRevision,
+                                          int width, int height, float dpiScale) { return false; }
+    virtual void captureFrozenBackdropScene() {}
+    virtual bool beginCachedStripFrame(std::uint64_t, std::uint64_t, int, int, float) { return false; }
+    virtual bool cachedStripNeedsValidation(std::uint64_t) const { return false; }
+    virtual void captureCachedStrip(const core::FrozenBackdrop&) {}
+    virtual void prepareFrozenBackdrop(const core::FrozenBackdrop& material) {}
     virtual void drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) = 0;
     virtual void drawPolygon(const PolygonDrawCommand& command, int windowWidth, int windowHeight) = 0;
     virtual void drawText(const TextDrawCommand& command, int windowWidth, int windowHeight) = 0;

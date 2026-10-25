@@ -10,9 +10,11 @@
 #include "state/app_state.h"
 #include "state/tabs_trace.h"
 #include "ui/metrics.h"
+#include "ui/popup_presentation.h"
 #include "ui/window_layout.h"
 #include "ui/widgets.h"
 #include "ui/mindmap_inline.h"
+#include "eui/app.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -181,7 +183,11 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
         mindmap_inline::prepareInlineMindmap(ui, state, width);
     }
     const auto statsBefore = InputModel::debugLayoutStats();
-    components::input(ui, editorInputId(state))
+    auto editorInput = components::input(ui, editorInputId(state));
+    if (state.markdownCapable() && state.wordWrap()) {
+        editorInput.widthReflowFrameToken(app::updateSerial());
+    }
+    editorInput
         .theme(colors.tokens)
         .size(width, height)
         .multiline(true)
@@ -272,17 +278,7 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
                     docDir = textfile::pathToUtf8(textfile::pathFromUtf8(state.path).parent_path());
                 }
                 const std::string resolved = lp::resolveLocalImageSrc(line.pureImageSrc, docDir);
-                std::optional<lp::ImageExtent> extent;
-                if (!resolved.empty()) {
-                    extent = lp::readImageExtent(resolved);
-                }
-                if (!resolved.empty() && extent.has_value()) {
-                    state.imagePreviewPath = resolved;
-                    state.imageViewport = ImageViewport{};
-                    state.imagePreviewWidth = static_cast<float>(extent->width);
-                    state.imagePreviewHeight = static_cast<float>(extent->height);
-                    app::requestUpdate();
-                }
+                if (!resolved.empty()) openImagePreview(state, resolved);
                 return;
             }
             if (hit.onGutter) {
@@ -337,7 +333,7 @@ inline void editorView(eui::Ui& ui, AppState& state, const UiMetrics& metrics, f
         .onContextMenu([&state](float x, float y) {
             state.contextMenuX = x;
             state.contextMenuY = y;
-            state.contextMenuOpen = true;
+            popup_presentation::activate(state, popup_presentation::Owner::EditorContext);
             app::requestUpdate();
         })
         .build();

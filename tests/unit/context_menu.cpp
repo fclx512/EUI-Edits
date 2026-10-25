@@ -2,6 +2,7 @@
 #include "core/dsl.h"
 
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -493,7 +494,183 @@ bool compactChildrenPresentationGeometry() {
     return true;
 }
 
+bool backgroundDecorationPreservesInteractionGeometry() {
+    core::dsl::Ui ui;
+    bool open = true;
+    int decorated = 0;
+    int selected = 0;
+    const auto compose = [&](bool enabled) {
+        ui.begin("decorated-menu");
+        auto menu = components::contextMenu(ui, "sample")
+            .open(open).screen(640, 480).position(30, 40).size(240, 34)
+            .items({"Action"}).onSelect([&](int) { ++selected; });
+        if (enabled) {
+            menu.backgroundDecoration([&](core::dsl::Ui& target, const std::string& id,
+                                           float width, float height) {
+                ++decorated;
+                target.rect(id + ".decoration").size(width, height)
+                    .hitTestMode(core::dsl::HitTestMode::None).build();
+            });
+        }
+        menu.build();
+        ui.end();
+        ui.layout(core::dsl::Screen{640, 480});
+    };
+    compose(false);
+    const auto original = findSuffix(ui, ".level.0.item.0")->frame;
+    compose(true);
+    const auto* row = findSuffix(ui, ".level.0.item.0");
+    const auto* decoration = findSuffix(ui, ".level.0.decoration");
+    const auto* background = findSuffix(ui, ".level.0.bg");
+    if (decorated != 1 || !row || !decoration || !background ||
+        decoration->hitTestMode != core::dsl::HitTestMode::None ||
+        row->frame.x != original.x || row->frame.y != original.y ||
+        row->frame.width != original.width || row->frame.height != original.height ||
+        decoration->frame.width != background->frame.width ||
+        decoration->frame.height != background->frame.height || !row->onClick) return false;
+    row->onClick();
+    if (selected != 1) return false;
+    open = false;
+    compose(true);
+    if (decorated != 1 || findSuffix(ui, ".level.0.decoration")) return false;
+    open = true;
+    compose(false);
+    return !findSuffix(ui, ".level.0.decoration") && decorated == 1;
+}
+
+bool frozenBackdropSessionPathAndScopeContracts() {
+
+    core::dsl::Ui ui;
+    bool open = true;
+    int dispatches = 0;
+    std::vector<int> selectedPath;
+    std::vector<MenuItem> items;
+    items.emplace_back("New", std::vector<MenuItem>{MenuItem("Text")});
+    items.emplace_back("Encoding", std::vector<MenuItem>{MenuItem("UTF-8")});
+    const auto compose = [&](bool configure, bool enabled = true, float x = 30.0f) {
+        ui.begin("frozen-menu-test");
+        auto menu = components::contextMenu(ui, "file")
+            .open(open).screen(640.0f, 480.0f).position(x, 36.0f).size(240.0f, 38.0f)
+            .items(items)
+            .onSelectPath([&](const std::vector<int>& path) {
+                ++dispatches;
+                selectedPath = path;
+            })
+            .onOpenChange([&](bool value) { open = value; });
+        if (configure) menu.frozenBackdrop(6.5f, 0.72f, enabled);
+        menu.build();
+        ui.end();
+        ui.layout(core::dsl::Screen{640.0f, 480.0f});
+    };
+
+    compose(false);
+    const auto* plainRootBg = findSuffix(ui, ".level.0.bg");
+    const auto* plainRow = findSuffix(ui, ".level.0.item.0");
+    if (!plainRootBg || plainRootBg->frozenBackdrop || plainRootBg->excludeFromBackdropSnapshot || !plainRow) {
+        std::cerr << "default context menu unexpectedly opted into frozen backdrop\n";
+        return false;
+    }
+    const auto originalRow = plainRow->frame;
+
+    compose(true);
+    auto* rootBg = findSuffix(ui, ".level.0.bg");
+    const auto* menuRoot = findSuffix(ui, ".file");
+    const auto* rootRow = findSuffix(ui, ".level.0.item.0");
+    if (!rootBg || !rootBg->frozenBackdrop || !menuRoot ||
+        !menuRoot->excludeFromBackdropSnapshot || !rootRow ||
+        std::fabs(rootRow->frame.x - originalRow.x) > 0.01f ||
+        std::fabs(rootRow->frame.y - originalRow.y) > 0.01f ||
+        std::fabs(rootRow->frame.width - originalRow.width) > 0.01f ||
+        std::fabs(rootRow->frame.height - originalRow.height) > 0.01f ||
+        rootBg->frozenBackdrop->session == 0 ||
+        std::fabs(rootBg->frozenBackdrop->sigma - 6.5f) > 0.001f ||
+        std::fabs(rootBg->frozenBackdrop->tintOpacity - 0.72f) > 0.001f) {
+        std::cerr << "frozen root material changed geometry or has invalid parameters\n";
+        return false;
+    }
+    const std::uint64_t firstSession = rootBg->frozenBackdrop->session;
+    const std::uint64_t rootPanel = rootBg->frozenBackdrop->panel;
+
+    auto* newParent = findSuffix(ui, ".level.0.item.0");
+    if (!newParent || !newParent->onHoverChanged) return false;
+    newParent->onHoverChanged(true);
+    compose(true);
+    auto* newChildBg = findSuffix(ui, ".level.1.bg");
+    if (!newChildBg || !newChildBg->frozenBackdrop ||
+        newChildBg->frozenBackdrop->session != firstSession ||
+        newChildBg->frozenBackdrop->panel == rootPanel) {
+        std::cerr << "submenu level did not receive a distinct panel key in the same session\n";
+        return false;
+    }
+    const std::uint64_t newPanel = newChildBg->frozenBackdrop->panel;
+    compose(true);
+    newChildBg = findSuffix(ui, ".level.1.bg");
+    if (!newChildBg || !newChildBg->frozenBackdrop ||
+        newChildBg->frozenBackdrop->panel != newPanel ||
+        newChildBg->frozenBackdrop->session != firstSession) {
+        std::cerr << "same submenu path did not retain its stable panel key in the session\n";
+        return false;
+    }
+
+    auto* encodingParent = findSuffix(ui, ".level.0.item.1");
+    if (!encodingParent || !encodingParent->onHoverChanged) return false;
+    encodingParent->onHoverChanged(true);
+    compose(true);
+    auto* encodingChildBg = findSuffix(ui, ".level.1.bg");
+    if (!encodingChildBg || !encodingChildBg->frozenBackdrop ||
+        encodingChildBg->frozenBackdrop->session != firstSession ||
+        encodingChildBg->frozenBackdrop->panel == newPanel) {
+        std::cerr << "same-depth submenu paths shared a frozen panel key\n";
+        return false;
+    }
+
+    auto* encodingLeaf = findSuffix(ui, ".level.1.item.0");
+    if (!encodingLeaf || !encodingLeaf->onClick) return false;
+    encodingLeaf->onClick();
+    if (dispatches != 1 || selectedPath != std::vector<int>{1, 0} || open) {
+        std::cerr << "frozen material changed menu command dispatch or dismissal\n";
+        return false;
+    }
+    compose(true);
+    rootBg = findSuffix(ui, ".level.0.bg");
+    if (!rootBg || rootBg->frozenBackdrop || findSuffix(ui, ".level.1.bg")) {
+        std::cerr << "closed menu background retained active frozen material\n";
+        return false;
+    }
+    compose(true, false);
+    menuRoot = findSuffix(ui, ".file");
+    if (!menuRoot || !menuRoot->excludeFromBackdropSnapshot) {
+        std::cerr << "a closing disabled popup can leak its exit animation into another snapshot\n";
+        return false;
+    }
+
+    open = true;
+    compose(true);
+    rootBg = findSuffix(ui, ".level.0.bg");
+    if (!rootBg || !rootBg->frozenBackdrop || rootBg->frozenBackdrop->session == firstSession) {
+        std::cerr << "reopened file menu did not start a new frozen session\n";
+        return false;
+    }
+
+    compose(true, false);
+    rootBg = findSuffix(ui, ".level.0.bg");
+    menuRoot = findSuffix(ui, ".file");
+    if (!rootBg || rootBg->frozenBackdrop || !menuRoot || !menuRoot->excludeFromBackdropSnapshot) {
+        std::cerr << "disabled material must remain pure-color while excluding its transient popup source\n";
+        return false;
+    }
+    return true;
+}
+
 int main() {
+    if (!frozenBackdropSessionPathAndScopeContracts()) {
+        std::cerr << "frozen backdrop session, path, geometry, command, or scope contract failed\n";
+        return 1;
+    }
+    if (!backgroundDecorationPreservesInteractionGeometry()) {
+        std::cerr << "menu decoration changed geometry or command behavior\n";
+        return 1;
+    }
     {
         core::dsl::Ui ui;
         MenuHarness closed; closed.open = false;

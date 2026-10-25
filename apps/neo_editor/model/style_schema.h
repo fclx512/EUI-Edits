@@ -32,6 +32,29 @@ inline constexpr const char* kUiFontFamily = "Microsoft YaHei";
 // 所以加一套配色不用改任何绘制代码。
 enum class ThemeMode { Dark = 0, Light = 1 };
 
+// 界面风格与配色是两条独立的轴：切深浅/换主题文件不动圆角，切风格也不动颜色。
+// 语义是全局的（和 activeTheme 一样），由设置恢复或 applyUiStyle 写入。
+enum class UiStyle { Rounded = 0, Square = 1 };
+
+inline UiStyle& uiStyleValue() {
+    static UiStyle style = UiStyle::Rounded;
+    return style;
+}
+
+inline unsigned long long& uiStyleRevisionValue() {
+    static unsigned long long revision = 0;
+    return revision;
+}
+
+inline UiStyle currentUiStyle() { return uiStyleValue(); }
+inline unsigned long long uiStyleRevision() { return uiStyleRevisionValue(); }
+
+inline void setUiStyle(UiStyle style) {
+    if (uiStyleValue() == style) return;
+    uiStyleValue() = style;
+    ++uiStyleRevisionValue();
+}
+
 // 全部配色集中在这里。框架没有样式表也没有热重载，换肤就是改这个函数。
 struct EditorColors {
     eui::Color window;
@@ -82,6 +105,12 @@ struct EditorColors {
 
 inline eui::Color rgba(float red, float green, float blue, float alpha = 1.0f) {
     return eui::Color{red, green, blue, alpha};
+}
+
+// 界面控件的圆角取值：圆角模式保持调用点原来的设计值，直角模式统一归零。
+// 视图层写 `.radius(neo::corner(colors, 8.0f))` 即可，不需要各自判断风格。
+inline float corner(const EditorColors& colors, float rounded) {
+    return components::theme::cornerRadius(colors.tokens.metrics, rounded);
 }
 
 // ── 主题文件（T13 第一阶段）──────────────────────────────────────────────
@@ -245,6 +274,11 @@ inline void deriveThemeTokens(EditorColors& value, bool light) {
     tokens.text = value.text;
     tokens.border = value.border;
     tokens.primary = value.accent;
+    // 直角风格只压 token，不碰任何配色；组件构造与渲染期读的是同一份 metrics。
+    components::theme::applyCornerStyle(
+        tokens.metrics,
+        currentUiStyle() == UiStyle::Square ? components::theme::CornerStyle::Square
+                                            : components::theme::CornerStyle::Rounded);
     value.tokens = tokens;
 }
 
@@ -370,15 +404,19 @@ inline const EditorColors& editorColors(ThemeMode mode) {
     struct Cache {
         // 与 themeRevision() 的初值（0）必然不同 ⇒ 首次调用一定先建一次。
         unsigned long long revision = ~0ULL;
+        // 风格轴单独一列：切角落风格不需要重新加载主题文件，但几何要重建。
+        unsigned long long styleRevision = ~0ULL;
         EditorColors dark;
         EditorColors light;
     };
     static Cache cache;
     const unsigned long long revision = themeRevision();
-    if (cache.revision != revision) {
+    const unsigned long long cornerRevision = uiStyleRevision();
+    if (cache.revision != revision || cache.styleRevision != cornerRevision) {
         cache.dark = buildEditorColors(false);
         cache.light = buildEditorColors(true);
         cache.revision = revision;
+        cache.styleRevision = cornerRevision;
     }
     return mode == ThemeMode::Light ? cache.light : cache.dark;
 }

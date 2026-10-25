@@ -7,6 +7,7 @@
 #include "core/render/primitive.h"
 #include "core/render/text.h"
 #include "core/runtime/runtime_geometry.h"
+#include "core/runtime/reveal_state.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -48,6 +49,8 @@ struct RectInstance {
     AnimatedValue<LayoutRect> frame;
     AnimatedValue<Color> color;
     Gradient gradient;
+    // Only opted-in controls allocate animation state.
+    std::unique_ptr<RevealState> reveal;
     AnimatedValue<float> radius;
     AnimatedValue<float> blur;
     AnimatedValue<float> opacity;

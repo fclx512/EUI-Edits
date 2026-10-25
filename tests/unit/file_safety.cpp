@@ -2,6 +2,7 @@
 #include "eui/platform.h"
 #include "model/settings.h"
 #include "model/text_file.h"
+#include "model/png_encode.h"
 #include "model/theme_loader.h"
 #include "model/vault.h"
 #include "platform/file_operations.h"
@@ -742,6 +743,78 @@ int main() {
               "consuming a resolved heading after tab or path identity changes cancels the entire request");
     }
 
+    // Images reuse the existing decoder and never enter the text tab/save path.
+    {
+        const auto picture=dir/fs::u8path("独立图片.PNG");
+        unsigned char rgba[3*2*4];std::fill(std::begin(rgba),std::end(rgba),255);
+        std::string pngBytes,pngError;
+        check(neo::pngencode::encodeRgba(3,2,rgba,pngBytes,pngError),"encode image routing fixture");
+        put(picture,pngBytes);
+        neo::AppState viewer;
+        viewer.path=neo::textfile::pathToUtf8(file);viewer.doc.text="unsaved manuscript";
+        viewer.revision=7;viewer.savedRevision=6;
+        const auto original=viewer.doc.text;const auto tabId=viewer.tabId;
+        check(neo::loadDocument(viewer,neo::textfile::pathToUtf8(picture)),"PNG opens through normal file dispatch");
+        check(viewer.imagePreviewWidth==3 && viewer.imagePreviewHeight==2 &&
+              viewer.imageViewport.panX==0 && viewer.imageViewport.panY==0 && viewer.imageViewport.zoom==1,
+              "decoded dimensions and centered initial viewport are used");
+        check(viewer.path==neo::textfile::pathToUtf8(file) && viewer.doc.text==original &&
+              viewer.revision==7 && viewer.savedRevision==6 && viewer.tabId==tabId && viewer.tabOrder.size()==1,
+              "viewing an image preserves dirty text and the entire tab identity");
+        neo::requestOpenPath(viewer,neo::textfile::pathToUtf8(createdPath));
+        check(viewer.doc.text==original,"image modal blocks accidental underlying document navigation");
+        viewer.imagePreviewPath.clear();viewer.imageViewport.panX=100;viewer.imageViewport.zoom=3;
+        check(neo::openImagePreview(viewer,neo::textfile::pathToUtf8(picture)) &&
+              viewer.imageViewport.panX==0 && viewer.imageViewport.zoom==1,"reopening resets image pan and zoom");
+        viewer.imagePreviewPath.clear();
+        for(const char* name:{"broken.png","unsupported.webp","missing.avif"}) {
+            const auto invalid=dir/name;
+            if(std::string(name)!="missing.avif")put(invalid,"this is not a decodable image");
+            check(!neo::loadDocument(viewer,neo::textfile::pathToUtf8(invalid)) && viewer.imagePreviewPath.empty() &&
+                  viewer.doc.text==original && viewer.tabOrder.size()==1 && viewer.toastVisible,
+                  "unreadable images report an error without binary-to-text fallback");
+        }
+        const auto vectorImage=dir/"vector.svg";
+        put(vectorImage,"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"20\"><rect width=\"40\" height=\"20\" fill=\"red\"/></svg>");
+        check(neo::loadDocument(viewer,neo::textfile::pathToUtf8(vectorImage)) && !viewer.imagePreviewPath.empty(),
+              "SVG uses the same existing rasterizer as UI images");
+        const bool hadRecovery=recoveryAvailable;recoveryAvailable=false;
+        neo::AppState startup;neo::restoreStartupDocument(startup,neo::textfile::pathToUtf8(picture));
+        recoveryAvailable=hadRecovery;
+        check(!startup.imagePreviewPath.empty() && startup.path.empty() && startup.doc.text.empty() && !startup.dirty(),
+              "startup image preserves an empty underlying editor instead of creating a text tab");
+        const auto filters=neo::filetypes::openExtensions();
+        check(std::find(filters.begin(),filters.end(),"png")!=filters.end() &&
+              std::find(filters.begin(),filters.end(),"webp")!=filters.end() &&
+              neo::filetypes::image("C:/folder.png/中文.JPG") && !neo::filetypes::image("C:/folder.png/note.md"),
+              "open filter includes image candidates with case-insensitive filename routing");
+    }
+    // Window Close must dismiss read-only image viewing before normal save/exit
+    // checks, while retaining every other outstanding modal transaction.
+    {
+        resetSessionWriterForCloseScenario();
+        neo::AppState cleanImage;
+        cleanImage.imagePreviewPath="fixture.png";
+        cleanImage.imagePreviewWidth=800;cleanImage.imagePreviewHeight=600;
+        const auto priorCloseRequests=closeRequests;
+        check(neo::documentModalOpen(cleanImage) && neo::requestCloseDocument(cleanImage) &&
+              cleanImage.closeApproved && closeRequests>priorCloseRequests && cleanImage.imagePreviewPath.empty(),
+              "clean window closes through its normal exit chain while an image is open");
+        resetSessionWriterForCloseScenario();
+        neo::AppState dirtyImage;
+        dirtyImage.doc.text="unsaved behind image";dirtyImage.revision=1;
+        dirtyImage.imagePreviewPath="fixture.png";
+        check(!neo::requestCloseDocument(dirtyImage) && dirtyImage.imagePreviewPath.empty() &&
+              dirtyImage.pending==neo::PendingAction::CloseWindow && dirtyImage.doc.text=="unsaved behind image",
+              "window close dismisses image and confirms the underlying dirty manuscript");
+        neo::resolveDocumentConfirmation(dirtyImage,neo::filesafety::UnsavedChoice::Cancel);
+        check(!dirtyImage.closeApproved && dirtyImage.dirty() && dirtyImage.pending==neo::PendingAction::None,
+              "canceling image-window close retains the underlying dirty document");
+        neo::AppState nestedImage;
+        nestedImage.imagePreviewPath="fixture.png";nestedImage.savePickerOpen=true;
+        check(!neo::requestCloseDocument(nestedImage) && !nestedImage.imagePreviewPath.empty() && nestedImage.savePickerOpen,
+              "a separate native picker still blocks window close without losing preview state");
+    }
     // Delete only this unique, verified temporary-directory child.
     fs::remove_all(dir);
     if (failures == 0) std::cout << "file_safety passed\n";

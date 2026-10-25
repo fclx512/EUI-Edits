@@ -328,6 +328,9 @@ struct AppState : DocumentSession {
     std::string codeFontFile;
     // 界面主题。落盘到 settings.ini 的 theme。
     ThemeMode theme = ThemeMode::Dark;
+    // 界面风格（几何轴，独立于配色）。落盘到 settings.ini 的 ui_style；
+    // 运行时由 model/style_schema.h 的 currentUiStyle() 提供给令牌派生。
+    UiStyle uiStyle = UiStyle::Rounded;
     // 主题偏好 = "跟随系统"（settings.ini 的 theme=2）：theme 字段此时存的是
     // 当前解析出的实际模式，启动/点击/系统外观变化时按 AppsUseLightTheme 更新。
     bool themeFollowSystem = false;
@@ -402,7 +405,7 @@ struct AppState : DocumentSession {
     bool linkEditorOpen = false;
     std::string linkEditorUrl;
     // 全屏图片预览（S3f 批次 E，批次 B 的收尾增量）：路径非空 = 预览打开。
-    // 宽高是**原图**的（打开时按文件头读一次），预览按窗口 contain 重算缩放，
+    // 宽高来自现有解码器的实际输出，预览按窗口 contain 重算缩放，
     // 与编辑区里那颗缩略图的尺寸无关。
     std::string imagePreviewPath;
     float imagePreviewWidth = 0.0f;

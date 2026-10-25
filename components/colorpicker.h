@@ -270,7 +270,7 @@ private:
             .states(style_.accent,
                     core::mixColor(style_.accent, theme::color(1.0f, 1.0f, 1.0f), 0.12f),
                     core::mixColor(style_.accent, theme::color(0.0f, 0.0f, 0.0f), 0.14f))
-            .radius(metrics_.spacing.header * 0.5f)
+            .radius(theme::cornerRadius(metrics_, metrics_.spacing.header * 0.5f))
             .disabled(!open_)
             .onClick([draft, committed, onChange, onOpenChange] {
                 if (draft != nullptr) {

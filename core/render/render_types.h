@@ -106,6 +106,37 @@ struct Gradient {
     GradientDirection direction = GradientDirection::Vertical;
 };
 
+// Opt-in pointer light for a rounded-rectangle primitive. Centers are relative
+// to the rectangle's top-left corner and may lie outside it for neighboring
+// controls. The Direct2D backend renders the soft radial light.
+struct RevealEffect {
+    bool enabled = false;
+    Vec2 center{};
+    float radius = 72.0f;
+    Color tint{};
+    float fillOpacity = 0.0f;
+    float borderOpacity = 0.0f;
+    float borderWidth = 1.0f;
+    Vec2 pressCenter{};
+    float pressRadius = 0.0f;
+    float pressOpacity = 0.0f;
+};
+
+// Explicit frozen scene material; unlike blur(), this never filters per frame.
+// Runtime supplies sourceBounds in final (unanimated) framebuffer pixels.
+struct FrozenBackdrop {
+    std::uint64_t session = 0;
+    std::uint64_t panel = 0;
+    Rect sourceBounds{};
+    float sigma = 8.0f;
+    float tintOpacity = 0.78f;
+    // An independent, bounded strip cache for persistent chrome. Its source
+    // can be the adjacent content band; it never captures a whole window.
+    bool cachedStrip = false;
+    Vec2 sourceOffset{};
+    bool allowCapture = true;
+};
+
 struct Border {
     float width = 0.0f;
     Color color = {1.0f, 1.0f, 1.0f, 1.0f};

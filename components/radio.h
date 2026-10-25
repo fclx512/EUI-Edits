@@ -1,6 +1,7 @@
 #pragma once
 
 #include "components/theme.h"
+#include "components/text_alignment.h"
 #include "core/dsl.h"
 #include "core/render/text.h"
 #include "eui/signal.h"
@@ -76,7 +77,7 @@ public:
         const float contentX = horizontalInset;
         const float labelWidth = std::max(0.0f, width_ - labelX - horizontalInset);
         const float labelLineHeight = fontSize;
-        const float labelY = std::max(0.0f, (height_ - labelLineHeight) * 0.5f);
+        const float labelY = text_alignment::singleLineTop(height_, fontSize);
         const float hitWidth = text_.empty()
             ? outer + horizontalInset * 2.0f
             : std::min(width_, labelX + textWidth(text_, fontSize) + horizontalInset * 2.0f);
@@ -91,7 +92,7 @@ public:
                 ui_.rect(id_ + ".hit")
                     .size(hitWidth, height_)
                     .states(theme::color(0.0f, 0.0f, 0.0f, 0.0f), style_.rowHover, style_.rowPressed)
-                    .radius(std::max(metrics_.radius.small, height_ * 0.20f))
+                    .radius(theme::cornerRadius(metrics_, std::max(metrics_.radius.small, height_ * 0.20f)))
                     .transition(transition_)
                     .onClick([onChange] {
                         if (onChange) {

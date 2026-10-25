@@ -5,6 +5,7 @@
 #include "ui/window_layout.h"
 #include "ui/widgets.h"
 #include "components/contextmenu.h"
+#include "ui/popup_presentation.h"
 #include "platform/window_chrome.h"
 
 namespace neo {
@@ -63,7 +64,7 @@ inline void writingIconButton(eui::Ui& ui, const std::string& id, UiIcon icon,
                               float buttonWidth = 32, float buttonHeight = 32, bool danger = false) {
     const auto& c = editorColors();
     ui.stack(id).position(x, y).size(buttonWidth, buttonHeight).content([&] {
-        ui.rect(id + ".bg").fill().radius(danger || id.rfind("window.", 0) == 0 ? 0 : 6)
+        ui.rect(id + ".bg").fill().radius(danger || id.rfind("window.", 0) == 0 ? 0 : neo::corner(c, 6.0f))
             .states(active ? core::mixColor(c.editor, c.accent, .12f) : transparentColor(), danger ? rgba(.91f,.07f,.14f,1) : c.rowHover,
                     danger ? rgba(.72f,.04f,.10f,1) : c.pressed)
             .preserveFocusOnPress().disabled(!enabled).cursor(eui::CursorShape::Hand)
@@ -75,7 +76,7 @@ inline void writingIconButton(eui::Ui& ui, const std::string& id, UiIcon icon,
         if (ui.state<bool>(id + ".hover")) {
             const float w = std::max(60.0f, core::TextPrimitive::measureTextWidth(label, kUiFontFamily, 12) + 20);
             ui.stack(id + ".tip").position(x < 100 && id.rfind("window.",0)!=0 ? 0 : buttonWidth-w, buttonHeight+4).size(w, 28).zIndex(2800).hitTestMode(core::dsl::HitTestMode::None).content([&] {
-                ui.rect(id + ".tip.bg").fill().radius(5).color(c.panel).border(1, c.border).build();
+                ui.rect(id + ".tip.bg").fill().radius(neo::corner(c, 5.0f)).color(c.panel).border(1, c.border).build();
                 ui.text(id + ".tip.text").fill().text(label).fontSize(12).color(c.text)
                     .horizontalAlign(eui::HorizontalAlign::Center).verticalAlign(eui::VerticalAlign::Center).build();
             }).build();
@@ -114,7 +115,8 @@ inline void markdownToolbarView(eui::Ui& ui, AppState& state, float width) {
         if (markdown && !immersive) {
             writingIconButton(ui, "markdown.heading", UiIcon::Heading, i18n::tr("writing.heading"), 12, 6,
                 state.markdownHeadingMenuOpen, !state.unavailable, [&state] {
-                    state.markdownHeadingMenuOpen = !state.markdownHeadingMenuOpen;
+                    if (state.markdownHeadingMenuOpen) state.markdownHeadingMenuOpen = false;
+                    else popup_presentation::activate(state, popup_presentation::Owner::MarkdownHeading);
                     state.openMenu = MenuKind::None; app::requestUpdate();
                 });
             float x = 48;
@@ -141,7 +143,7 @@ inline void markdownToolbarView(eui::Ui& ui, AppState& state, float width) {
             platform::chrome::exclude(x + 36, height - 38, 32, 32);
         }
         if (!markdown) ui.rect("writing.capsule").position(x-3,height-41).size(74,38)
-            .radius(9).color(colors.panel).border(1,colors.border).build();
+            .radius(neo::corner(colors, 9.0f)).color(colors.panel).border(1,colors.border).build();
         writingIconButton(ui, "markdown.typewriter", UiIcon::Typewriter, i18n::tr("writing.typewriter"), x, height-38,
             state.markdownTypewriter, true, [&state] {
                 state.markdownTypewriter = !state.markdownTypewriter;
@@ -168,13 +170,17 @@ inline void markdownHeadingMenu(eui::Ui& ui, AppState& state, const eui::Screen&
         state.markdownHeadingMenuOpen = false;
         return;
     }
-    components::contextMenu(ui, "markdown.heading.menu").open(state.markdownHeadingMenuOpen)
+    const auto menuTokens = editorColors(state.theme).tokens;
+    auto menu = components::contextMenu(ui, "markdown.heading.menu").open(state.markdownHeadingMenuOpen)
         .screen(screen.width, screen.height).position(x + 12, y + 44).size(180, 32)
         .items({components::ContextMenuItem(i18n::tr("context.body")),
                 components::ContextMenuItem(i18n::tr("context.heading1")),
                 components::ContextMenuItem(i18n::tr("context.heading2")),
                 components::ContextMenuItem(i18n::tr("context.heading3"))})
-        .theme(editorColors(state.theme).tokens).skipClosedContent().zIndex(900)
+        .theme(menuTokens);
+    popup_presentation::apply(menu, state,
+                          menuTokens, state.markdownHeadingMenuOpen);
+    menu.skipClosedContent().zIndex(900)
         .onSelectPath([&state](const std::vector<int>& path) {
             if (path.size() == 1) queueMarkdownTool(state, EditorCommand::SetHeading, path[0]);
         })

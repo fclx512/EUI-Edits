@@ -47,6 +47,23 @@ inline std::string lower(std::string value) {
     for (char& c : value) if(c>='A' && c<='Z') c=static_cast<char>(c+'a'-'A');
     return value;
 }
+// Routing candidates, not a decoder support promise. Recognize common image
+// extensions even when the bundled decoder cannot read them, so binary images
+// never fall through to the text editor merely because decoding failed.
+inline const std::vector<std::string>& imageExtensions() {
+    static const std::vector<std::string> value = {
+        "png", "jpg", "jpeg", "bmp", "gif", "svg", "tga", "hdr", "ppm", "pgm", "pnm", "psd", "pic",
+        "webp", "tif", "tiff", "avif", "heic", "heif", "ico", "cur", "jp2", "jxl", "exr", "dds", "svgz"};
+    return value;
+}
+inline bool image(const std::string& path) {
+    const auto dot = path.find_last_of('.');
+    const auto slash = path.find_last_of("/\\");
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) return false;
+    const auto extension = lower(path.substr(dot + 1));
+    const auto& values = imageExtensions();
+    return std::find(values.begin(), values.end(), extension) != values.end();
+}
 inline Type detect(const std::string& path) {
     const auto slash=path.find_last_of("/\\");
     const std::string name=lower(path.substr(slash==std::string::npos?0:slash+1));
@@ -104,6 +121,12 @@ inline std::vector<std::string> recommendedAssociations() {
 inline std::vector<std::string> extensions() {
     std::vector<std::string> result;
     for(const auto& type:types()) result.emplace_back(type.extension);
+    return result;
+}
+inline std::vector<std::string> openExtensions() {
+    auto result = extensions();
+    for (const auto& extension : imageExtensions())
+        if (std::find(result.begin(), result.end(), extension) == result.end()) result.push_back(extension);
     return result;
 }
 inline bool source(const std::string& language) { return language!="text" && language!="markdown"; }

@@ -37,6 +37,8 @@ struct RoundedRectPrimitive::Impl {
     Rect bounds{};
     Color color{};
     Gradient gradient{};
+    RevealEffect reveal{};
+    FrozenBackdrop frozenBackdrop{};
     Border border{};
     Shadow shadow{};
     Transform transform{};
@@ -69,6 +71,7 @@ struct RoundedRectPrimitive::Impl {
         command.vertices.assign(vertices.begin(), vertices.end());
         command.fillColor = shadowPass ? layerColor : color;
         command.gradient = gradient;
+        command.reveal = shadowPass ? RevealEffect{} : reveal;
         command.border = shadowPass ? Border{} : border;
         command.rect = sdfBounds;
         command.radius = core::render::clampedPrimitiveRadius(cornerRadius, sdfBounds);
@@ -78,6 +81,7 @@ struct RoundedRectPrimitive::Impl {
         command.shadowOffset = layerShadowOffset;
         command.shadowSpread = layerShadowSpread;
         command.backdropBlur = shadowPass ? 0.0f : blur;
+        command.frozenBackdrop = shadowPass ? FrozenBackdrop{} : frozenBackdrop;
         command.backdropOffset = {
             backdropBounds.x - bounds.x,
             backdropBounds.y - bounds.y
@@ -129,6 +133,8 @@ void RoundedRectPrimitive::destroy() {}
 void RoundedRectPrimitive::setBounds(float x, float y, float width, float height) { impl_->bounds = {x, y, width, height}; }
 void RoundedRectPrimitive::setColor(const Color& color) { impl_->color = color; }
 void RoundedRectPrimitive::setGradient(const Gradient& gradient) { impl_->gradient = gradient; }
+void RoundedRectPrimitive::setReveal(const RevealEffect& reveal) { impl_->reveal = reveal; }
+void RoundedRectPrimitive::setFrozenBackdrop(const FrozenBackdrop& material) { impl_->frozenBackdrop = material; }
 void RoundedRectPrimitive::setCornerRadius(float radius) { impl_->cornerRadius = radius; }
 void RoundedRectPrimitive::setOpacity(float opacity) { impl_->opacity = std::clamp(opacity, 0.0f, 1.0f); }
 void RoundedRectPrimitive::setBorder(const Border& border) { impl_->border = border; }
@@ -161,6 +167,7 @@ void RoundedRectPrimitive::setTransformMatrix(const TransformMatrix& matrix) {
 const Rect& RoundedRectPrimitive::bounds() const { return impl_->bounds; }
 const Color& RoundedRectPrimitive::color() const { return impl_->color; }
 const Gradient& RoundedRectPrimitive::gradient() const { return impl_->gradient; }
+const RevealEffect& RoundedRectPrimitive::reveal() const { return impl_->reveal; }
 const Border& RoundedRectPrimitive::border() const { return impl_->border; }
 const Shadow& RoundedRectPrimitive::shadow() const { return impl_->shadow; }
 float RoundedRectPrimitive::blur() const { return impl_->blur; }
@@ -182,6 +189,7 @@ void RoundedRectPrimitive::render(int windowWidth, int windowHeight) const {
     if (impl_->blur > 0.0f) {
         backend->prepareBackdropBlur(backdropBounds, impl_->blur, windowWidth, windowHeight);
     }
+    if (impl_->frozenBackdrop.session) backend->prepareFrozenBackdrop(impl_->frozenBackdrop);
     if (impl_->shadow.enabled && !impl_->shadow.inset) {
         impl_->drawShadow(windowWidth, windowHeight);
     }

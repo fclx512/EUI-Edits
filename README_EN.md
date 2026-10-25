@@ -50,9 +50,9 @@ Markdown covers common writing syntax and some extensions; full Obsidian compati
 
 ## Getting started
 
-Choose a version on the [releases page](https://github.com/fclx512/EUI-Edits/releases), download its `EUI-Edits-<version>-windows-x64.exe`, put it where you plan to keep it, and run it directly. No resource folder needs unpacking. This README describes the 0.2.1 source; available downloads are listed on the releases page. The unsigned app targets Windows 10/11 x64. Windows 10 and mixed-DPI validation of this candidate remain pending. Appearance and behavior may vary with your system, fonts, and display settings.
+Choose a version on the [releases page](https://github.com/fclx512/EUI-Edits/releases), download its `EUI-Edits-<version>-windows-x64.exe`, put it where you plan to keep it, and run it directly. No resource folder needs unpacking. This README describes the 0.2.2 source; available downloads are listed on the releases page. The unsigned app targets Windows 10/11 x64. Windows 10 and mixed-DPI validation of this candidate remain pending. Appearance and behavior may vary with your system, fonts, and display settings.
 
-**0.2.1 update:** Improves borderless header dragging, narrow-window menus and overlay input. Adds automatic compact layout and window pinning, with a smaller minimum window width. Release drafts require review; available downloads are listed on the releases page. See the [release notes](apps/neo_editor/RELEASE-NOTES.md).
+**0.2.2 update:** Adds image viewing and an internal image icon in the document library, with centered zoom, bounded panning and normal window closing. Settings gain a rounded/square interface style; menus and the header use solid colors, with revised menu transitions and text alignment. Fixes stale context menus after returning from settings and improves narrow settings layouts; entering settings or returning to the editor takes about 200 ms. Large Markdown documents with word wrap now reflow in slices when only the width changes, retaining the previous complete layout until the new one is ready. Initial loading and text edits can still run synchronously; very large documents may take seconds to settle and require more cumulative work time and layout memory, while shorter documents may see little benefit. This version is being prepared as a local candidate for review; available downloads are listed on the releases page. See the [release notes](apps/neo_editor/RELEASE-NOTES.md).
 
 ### Common actions
 
@@ -76,7 +76,7 @@ A new document's first save chooses its name and location. For garbled text, cho
 
 Typewriter and Focus work in Markdown and plain text; their preferences last for the current session. Focus hides interface elements without entering system fullscreen. Selection-scoped find uses literal text matching. If edits, undo, or reload invalidate the original range, EUI-Edits warns and stops selection-scoped matching to prevent replacement at stale positions; choose a new range or switch to document scope to continue.
 
-In image preview, use the wheel to zoom, middle-drag to pan, and left-click or `Esc` to close.
+Image files can also be opened directly for read-only viewing with the existing decoder. Unsupported, damaged, or unreadable files produce an error. Zoom is centered on the window; each axis stays centered until the enlarged image exceeds the window, when left-drag can pan that viewport. Zooming back to fit recenters it. The image close button or `Esc` returns to the document; the application close button follows the usual save-confirmation and exit flow. The library uses an internal image icon without adding system icon resources or image association options. Viewing an image does not replace or modify the current document.
 
 ### Settings, recovery, and file associations
 
@@ -99,12 +99,15 @@ Most settings take effect immediately and persist across launches:
 | Option | Choices |
 | --- | --- |
 | Language and theme | 简体中文 / English; follow the system theme or choose light / dark |
+| Interface style | Rounded (Windows 11 look) or square (Windows 10 look); UI controls only, editor untouched |
 | Fonts | Separate body, code, and UI fonts; import `.ttf`, `.otf`, or `.ttc`; code fonts are checked for monospace |
 | Sizes and scaling | Body size 12–32, UI size 12–18; extra scaling of 80%–200% on top of system DPI |
 | Reading layout | Line numbers, status bar, word wrap; readable width narrows and centers the content |
 | Library and animations | Simple / library view; hover and press animations can be disabled |
 
 The status bar shows file location, syntax mode, encoding, line endings, line count, and character count, with controls for syntax mode and word wrap; some information collapses in narrow windows. Fonts come from your machine or imports; the release ships no font files.
+
+Interface style and color are independent axes: switching light/dark or a theme file does not change the corners, and switching rounded/square does not change colors.
 
 **The local theme workspace is a beta feature.** Open "Settings → Appearance → Theme library" to view a sample on the left and edit colors or typography on the right. Each light/dark side has 26 colors. It supports local palette generation, per-color locks, undo/redo, comparison with the baseline, and saving a new theme. Typography controls include line spacing, paragraph spacing, and heading scales.
 
@@ -116,16 +119,16 @@ For Obsidian themes, select `manifest.json` with a sibling `theme.css`, or selec
 
 The UI redraws on demand. Tab switches reuse layout and highlighting where possible, with less-used derived data released when cache budgets are exceeded. The library scans metadata without loading every document. Disabling interaction animations removes hover and press transition frames.
 
-The following are **historical idle memory figures for 0.1.4 on Windows 11**, in MiB:
+The following are **idle memory figures for the 0.2.2 candidate on Windows 11 at 125% DPI** (2026-10-25, borderless window, 1280×800 client area), in MiB:
 
 | Scenario | Total working set | Private working set | Private commit |
 | --- | ---: | ---: | ---: |
-| Empty document, one tab | 46.0 | 15.9 | 21.7 |
-| Three small Markdown tabs, 2,580 bytes total, idle after loading each | 55.9 | 21.9 | 28.3 |
-| 9 MiB plain text, 73,728 file lines | 118.0 | 87.8 | 101.9 |
-| 9 MiB Markdown, same line count, with a list item, emphasis, and inline code on every line | 216.6 | 186.2 | 207.0 |
+| Empty document, one tab | 47.1 | 17.4 | 24.8 |
+| Three small Markdown tabs, 2,580 bytes total, idle after loading each | 59.0 | 25.3 | 33.5 |
+| 9 MiB plain text, 73,728 file lines | 90.6 | 60.8 | 74.7 |
+| 9 MiB Markdown, same line count, with a list item, emphasis, and inline code on every line | 278.7 | 248.6 | 270.7 |
 
-These figures are for reference only, not measurements of 0.2.1 or memory ceilings. Actual use varies with the system, document content, settings, and editing activity, and may differ from the table. The three metrics cannot be added together.
+These figures are for reference only, not memory ceilings. The historical 0.1.4 table used a 1262×753 client area; this table uses 1280×800, and the 0.2.2 Markdown scenario includes the new decoration and reflow caches, so it is not directly comparable to the old table. Actual use varies with the system, document content, settings, and editing activity, and may differ from the table. The three metrics cannot be added together.
 
 ## Current scope
 
@@ -149,10 +152,10 @@ Run from the repository root:
 pwsh -NoProfile -File ./scripts/check-neoeditor.ps1
 
 # Build a Release x64 single EXE
-pwsh -NoProfile -File ./scripts/package-neoeditor.ps1 -Version 0.2.1
+pwsh -NoProfile -File ./scripts/package-neoeditor.ps1 -Version 0.2.2
 ```
 
-The output is `out/euiedits-0.2.1-single-exe/EUI-Edits-0.2.1-windows-x64.exe`. Source folders, CMake targets, and script names retain the internal `neo_editor` identifier.
+The output is `out/euiedits-0.2.2-single-exe/EUI-Edits-0.2.2-windows-x64.exe`. Source folders, CMake targets, and script names retain the internal `neo_editor` identifier.
 
 See the [release build guide](docs/NeoEditor-发布构建说明-2026-10-02.md) for more build options and the [documentation index](docs/目录说明.md) for maintenance and release guidance (Chinese).
 

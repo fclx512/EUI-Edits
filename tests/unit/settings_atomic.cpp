@@ -137,6 +137,7 @@ std::string serializeSettings(const neo::settings::Data& data) {
     out << "animations=" << (data.animations ? 1 : 0) << '\n';
     out << "attachment_mode=" << data.attachmentMode << '\n';
     out << "theme=" << data.theme << '\n';
+    out << "ui_style=" << data.uiStyle << '\n';
     std::ostringstream scale;
     scale << data.uiScale;
     out << "ui_scale=" << scale.str() << '\n';
@@ -174,6 +175,7 @@ std::string defaultSettingsIni() {
         "animations=" + (neo::settings::systemAnimationsDefault() ? '1' : '0') + '\n' +
         "attachment_mode=0\n"
         "theme=2\n"
+        "ui_style=0\n"
         "ui_scale=1\n"
         "editor_font_size=16\n"
         "vault_width=264\n"

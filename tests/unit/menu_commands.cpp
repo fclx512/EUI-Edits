@@ -196,7 +196,64 @@ int main() {
                 pin->frame.y + pin->frame.height - 1, width, largeMetrics.menuBarHeight) ||
             !neo::platform::chrome::captionAt(header.tabsRight + 8, 16, width, largeMetrics.menuBarHeight)) return 25;
     }
+    using PopupOwner = neo::popup_presentation::Owner;
+    neo::AppState popupState;
+    if (neo::popup_presentation::activeOwner(popupState) != PopupOwner::None) return 26;
+    const std::array<PopupOwner, 6> owners{{PopupOwner::Language, PopupOwner::VaultContext,
+        PopupOwner::EditorContext, PopupOwner::FindOptions, PopupOwner::MainMenu, PopupOwner::MarkdownHeading}};
+    for (const auto owner : owners) {
+        popupState.openMenu = neo::MenuKind::Edit;
+        popupState.contextMenuOpen = popupState.vaultContextMenuOpen = popupState.findOptionsOpen = true;
+        popupState.markdownHeadingMenuOpen = popupState.languageMenuOpen = popupState.tabListOpen = true;
+        neo::popup_presentation::activate(popupState, owner);
+        if (neo::popup_presentation::activeOwner(popupState) != owner || popupState.tabListOpen) return 26;
+    }
+    neo::popup_presentation::activate(popupState, PopupOwner::None);
+    if (neo::popup_presentation::activeOwner(popupState) != PopupOwner::None) return 26;
+
+    for (const auto style : {neo::UiStyle::Square, neo::UiStyle::Rounded}) {
+        popupState.uiStyle = style;
+        for (const auto mode : {neo::ThemeMode::Light, neo::ThemeMode::Dark}) {
+            auto tokens = neo::editorColors(mode).tokens;
+            tokens.surface.a = 0.35f; // Imported themes cannot expose busy content behind a menu.
+            const components::ContextMenuStyle base(tokens);
+            const auto surface = neo::popup_presentation::style(tokens);
+            if (!core::closeEnough(surface.background.a, 1.0f) ||
+                !core::closeEnough(surface.background.r, base.background.r) ||
+                !core::closeEnough(surface.background.g, base.background.g) ||
+                !core::closeEnough(surface.background.b, base.background.b) ||
+                !core::closeEnough(surface.text, base.text) ||
+                !core::closeEnough(surface.hover, base.hover) || surface.radius != base.radius) return 27;
+            for (bool animations : {true, false}) {
+                popupState.animations = animations;
+                popupState.openMenu = neo::MenuKind::File;
+                core::dsl::Ui* popupUi = nullptr;
+                runtime.compose("solid-popup-policy", 1000, 700, [&](core::dsl::Ui& view, const core::dsl::Screen&) {
+                    popupUi = &view;
+                    for (const auto owner : owners) {
+                        const bool open = owner == PopupOwner::MainMenu;
+                        auto menu = components::contextMenu(view, "popup." + std::to_string(static_cast<int>(owner)))
+                            .open(open).screen(1000, 700).position(20, 40).items({"Action"}).theme(tokens);
+                        neo::popup_presentation::apply(menu, popupState, tokens, open);
+                        menu.build();
+                    }
+                });
+                bool material = false;
+                const auto inspect = [&](auto&& self, const core::dsl::Element& element) -> void {
+                    material = material || static_cast<bool>(element.frozenBackdrop);
+                    for (const auto& child : element.children) self(self, *child);
+                };
+                for (const auto& root : popupUi->roots()) inspect(inspect, *root);
+                if (material || popupUi->frozenBackdropSession() || popupUi->cachedStripSession()) return 28;
+                auto* openLevel = popupUi->find("popup." + std::to_string(static_cast<int>(PopupOwner::MainMenu)) + ".level.0");
+                auto* closedLevel = popupUi->find("popup." + std::to_string(static_cast<int>(PopupOwner::Language)) + ".level.0");
+                if (!openLevel || !closedLevel || openLevel->transition.enabled != animations ||
+                    closedLevel->transition.enabled || !closedLevel->disabled ||
+                    !core::closeEnough(openLevel->transform.scale, core::Vec2{1,1})) return 29;
+            }
+        }
+    }
     runtime.shutdown();
-    std::cout<<"translated menu commands, compact layout and chrome exclusions passed\n";
+    std::cout<<"translated menu commands, compact layout and opaque popup policy passed\n";
     return 0;
 }

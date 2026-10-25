@@ -13,7 +13,7 @@ inline void dialog(eui::Ui& ui,AppState& state,float width,float height,float pr
         ui.rect("themeWorkbench.dialog.shade").fill().color(rgba(0,0,0,.34f))
             .preserveFocusOnPress().onClick([]{}).build();
         ui.stack("themeWorkbench.dialog.card").position((width-w)*.5f,(height-h)*.5f).size(w,h).clip().content([&]{
-            ui.rect("themeWorkbench.dialog.surface").fill().radius(10).color(c.panel).border(1,c.border)
+            ui.rect("themeWorkbench.dialog.surface").fill().radius(neo::corner(c, 10.0f)).color(c.panel).border(1,c.border)
                 .preserveFocusOnPress().onClick([]{}).build();
             label(ui,"themeWorkbench.dialog.title",tr(title),d.pad,10,w-d.pad*2-38,d.row,c.text,d.title,600);
             ghostButton(ui,"themeWorkbench.dialog.close","",w-d.pad-32,12,32,32,c,d.font,

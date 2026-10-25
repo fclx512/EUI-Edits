@@ -177,7 +177,7 @@ inline void mindmapPreviewOverlay(eui::Ui& ui, AppState& state, const eui::Scree
                 .content([&] {
                     ui.rect("mindmapPreview.panel.bg")
                         .size(panelWidth, panelHeight)
-                        .radius(8.0f)
+                        .radius(neo::corner(colors, 8.0f))
                         .color(colors.editor)
                         .build();
 

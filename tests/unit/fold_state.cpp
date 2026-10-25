@@ -18,7 +18,17 @@
 #include <iostream>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
+
+// Keep notifications observable without linking the app's platform actions.
+namespace neo {
+void showToast(AppState& state, std::string title, std::string message) {
+    state.toastTitle = std::move(title);
+    state.toastMessage = std::move(message);
+    state.toastVisible = true;
+}
+} // namespace neo
 
 namespace {
 

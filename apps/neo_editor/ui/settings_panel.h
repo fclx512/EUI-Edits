@@ -46,6 +46,7 @@ inline constexpr float kControlWidth = 176.0f;
 // 主内容区与字体/主题子页共用的几何数据。
 struct PanelGeometry {
     float contentWidth = 0.0f;
+    float viewportHeight = -1.0f;
     float controlWidth = kControlWidth;
     float controlX = 0.0f;
     float labelWidth = 0.0f;
@@ -56,6 +57,22 @@ struct PanelGeometry {
     float controlTop = 34.0f;
     float cardHeight = 100.0f;
 };
+
+inline constexpr int settingsRowsBeforeReset(SettingsCategory category) {
+    switch (category) {
+        case SettingsCategory::Appearance: return 8; // language, theme, style, animation, scale, UI size, fonts, theme file
+        case SettingsCategory::Editor: return 6;     // editor size, layout, auto compact, status, line numbers, readable width
+        default: return 0;
+    }
+}
+
+inline float settingsMainContentHeight(SettingsCategory category,
+                                       float sectionHeight,
+                                       float rowHeight) {
+    // The reset action is the row after all regular settings; keep the final 10-DIP
+    // breathing space already used by the scroll content.
+    return sectionHeight + rowHeight * (settingsRowsBeforeReset(category) + 1) + 10.0f;
+}
 
 // 绝对定位的按钮。toolButton 不带坐标，而设置面板是逐行手排的，所以这里单开一个收口。
 inline void flatButton(eui::Ui& ui,
@@ -87,7 +104,7 @@ inline void flatButton(eui::Ui& ui,
     components::button(ui, id)
         .position(x, y)
         .size(width, height)
-        .radius(6.0f)
+        .radius(neo::corner(colors, 6.0f))
         .fontSize(fontSize)
         .text(label)
         .textColor(textColor)
@@ -271,13 +288,10 @@ inline void slotButton(eui::Ui& ui,
     const eui::Color hover = colors.rowHover;
 
     ui.rect(id + ".bg")
-        .x(x)
-        .y(y)
-        .size(width, height)
-        .radius(6.0f)
+        .x(x).y(y).size(width, height)
+        .radius(neo::corner(colors, 6.0f))
         .states(normal, hover, colors.pressed)
         .cursor(eui::CursorShape::Hand)
-        // 不让点设置面板把焦点从编辑区抢走（与其它按钮一致）。
         .preserveFocusOnPress()
         .onClick(std::move(onClick))
         .transition(quickTransition())
@@ -301,6 +315,16 @@ inline void slotButton(eui::Ui& ui,
              y + (height-16)*.5f, 16, highlighted ? colors.accent : colors.textMuted);
 }
 
+inline int rowHintLines(const std::string& hint, const char* fontFamily, float size,
+                        float width, float lineHeight) {
+    if (hint.empty()) return 0;
+    core::TextStyle style;
+    style.text = hint; style.fontFamily = fontFamily;
+    style.fontSize = size; style.lineHeight = lineHeight;
+    style.wrap = true; style.maxWidth = std::max(1.0f, width);
+    return std::max(1, static_cast<int>(std::round(core::TextPrimitive::measureTextSize(style).y / lineHeight)));
+}
+
 // 一行标签 + 可选说明。
 inline void rowLabel(eui::Ui& ui,
                      const EditorColors& colors,
@@ -313,39 +337,59 @@ inline void rowLabel(eui::Ui& ui,
                      float y,
                      float width,
                      const PanelGeometry& geometry) {
-    ui.rect(id + ".card")
-        .position(x, y).size(geometry.contentWidth, geometry.cardHeight)
-        .radius(8.0f).color(colors.editor)
-        .border(1.0f, components::theme::withAlpha(colors.border, .45f)).build();
-    // 文字块在卡片内竖向居中。说明行数按实际测量估算（单行/两行差一个行高），
-    // 否则单行说明的卡片下方会空出一大块；标题↔说明之间保留 4px 间隙。
+    if (colors.tokens.metrics.corners == components::theme::CornerStyle::Square) {
+        // The Square settings pane is one flat surface. Keep the existing row
+        // geometry and place a hairline in the existing gap between rows.
+        ui.rect(id + ".separator")
+            .position(x, y + geometry.rowHeight - 1.0f)
+            .size(geometry.contentWidth, 1.0f)
+            .color(components::theme::withAlpha(colors.border, .45f))
+            .hitTestMode(core::dsl::HitTestMode::None).build();
+    } else {
+        ui.rect(id + ".card")
+            .position(x, y).size(geometry.contentWidth, geometry.cardHeight)
+            .radius(neo::corner(colors, 8.0f)).color(colors.editor)
+            .border(1.0f, components::theme::withAlpha(colors.border, .45f)).build();
+    }
+    // Centre the complete ink block, not nominal line boxes. Use the renderer's
+    // actual wrapping and the same explicit line height in measurement/drawing.
     const float labelLineH = metrics.panelLabelFontSize + 7.0f;
     const float hintLineH = metrics.panelHintFontSize + 5.0f;
-    int hintLines = 1;
-    if (!hint.empty()) {
-        const float hintWidth = core::TextPrimitive::measureTextWidth(hint, fontFamily, metrics.panelHintFontSize);
-        hintLines = std::max(1, static_cast<int>(std::ceil(hintWidth / std::max(1.0f, width))));
-    }
+    const int hintLines = rowHintLines(hint, fontFamily, metrics.panelHintFontSize, width, hintLineH);
     const float textAreaH = geometry.cardHeight - (geometry.stacked ? 14.0f + kControlHeight : 0.0f);
-    const float contentH = labelLineH + 4.0f + static_cast<float>(hintLines) * hintLineH;
+    core::TextStyle labelStyle;
+    labelStyle.text = text; labelStyle.fontFamily = fontFamily;
+    labelStyle.fontSize = metrics.panelLabelFontSize; labelStyle.fontWeight = 600;
+    labelStyle.lineHeight = labelLineH;
+    const auto labelInk = core::TextPrimitive::measureTextInk(labelStyle);
+    core::TextStyle hintStyle;
+    hintStyle.text = hint; hintStyle.fontFamily = fontFamily;
+    hintStyle.fontSize = metrics.panelHintFontSize; hintStyle.lineHeight = hintLineH;
+    hintStyle.wrap = true; hintStyle.maxWidth = std::max(1.0f, width);
+    const auto hintInk = hint.empty() ? core::Vec2{} : core::TextPrimitive::measureTextInk(hintStyle);
+    const float labelInkHeight = labelInk.y - labelInk.x;
+    const float contentH = labelInkHeight + (hint.empty() ? 0.0f :
+        4.0f + hintInk.y - hintInk.x);
     const float textTop = y + std::max(6.0f, (textAreaH - contentH) * 0.5f);
     ui.text(id + ".label")
         .x(x + 18.0f)
-        .y(textTop)
+        .y(textTop - labelInk.x)
         .size(width, labelLineH)
         .text(text)
         .fontFamily(fontFamily)
         .fontSize(metrics.panelLabelFontSize).fontWeight(600)
+        .lineHeight(labelLineH).verticalAlign(eui::VerticalAlign::Top)
         .color(colors.text)
         .build();
     if (!hint.empty()) {
         ui.text(id + ".hint")
             .x(x + 18.0f)
-            .y(textTop + labelLineH + 4.0f)
+            .y(textTop + labelInkHeight + 4.0f - hintInk.x)
             .size(width, static_cast<float>(hintLines) * hintLineH)
             .text(hint).wrap(true)
             .fontFamily(fontFamily)
             .fontSize(metrics.panelHintFontSize)
+            .lineHeight(hintLineH).maxWidth(std::max(1.0f, width))
             .color(colors.textMuted)
             .verticalAlign(eui::VerticalAlign::Top)
             .build();
@@ -494,7 +538,7 @@ inline void fileAssocCard(eui::Ui& ui,AppState& state,const EditorColors& colors
     const auto buttonWidth=[&](const char* text) {
         return std::min(inner,core::TextPrimitive::measureTextWidth(text,uiFont,metrics.panelFontSize)+28.0f);
     };
-    ui.rect("settings.fileAssoc.card").position(0,y).size(width,layout.height).radius(8).color(colors.editor).border(1,colors.border).build();
+    ui.rect("settings.fileAssoc.card").position(0,y).size(width,layout.height).radius(neo::corner(colors, 8.0f)).color(colors.editor).border(1,colors.border).build();
     label("settings.fileAssoc.label",i18n::tr("assoc.title"),y+12*scale,28*scale,true);
     label("settings.fileAssoc.description",i18n::tr("settings.assoc_description"),y+44*scale,44*scale);
     const float selectW=buttonWidth(i18n::tr("assoc.select_recommended"));
@@ -575,7 +619,7 @@ inline void fileAssocCard(eui::Ui& ui,AppState& state,const EditorColors& colors
             const bool focused=rowUi.isFocused(id+".hit");
             const eui::Color tint=associationColor(colors,type.category);
             rowUi.stack(id).size(rowWidth,rowH).content([&] {
-                rowUi.rect(id+".hit").fill().radius(6).states(transparentColor(),colors.rowHover,colors.pressed)
+                rowUi.rect(id+".hit").fill().radius(neo::corner(colors, 6.0f)).states(transparentColor(),colors.rowHover,colors.pressed)
                     .border(focused?1.5f:0.0f,colors.accent).focusable().onClick(toggle)
                     .onFocusChanged([](bool){app::requestUpdate();})
                     .onKeyEvent([toggle,&rowUi,&offset,rows,index,rowH,viewport](const eui::KeyEvent& event) {
@@ -597,10 +641,10 @@ inline void fileAssocCard(eui::Ui& ui,AppState& state,const EditorColors& colors
                         }
                         return false;
                     }).build();
-                rowUi.rect(id+".checkbox").position(10,center-box*.5f).size(box,box).radius(4)
+                rowUi.rect(id+".checkbox").position(10,center-box*.5f).size(box,box).radius(neo::corner(colors, 4.0f))
                     .color(selected?colors.accent:colors.editor).border(selected?0.0f:1.5f,colors.textMuted).build();
                 if(selected) components::vector_icon::drawCheckmark(rowUi,id+".check",12,center-7,14,rgba(1,1,1,1));
-                rowUi.rect(id+".pill").position(42,center-12).size(pillWidth,24).radius(12)
+                rowUi.rect(id+".pill").position(42,center-12).size(pillWidth,24).radius(neo::corner(colors, 12.0f))
                     .color(rgba(tint.r,tint.g,tint.b,.12f)).border(1,rgba(tint.r,tint.g,tint.b,.24f)).build();
                 rowUi.text(id+".extension").position(42,center-12).size(pillWidth,24).text("."+ext)
                     .fontFamily(uiFont).fontSize(metrics.panelHintFontSize).fontWeight(600).color(tint)
@@ -748,7 +792,7 @@ inline void fontPickerPage(eui::Ui& ui,
         : "永和九年 岁在癸丑 Hello 123";
     if (showSample) {
         ui.rect("settings.fontPicker.preview.card").position(kPadding, sampleY)
-            .size(geometry.contentWidth, sampleHeight).radius(8)
+            .size(geometry.contentWidth, sampleHeight).radius(neo::corner(colors, 8.0f))
             .color(colors.toolbar).border(1, colors.border).build();
         ui.text("settings.fontPicker.preview.label").position(kPadding+14, sampleY+10)
             .size(geometry.contentWidth-28, 24).text(i18n::tr("settings.font_preview"))
@@ -764,7 +808,7 @@ inline void fontPickerPage(eui::Ui& ui,
     const float listHeight = std::max(0.0f, geometry.footerRuleY - 12 - listY);
     const float rowHeight = std::max(36.0f, metrics.panelFontSize + 22);
     ui.rect("settings.fontPicker.list.card").position(kPadding, listY)
-        .size(geometry.contentWidth, listHeight).radius(8)
+        .size(geometry.contentWidth, listHeight).radius(neo::corner(colors, 8.0f))
         .color(colors.editor).border(1, colors.border).build();
 
     std::vector<const fonts::Entry*> visibleEntries;
@@ -830,7 +874,7 @@ inline void fontPickerPage(eui::Ui& ui,
                     .content([&] {
                         rowUi.rect(rowId + ".bg")
                             .fill()
-                            .radius(4.0f)
+                            .radius(neo::corner(colors, 4.0f))
                             .states(normal, hover, colors.pressed)
                             .transition(quickTransition())
                             .cursor(eui::CursorShape::Hand)
@@ -871,7 +915,7 @@ inline void fontPickerPage(eui::Ui& ui,
                             right -= tagWidth;
                             const std::string tagId = rowId+".tag."+std::to_string(t);
                             rowUi.rect(tagId+".bg").position(right, (rowHeight-24)*.5f).size(tagWidth, 24)
-                                .radius(4).color(colors.toolbar).border(1, colors.border).build();
+                                .radius(neo::corner(colors, 4.0f)).color(colors.toolbar).border(1, colors.border).build();
                             rowUi.text(tagId+".text").position(right, (rowHeight-24)*.5f).size(tagWidth, 24)
                                 .text(tags[t]).fontFamily(uiFontFamily(state)).fontSize(tagFont)
                                 .color(colors.textMuted).horizontalAlign(eui::HorizontalAlign::Center)
@@ -911,12 +955,60 @@ inline void fontPickerPage(eui::Ui& ui,
                   });
 }
 
+struct ThemeListLayout {
+    float hintHeight = 0.0f, listY = 0.0f, contentHeight = 0.0f;
+};
+
+inline ThemeListLayout themeListLayout(const UiMetrics& metrics, const char* font,
+                                        float width, float availableHeight) {
+    core::TextStyle hint;
+    hint.text = i18n::tr("settings.theme_library_hint");
+    hint.fontFamily = font;
+    hint.fontSize = metrics.panelHintFontSize;
+    hint.lineHeight = metrics.panelHintFontSize + 5.0f;
+    hint.wrap = true;
+    hint.maxWidth = std::max(1.0f, width);
+    ThemeListLayout layout;
+    layout.hintHeight = std::max(hint.lineHeight, core::TextPrimitive::measureTextSize(hint).y);
+    layout.listY = 64.0f + layout.hintHeight + 12.0f;
+    // Keep a usable list and every action in the scrollable page even when a
+    // wrapped header / navigation leaves very little vertical room.
+    layout.contentHeight = std::max(availableHeight, layout.listY + 64.0f + 55.0f + 86.0f);
+    return layout;
+}
+
+inline int settingsNavigationColumns(const AppState& state, float width) {
+    const auto metrics = uiMetrics(state);
+    float needed = 88.0f;
+    for (const char* id : {"settings.appearance", "settings.editor", "settings.files_system", "settings.about_nav"})
+        needed = std::max(needed, core::TextPrimitive::measureTextWidth(
+            i18n::tr(id), uiFontFamily(state), metrics.panelFontSize) + 24.0f);
+    const float available = std::max(0.0f, width - 24.0f);
+    return available / 4.0f - 4.0f >= needed ? 4 : available / 2.0f - 4.0f >= needed ? 2 : 1;
+}
+
 inline void themeListPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
-                          const UiMetrics& metrics, const PanelGeometry& geometry) {
+                          const UiMetrics& metrics, const PanelGeometry& availableGeometry) {
     if (theme_workbench_ui::session().catalogRefreshNeeded) {
         refreshThemeCatalog();
         theme_workbench_ui::session().catalogRefreshNeeded = false;
     }
+    const float pageWidth = availableGeometry.contentWidth + kPadding * 2.0f;
+    const float pageHeight = availableGeometry.viewportHeight >= 0.0f
+        ? availableGeometry.viewportHeight : availableGeometry.footerRuleY + 86.0f;
+    const auto layout = themeListLayout(metrics, uiFontFamily(state), availableGeometry.contentWidth, pageHeight);
+    PanelGeometry geometry = availableGeometry;
+    geometry.footerRuleY = layout.contentHeight - 86.0f;
+    geometry.buttonY = geometry.footerRuleY + 8.0f;
+    const float maxOffset = std::max(0.0f, layout.contentHeight - pageHeight);
+    float& pageOffset = ui.state<float>("settings.themeList.pageOffset");
+    pageOffset = std::clamp(pageOffset, 0.0f, maxOffset);
+    ui.stack("settings.themeList.viewport").size(pageWidth, pageHeight).clip()
+        .scrollState("settings.themeList.viewport", pageOffset, maxOffset, 36.0f)
+        .onScrollOffsetChanged([&pageOffset](float value) { pageOffset = value; })
+        .content([&] {
+        ui.stack("settings.themeList.content").size(pageWidth, layout.contentHeight)
+            .scrollContentFrom("settings.themeList.viewport").content([&] {
     ui.text("settings.themeList.title")
         .x(kPadding).y(18.0f).size(geometry.contentWidth, 32.0f)
         .text(i18n::tr("settings.theme_library"))
@@ -926,14 +1018,16 @@ inline void themeListPage(eui::Ui& ui, AppState& state, const EditorColors& colo
         .x(kPadding).y(54.0f).size(geometry.contentWidth, 1.0f)
         .color(colors.border).build();
     ui.text("settings.themeList.hint")
-        .x(kPadding).y(64.0f).size(geometry.contentWidth, 27.0f)
+        .x(kPadding).y(64.0f).size(geometry.contentWidth, layout.hintHeight)
         .text(i18n::tr("settings.theme_library_hint"))
         .fontFamily(uiFontFamily(state)).fontSize(metrics.panelHintFontSize)
+        .lineHeight(metrics.panelHintFontSize + 5.0f).wrap(true)
+        .verticalAlign(eui::VerticalAlign::Top)
         .color(colors.textMuted).build();
 
     const auto& entries = themeCatalog();
-    const float listY = 96.0f;
-    const float listHeight = std::max(64.0f, geometry.footerRuleY - 55.0f - listY);
+    const float listY = layout.listY;
+    const float listHeight = geometry.footerRuleY - 55.0f - listY;
     const float rowHeight = std::max(28.0f, std::round(metrics.panelFontSize * 1.9f));
     if (entries.empty() && state.themeFile.empty()) {
         ui.text("settings.themeList.empty")
@@ -964,7 +1058,7 @@ inline void themeListPage(eui::Ui& ui, AppState& state, const EditorColors& colo
                 const bool active = builtinRow ? state.themeFile.empty() : entry.path == state.themeFile;
                 rowUi.stack(rowId).size(rowWidth, rowHeight).content([&] {
                     rowUi.rect(rowId + ".bg")
-                        .fill().radius(4.0f)
+                        .fill().radius(neo::corner(colors, 4.0f))
                         .states(active ? colors.rowActive : transparentColor(),
                                 active ? colors.rowActive : colors.rowHover, colors.pressed)
                         .transition(quickTransition()).cursor(eui::CursorShape::Hand)
@@ -993,12 +1087,16 @@ inline void themeListPage(eui::Ui& ui, AppState& state, const EditorColors& colo
             }).build();
     }
     flatButton(ui, colors, "settings.themeList.workbench", i18n::tr("settings.theme_workbench"),
-               kPadding, geometry.footerRuleY - 40.0f, std::min(168.0f, geometry.contentWidth), 31.0f,
+               kPadding, geometry.footerRuleY - 40.0f,
+               std::min(geometry.contentWidth, std::max(168.0f, core::TextPrimitive::measureTextWidth(
+                   i18n::tr("settings.theme_workbench"), uiFontFamily(state), metrics.panelFontSize) + 24.0f)), 31.0f,
                true, metrics.panelFontSize, [&state] { openThemeWorkbench(state); });
     footerButtons(ui, colors, metrics, uiFontFamily(state), geometry,
                   "settings.themeList.file", i18n::tr("settings.pick_file"),
                   [&state] { chooseThemeFile(state); },
                   i18n::tr("settings.back"), [&state] { state.themeListOpen = false; app::requestUpdate(); });
+            }).build();
+        }).build();
 }
 
 
@@ -1018,7 +1116,9 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
     bool& wasForeground = ui.state<bool>("settings.wasForeground");
     if (state.settingsOpen && foreground && !wasForeground && state.settingsOpenLast) refreshFileAssocState(state);
     wasForeground = foreground;
-    if (state.settingsOpen && !state.settingsOpenLast) {
+    const bool newlyOpened = state.settingsOpen && !state.settingsOpenLast;
+    if (newlyOpened) {
+        popup_presentation::activate(state, popup_presentation::Owner::None);
         state.fontPicker = FontPickerTarget::None;
         state.themeListOpen = false;
         refreshFileAssocState(state);
@@ -1029,14 +1129,26 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
 
     const float headerHeight = settingsHeaderLayout(state, screen.width).height;
     const bool compactNav = screen.width < 840.0f;
+    const int navColumns = compactNav ? settingsNavigationColumns(state, screen.width) : 1;
+    const float navHeight = compactNav ? 6.0f + 48.0f * ((4 + navColumns - 1) / navColumns) : 0.0f;
     const float navWidth = compactNav ? 0.0f : 176.0f;
-    const float pageTop = headerHeight + (compactNav ? 54.0f : 0.0f);
+    const float pageTop = headerHeight + navHeight;
     const float remainingWidth = std::max(0.0f, screen.width - navWidth);
     const float pageWidth = std::min(952.0f, remainingWidth);
     const float pageX = navWidth + (remainingWidth - pageWidth) * 0.5f;
     const float pageHeight = std::max(0.0f, screen.height - pageTop);
+
+    const std::string fontsCurrent = i18n::format("settings.fonts_current",{
+        {"body", state.editorFontFile.empty() ? std::string(i18n::tr("settings.font_default_short"))
+                                              : fonts::displayNameFor(state.editorFontFile)},
+        {"code", state.codeFontFile.empty() ? std::string(i18n::tr("settings.font_default_short"))
+                                            : fonts::displayNameFor(state.codeFontFile)},
+        {"ui", state.uiFontFile.empty() ? std::string(i18n::tr("settings.font_default_short"))
+                                        : fonts::displayNameFor(state.uiFontFile)}});
+
     const PanelGeometry geometry = [&] {
         PanelGeometry g;
+        g.viewportHeight = pageHeight;
         g.contentWidth = std::max(0.0f, pageWidth - kPadding * 2.0f);
         g.controlWidth = std::min(std::max(0.0f, g.contentWidth - 36.0f),
                                   std::max(224.0f, metrics.panelFontSize * 16.0f));
@@ -1050,7 +1162,21 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
         const float textBottom = labelTop + metrics.panelLabelFontSize + 4.0f +
                                  (metrics.panelHintFontSize + 5.0f)*2.0f;
         g.cardHeight = textBottom + 6.0f + (g.stacked ? 14.0f + kControlHeight : 0.0f);
-        g.controlTop = g.stacked ? textBottom + 14.0f : (g.cardHeight-kControlHeight)*.5f;
+        // At narrow widths / larger UI fonts a localized hint can wrap beyond
+        // two lines. Grow the shared row geometry before computing scroll range.
+        int maxHintLines = 2;
+        for (const char* id : {"settings.language_hint", "settings.appearance_hint", "settings.ui_style_hint",
+             "settings.animations_hint", "settings.ui_font_size_hint", "settings.theme_builtin_hint",
+             "settings.editor_font_size_hint", "settings.layout_hint", "settings.auto_compact_hint",
+             "settings.status_bar_hint", "settings.line_numbers_hint", "settings.readable_width_hint", "settings.reset_hint"})
+            maxHintLines = std::max(maxHintLines, rowHintLines(i18n::tr(id), uiFont,
+                metrics.panelHintFontSize, g.labelWidth, metrics.panelHintFontSize + 5.0f));
+        maxHintLines = std::max(maxHintLines, rowHintLines(systemScaleHint(state), uiFont,
+            metrics.panelHintFontSize, g.labelWidth, metrics.panelHintFontSize + 5.0f));
+        maxHintLines = std::max(maxHintLines, rowHintLines(fontsCurrent, uiFont,
+            metrics.panelHintFontSize, g.labelWidth, metrics.panelHintFontSize + 5.0f));
+        g.cardHeight += (maxHintLines - 2) * (metrics.panelHintFontSize + 5.0f);
+        g.controlTop = g.stacked ? g.cardHeight - 6.0f - kControlHeight : (g.cardHeight-kControlHeight)*.5f;
         g.rowHeight = g.cardHeight + 12.0f;
         g.footerRuleY = std::max(0.0f, pageHeight - 86.0f);
         g.buttonY = g.footerRuleY + 8.0f;
@@ -1077,14 +1203,15 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
             {SettingsCategory::FileSystem, i18n::tr("settings.files_system")},
             {SettingsCategory::About, i18n::tr("settings.about_nav")},
         };
-        const float navSlots = static_cast<float>(categories.size());
+        const float navSlots = static_cast<float>(navColumns);
         float navY = headerHeight + (compactNav ? 7.0f : 20.0f);
         std::size_t categoryIndex = 0;
         for (const auto& entry : categories) {
             const bool active = state.settingsCategory == entry.first;
             flatButton(ui, colors, std::string("settings.nav.") + std::to_string(static_cast<int>(entry.first)), entry.second,
-                       compactNav ? 12.0f + categoryIndex * ((screen.width - 24.0f) / navSlots) : 12.0f,
-                       navY, compactNav ? (screen.width - 24.0f) / navSlots - 4.0f : navWidth - 24.0f, 40.0f,
+                       compactNav ? 12.0f + (categoryIndex % navColumns) * ((screen.width - 24.0f) / navSlots) : 12.0f,
+                       navY + (compactNav ? (categoryIndex / navColumns) * 48.0f : 0.0f),
+                       compactNav ? (screen.width - 24.0f) / navSlots - 4.0f : navWidth - 24.0f, 40.0f,
                        active, metrics.panelFontSize,
                         [&state, category = entry.first] {
                             state.settingsCategory = category;
@@ -1096,6 +1223,12 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                             }
                             app::requestUpdate();
                        });
+            if (active && !compactNav && colors.tokens.metrics.corners == components::theme::CornerStyle::Square) {
+                ui.rect("settings.nav.selectionAccent")
+                    .position(12.0f, navY + 5.0f).size(2.0f, 30.0f)
+                    .color(colors.accent)
+                    .hitTestMode(core::dsl::HitTestMode::None).build();
+            }
             if (!compactNav) navY += 48.0f;
             ++categoryIndex;
         }
@@ -1116,15 +1249,19 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                     return;
                 }
 
+                if (colors.tokens.metrics.corners == components::theme::CornerStyle::Square) {
+                    ui.rect("settings.contentPane.flatSurface")
+                        .fill().color(colors.editor)
+                        .hitTestMode(core::dsl::HitTestMode::None).build();
+                }
+
                 const float scrollTop = 24.0f;
                 const float scrollHeight = std::max(0.0f, pageHeight - scrollTop - 18.0f);
                 const float rowHeight = geometry.rowHeight;
                 const float sectionHeight = metrics.sectionTitleFontSize + 26.0f;
                 const float associationSpace = std::max(0.0f, scrollHeight-sectionHeight-rowHeight);
-                int rowCount = state.settingsCategory == SettingsCategory::Appearance ? 7
-                             : state.settingsCategory == SettingsCategory::Editor ? 6 : 0;
-                // 行数之外只剩"恢复默认值"一行，所以 +1。
-                const float contentHeight = sectionHeight + rowHeight * (rowCount+1) + 10.0f +
+                const float contentHeight = settingsMainContentHeight(
+                    state.settingsCategory, sectionHeight, rowHeight) +
                     (state.settingsCategory == SettingsCategory::FileSystem
                         ? fileAssocCardHeight(metrics, geometry.contentWidth, associationSpace, state) + 12.0f : 0.0f);
                 const float maxOffset = std::max(0.0f, contentHeight - scrollHeight);
@@ -1189,6 +1326,33 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                         });
             rowY += geometry.rowHeight;
 
+            rowLabel(ui, colors, metrics, uiFont, "settings.uiStyle", i18n::tr("settings.ui_style"),
+                     i18n::tr("settings.ui_style_hint"),
+                     0.0f, rowY, labelWidth, geometry);
+            segmentedAt(ui, colors, "settings.uiStyle",
+                        controlX, rowY + plainRowControlY, controlWidth,
+                        {i18n::tr("settings.ui_style_rounded"), i18n::tr("settings.ui_style_square")},
+                        state.uiStyle == UiStyle::Square ? 1 : 0, metrics.panelFontSize,
+                        [&state](int index) {
+                            applyUiStyle(state, index == 1 ? UiStyle::Square : UiStyle::Rounded);
+                        });
+            rowY += geometry.rowHeight;
+
+            // 交互反馈动画（悬停/按压配色过渡与按压缩放）。关掉后界面即时响应、
+            // 不再产生过渡帧，是给性能敏感场景留的出口；默认跟随系统"动画效果"。
+            rowLabel(ui, colors, metrics, uiFont, "settings.animations", i18n::tr("settings.animations"),
+                     i18n::tr("settings.animations_hint"),
+                     0.0f, rowY, labelWidth, geometry);
+            segmentedAt(ui, colors, "settings.animations",
+                        controlX, rowY + plainRowControlY, controlWidth,
+                        {i18n::tr("settings.on"), i18n::tr("settings.off")}, state.animations ? 0 : 1, metrics.panelFontSize,
+                        [&state](int index) {
+                            state.animations = index == 0;
+                            persistSettings(state);
+                            app::requestUpdate();
+                        });
+            rowY += geometry.rowHeight;
+
             rowLabel(ui, colors, metrics, uiFont, "settings.scale", i18n::tr("settings.ui_scale"), systemScaleHint(state),
                      0.0f, rowY, labelWidth, geometry);
             stepControl(ui, colors, "settings.scale",
@@ -1219,13 +1383,6 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
             // 字体：打开字体选择子页（正文/代码/界面三个目标共用）。槽按钮一行的
             // 宽度放不下三份状态，之前只显示正文一项容易让人误会——按钮只说
             // "点这里去选"，三个目标各自的当前值写在左侧说明里。
-            const std::string fontsCurrent = i18n::format("settings.fonts_current",{
-                {"body", state.editorFontFile.empty() ? std::string(i18n::tr("settings.font_default_short"))
-                                                      : fonts::displayNameFor(state.editorFontFile)},
-                {"code", state.codeFontFile.empty() ? std::string(i18n::tr("settings.font_default_short"))
-                                                    : fonts::displayNameFor(state.codeFontFile)},
-                {"ui", state.uiFontFile.empty() ? std::string(i18n::tr("settings.font_default_short"))
-                                                : fonts::displayNameFor(state.uiFontFile)}});
             rowLabel(ui, colors, metrics, uiFont, "settings.fonts", i18n::tr("settings.fonts"),
                      fontsCurrent,
                      0.0f, rowY, labelWidth, geometry);
@@ -1260,20 +1417,6 @@ inline void settingsPanelOverlay(eui::Ui& ui, AppState& state, const eui::Screen
                        [&state] { openThemeChooser(state); });
             rowY += geometry.rowHeight;
 
-            // 交互反馈动画（悬停/按压配色过渡与按压缩放）。关掉后界面即时响应、
-            // 不再产生过渡帧，是给性能敏感场景留的出口；默认跟随系统"动画效果"。
-            rowLabel(ui, colors, metrics, uiFont, "settings.animations", i18n::tr("settings.animations"),
-                     i18n::tr("settings.animations_hint"),
-                     0.0f, rowY, labelWidth, geometry);
-            segmentedAt(ui, colors, "settings.animations",
-                        controlX, rowY + plainRowControlY, controlWidth,
-                        {i18n::tr("settings.on"), i18n::tr("settings.off")}, state.animations ? 0 : 1, metrics.panelFontSize,
-                        [&state](int index) {
-                            state.animations = index == 0;
-                            persistSettings(state);
-                            app::requestUpdate();
-                        });
-            rowY += geometry.rowHeight;
                                 }
                                 if (state.settingsCategory == SettingsCategory::Editor) {
             rowLabel(ui, colors, metrics, uiFont, "settings.mode", i18n::tr("settings.layout"), i18n::tr("settings.layout_hint"),

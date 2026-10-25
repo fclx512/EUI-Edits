@@ -93,6 +93,19 @@ int main() {
     state.newDocumentLanguage = "text"; compose();
     click("markdown.immersive.bg"); compose();
     check(!neo::markdownImmersive(state) && ui->find("writing.capsule"), "plain text can exit focus");
+    for (const auto style : {neo::UiStyle::Square, neo::UiStyle::Rounded}) {
+        neo::setUiStyle(style);
+        compose();
+        neo::applyInteractionDefaults(*ui, neo::kUiFontFamily, true);
+        const bool square = style == neo::UiStyle::Square;
+        check(ui->find("writing.capsule")->radius == (square ? 0.0f : 9.0f),
+              "plain writing capsule follows square and rounded styles");
+        for (const char* id : {"markdown.typewriter.bg", "markdown.immersive.bg"}) {
+            const auto* control = ui->find(id);
+            check(control && control->radius == (square ? 0.0f : 6.0f) &&
+                  bool(control->reveal) == square, "writing controls follow geometry and Reveal policy");
+        }
+    }
     const auto metrics = neo::uiMetrics(state);
     const float narrowRail = neo::writingCapsuleRailWidth(state, 800, metrics);
     const float wideRail = neo::writingCapsuleRailWidth(state, 1200, metrics);

@@ -181,7 +181,7 @@ bool hoverAfterSleepStartsAnimationWithoutChangingTimerClock() {
     harness.runtime.update(harness.window, 0.0f, 1.0f, 1.0f);
     core::queuePointerMotion(harness.window, 20, 20, {}, {});
     harness.runtime.update(harness.window, 2.0f, 1.0f, 1.0f);
-    if (!harness.runtime.isAnimating() || callbacks != 1) {
+    if (harness.runtime.isAnimating() || harness.runtime.nextTimerWakeSeconds() > 1.0f / 60.0f + .0001f || callbacks != 1) {
         harness.finish();
         std::cerr << "idle hover skipped its animation or timer lost elapsed time\n";
         return false;
@@ -189,23 +189,25 @@ bool hoverAfterSleepStartsAnimationWithoutChangingTimerClock() {
     // Hover callbacks can request a second compose/update in the same frame.
     // That zero-time pass must not snap the smoothing to its final target.
     harness.runtime.update(harness.window, 0.0f, 1.0f, 1.0f);
-    if (!harness.runtime.isAnimating() || callbacks != 1) {
+    if (harness.runtime.isAnimating() || harness.runtime.nextTimerWakeSeconds() > 1.0f / 60.0f + .0001f || callbacks != 1) {
         harness.finish();
         std::cerr << "same-frame update snapped hover or advanced the timer\n";
         return false;
     }
     // An already active visual consumes the actual next elapsed interval.
     harness.runtime.update(harness.window, 1.0f, 1.0f, 1.0f);
-    if (harness.runtime.isAnimating()) {
+    if (harness.runtime.isAnimating() || harness.runtime.nextTimerWakeSeconds() <= 1.0f / 60.0f) {
         harness.finish();
         std::cerr << "active hover animation did not finish after elapsed time\n";
         return false;
     }
     core::queuePointerMotion(harness.window, 100, 70, {}, {});
     harness.runtime.update(harness.window, 2.0f, 1.0f, 1.0f);
-    const bool exitAnimating = harness.runtime.isAnimating();
+    const bool exitAnimating = !harness.runtime.isAnimating() &&
+        harness.runtime.nextTimerWakeSeconds() <= 1.0f / 60.0f + .0001f;
     harness.runtime.update(harness.window, 1.0f, 1.0f, 1.0f);
-    const bool settled = !harness.runtime.isAnimating();
+    const bool settled = !harness.runtime.isAnimating() &&
+        harness.runtime.nextTimerWakeSeconds() > 1.0f / 60.0f;
     harness.finish();
     return exitAnimating && settled;
 }

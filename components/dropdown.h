@@ -1,6 +1,7 @@
 #pragma once
 
 #include "components/theme.h"
+#include "components/text_alignment.h"
 #include "core/dsl.h"
 #include "eui/signal.h"
 
@@ -91,6 +92,7 @@ public:
         const float popupGap = metrics_.spacing.compact;
         const float popupPadding = metrics_.spacing.small;
         const float popupHeight = itemHeight * static_cast<float>(std::max(1, count)) + popupPadding * 2.0f;
+        const float optionTextTop = text_alignment::singleLineTop(itemHeight, metrics_.typography.option);
         const float rootHeight = height + popupGap + popupHeight;
         const float visible = open_ ? 1.0f : 0.0f;
         const float popupOffsetY = open_ ? 0.0f : -6.0f;
@@ -188,13 +190,13 @@ public:
 
                             ui_.text(id_ + ".item.label." + std::to_string(index))
                                 .x(popupPadding + metrics_.spacing.content)
-                                .y(itemY + std::max(0.0f, (itemHeight - metrics_.typography.option -
-                                                           metrics_.typography.lineGapTight) * 0.5f))
+                                .y(itemY + optionTextTop)
                                 .size(std::max(0.0f, width_ - popupPadding * 2.0f - metrics_.spacing.panel),
                                       metrics_.spacing.large)
                                 .text(items_[index])
                                 .fontSize(metrics_.typography.option)
                                 .lineHeight(metrics_.typography.option + metrics_.typography.lineGapTight)
+                                .verticalAlign(core::VerticalAlign::Top)
                                 .color(active ? style_.accent : style_.text)
                                 .transition(transition_)
                                 .animate(core::AnimProperty::TextColor)

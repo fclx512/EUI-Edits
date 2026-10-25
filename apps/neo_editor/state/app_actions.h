@@ -59,6 +59,8 @@ bool mergeRelatedVaultRoots(AppState& state);
 
 void newDocument(AppState& state);
 bool loadDocument(AppState& state, const std::string& path);
+// Reuse the existing image decoder/viewer without creating or replacing a text tab.
+bool openImagePreview(AppState& state, const std::string& path);
 void retryUnavailableDocument(AppState& state);
 // Startup preserves a crash recovery draft before honoring an explicit file.
 void restoreStartupDocument(AppState& state, const std::string& commandLinePath);
@@ -66,11 +68,14 @@ void openFileFromDialog(AppState& state);
 void openRecentFile(AppState& state, std::size_t index);
 
 // 有未保存修改时先确认再打开，避免浏览文档库顺手丢掉正在写的内容。
-inline bool documentModalOpen(const AppState& state) {
+// Window closing may dismiss a read-only image first; other actions continue to
+// treat it as modal. Save/conflict and destructive-confirmation guards stay on.
+inline bool documentModalOpen(const AppState& state, bool includeImagePreview = true) {
     return state.closeApproved || state.sessionClosePending || state.savePickerOpen || state.pending != PendingAction::None || state.saveConflictOpen ||
         state.riskAction != AppState::RiskAction::None ||
         state.vaultPromptKind != VaultPromptKind::None || state.vaultDeletePending || state.linkEditorOpen ||
-        !state.imagePreviewPath.empty() || (state.mindmapPreview.open && !state.mindmapPreview.inlineMode) || state.exitClosing;
+        (includeImagePreview && !state.imagePreviewPath.empty()) ||
+        (state.mindmapPreview.open && !state.mindmapPreview.inlineMode) || state.exitClosing;
 }
 void requestOpenPath(AppState& state, const std::string& path);
 
@@ -182,6 +187,10 @@ void applyTheme(AppState& state, ThemeMode mode);
 void applyFollowSystemTheme(AppState& state);
 // 系统通知只更新跟随偏好；固定亮/暗不受影响，模式没变时不重绘或落盘。
 void refreshSystemTheme(AppState& state);
+
+// 界面风格（settings.ini 的 ui_style）。与配色互不影响，但几何同样烘进图元，
+// 所以要整屏作废；窗口圆角交给平台层重新申请 DWM 属性。
+void applyUiStyle(AppState& state, UiStyle style);
 
 // 自选字体文件（settings.ini 的 editor_font_file / ui_font_file / code_font_file）。
 // 传空串 = 恢复预设。编辑区字体立刻生效；界面字体还要顺带换掉框架的全局默认字体，

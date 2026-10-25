@@ -41,6 +41,9 @@ inline bool dragEscapeArmed = false;
 inline bool dragEscapePressed = false;
 // API results are diagnostics, not proof that the compositor displayed a shadow.
 inline HRESULT frameExtensionResult = E_PENDING, cornerPreferenceResult = E_PENDING;
+// 1 = DWMWCP_DONOTROUND（Win10 直角），2 = DWMWCP_ROUND（Win11 圆角）。
+// Win10 上属性 33 本来就返回 E_INVALIDARG，窗口保持方角；这里显式请求 1。
+inline bool squareCorners = false;
 inline void applyDwmFrame(HWND hwnd) {
     static const auto module = LoadLibraryExW(L"dwmapi.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     using ExtendFrame = HRESULT(WINAPI*)(HWND, const MARGINS*);
@@ -54,8 +57,13 @@ inline void applyDwmFrame(HWND hwnd) {
     // The client renderer stays opaque; do not use a full-window glass margin.
     const MARGINS margins{1, 1, 1, 1};
     frameExtensionResult = extendFrame ? extendFrame(hwnd, &margins) : E_NOTIMPL;
-    const DWORD round = 2;
+    const DWORD round = squareCorners ? 1u : 2u;
     cornerPreferenceResult = setAttribute ? setAttribute(hwnd, 33, &round, sizeof(round)) : E_NOTIMPL;
+}
+inline void setSquareCorners(bool square) {
+    if (squareCorners == square) return;
+    squareCorners = square;
+    if (window) applyDwmFrame(window);
 }
 inline void armTabDragEscape(bool armed) {
     dragEscapeArmed = armed;
@@ -129,14 +137,16 @@ inline bool setAlwaysOnTop(bool enabled) {
     return window && SetWindowPos(window, enabled ? HWND_TOPMOST : HWND_NOTOPMOST,
         0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) != FALSE;
 }
-// Keep client scrollbars inside the native sizing strip, at the current
-// system DPI and application UI scale. Maximized windows have no sizing strip.
-inline float resizeInset() {
+// Keep a scrollbar's center inside client input, at the current system DPI
+// and UI scale. Its outer half already contributes to the native sizing
+// allowance. Maximized windows have no sizing strip.
+inline float resizeInset(float scrollbarWidth = 0.0f) {
     if (!window || IsZoomed(window)) return 0;
     RECT r{}; GetClientRect(window, &r);
     const float scale = r.right / std::max(1.0f, logicalWidth);
     const int edge = std::max(4, static_cast<int>(6 * GetDpiForWindow(window) / 96.0f));
-    return (edge + 1.0f) / std::max(.1f, scale);
+    return std::max(0.0f, (edge + 1.0f) / std::max(.1f, scale) -
+        std::max(0.0f, scrollbarWidth) * 0.5f);
 }
 inline void minimize() { if(window) PostMessageW(window,WM_SYSCOMMAND,SC_MINIMIZE,0); }
 inline void maximize() { if(window) PostMessageW(window,WM_SYSCOMMAND,maximized()?SC_RESTORE:SC_MAXIMIZE,0); }
@@ -144,6 +154,7 @@ inline void close() { if(window) PostMessageW(window,WM_CLOSE,0,0); }
 #else
 inline void armTabDragEscape(bool) {}
 inline bool tabDragEscapePressed() { return false; }
+inline void setSquareCorners(bool) {}
 inline void update(void*, float width, float height, float interactiveRight = controlsWidth) {
     beginFrame(width, height, interactiveRight);
 }
@@ -151,7 +162,7 @@ inline bool maximized() { return false; }
 inline bool foreground() { return true; }
 inline bool alwaysOnTop() { return false; }
 inline bool setAlwaysOnTop(bool) { return false; }
-inline float resizeInset() { return 0; }
+inline float resizeInset(float = 0.0f) { return 0; }
 inline void minimize() {}
 inline void maximize() {}
 inline void close() {}

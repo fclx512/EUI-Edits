@@ -96,7 +96,7 @@ inline void drawContent(eui::Ui& ui, const std::string& id, float x, float y, fl
                              float px, float py, float pw, float ph, eui::Color fill, float radius = 0.0f) {
         const auto [bw, bc] = mark(key);
         auto area = target.rect(id + suffix);
-        area.position(px, py).size(std::max(1.0f, pw), std::max(1.0f, ph)).radius(radius)
+        area.position(px, py).size(std::max(1.0f, pw), std::max(1.0f, ph)).radius(neo::corner(colors, radius))
             .states(fill, fill, fill).border(bw, bc);
         if (a.interactive) {
             const auto onSelect = a.onSelect;
@@ -265,7 +265,7 @@ inline void drawContent(eui::Ui& ui, const std::string& id, float x, float y, fl
          width - 24, status - 1, colors.textMuted, 11);
     // 外框最后画，压在内部色块上；选中"边框"时也走这里的粗描边。
     const auto [bw, bc] = mark("border");
-    ui.rect(id + ".outer.border").position(x, y).size(width, height).radius(7.0f)
+    ui.rect(id + ".outer.border").position(x, y).size(width, height).radius(neo::corner(colors, 7.0f))
         .color(transparentColor()).border(bw > 0 ? bw : 1.0f, bw > 0 ? bc : colors.border).build();
 }
 

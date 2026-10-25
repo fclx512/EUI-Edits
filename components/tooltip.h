@@ -64,6 +64,7 @@ public:
             tooltipWidth - pointerHalfWidth_ - metrics_.typography.lineGapRelaxed);
 
         ui_.stack(id_)
+            .excludeFromBackdropSnapshot()
             .x(tooltipX)
             .y(tooltipY)
             .size(tooltipWidth, stackHeight)
@@ -87,7 +88,7 @@ public:
                     .size(tooltipWidth, pointerHeight_)
                     .points(pointerPoints)
                     .color(style_.background)
-                    .radius(pointerRadius_)
+                    .radius(theme::cornerRadius(metrics_, pointerRadius_))
                     .build();
 
                 ui_.rect(id_ + ".bg")

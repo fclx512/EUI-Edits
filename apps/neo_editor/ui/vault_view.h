@@ -6,6 +6,7 @@
 #include "state/vault_cache.h"
 #include "platform/vault_rename.h"
 #include "ui/metrics.h"
+#include "ui/popup_presentation.h"
 #include "ui/outline_view.h"
 #include "ui/widgets.h"
 
@@ -77,7 +78,7 @@ inline void toolbarTooltip(eui::Ui& ui, const std::string& id, const std::string
     ui.stack(id).position(x, y).size(tooltipWidth, tooltipHeight).zIndex(2600)
         .hoverOpacityFrom(source)
         .content([&] {
-            ui.rect(id + ".bg").fill().radius(7.0f).color(background)
+            ui.rect(id + ".bg").fill().radius(neo::corner(colors, 7.0f)).color(background)
                 .border(1.0f, colors.border).build();
             ui.text(id + ".text").position(kPaddingX, kPaddingY).size(textWidth, textHeight)
                 .text(text).fontFamily(fontFamily).fontSize(fontSize).lineHeight(textStyle.lineHeight)
@@ -126,6 +127,7 @@ inline UiIcon rowIcon(const vault::Row& row) {
     if (row.isDir) {
         return row.expanded ? UiIcon::FolderOpen : UiIcon::Folder;
     }
+    if (filetypes::image(row.name)) return UiIcon::ImageFile;
     switch(filetypes::detect(row.name).category) {
     case filetypes::Category::Markdown:return UiIcon::MarkdownFile;
     case filetypes::Category::Text:return UiIcon::TextFile;
@@ -139,6 +141,7 @@ inline eui::Color rowIconColor(const EditorColors& colors, const vault::Row& row
     if (row.isDir) {
         return colors.iconFolder;
     }
+    if (filetypes::image(row.name)) return colors.iconData;
     switch(filetypes::detect(row.name).category) {
     case filetypes::Category::Markdown:return colors.iconMd;
     case filetypes::Category::Text:return colors.iconTxt;
@@ -246,7 +249,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                             const eui::Color activeModeFill = rgba(colors.accent.r, colors.accent.g,
                                                                   colors.accent.b, 0.14f);
                             ui.stack("vault.mode.filter").size(kModeButtonWidth, kHeaderHeight).content([&] {
-                                ui.rect("vault.mode.filter.hit").fill().radius(5.0f)
+                                ui.rect("vault.mode.filter.hit").fill().radius(neo::corner(colors, 5.0f))
                                     .color(filterMode ? activeModeFill : transparentColor())
                                     .border(filterMode ? 1.0f : 0.0f, colors.accent)
                                     .states(filterMode ? activeModeFill : transparentColor(), colors.rowHover,
@@ -269,7 +272,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                                          filterMode ? colors.accent : colors.textMuted);
                             }).build();
                             ui.stack("vault.parent").size(kModeButtonWidth, kHeaderHeight).content([&] {
-                                auto hit = ui.rect("vault.parent.hit").fill().radius(5.0f)
+                                auto hit = ui.rect("vault.parent.hit").fill().radius(neo::corner(colors, 5.0f))
                                     .states(transparentColor(), colors.rowHover, colors.pressed)
                                     .preserveFocusOnPress().disabled(!canGoParent);
                                 if (canGoParent) {
@@ -306,7 +309,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                         ? colors.textMuted : colors.text;
                     unifiedStyle.placeholder = colors.textMuted;
                     unifiedStyle.cursor = colors.accent;
-                    unifiedStyle.radius = 5.0f;
+                    unifiedStyle.radius = neo::corner(colors, 5.0f);
                     unifiedStyle.shadow = eui::Shadow{};
                     components::input(ui, "vault.address")
                         .size(inner, kRootHeight)
@@ -417,7 +420,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                             if (row.loadMore) {
                                 const std::string id = "vault.more." + stableRowId(row.relative);
                                 rowUi.stack(id).size(rowWidth, rowHeight).content([&] {
-                                    rowUi.rect(id + ".hit").fill().radius(4.0f)
+                                    rowUi.rect(id + ".hit").fill().radius(neo::corner(colors, 4.0f))
                                         .states(transparentColor(), colors.rowHover, colors.pressed)
                                         .cursor(row.cacheLimitReached ? eui::CursorShape::Arrow : eui::CursorShape::Hand)
                                         .onClick([&state, row] {
@@ -467,7 +470,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                                 .content([&] {
                                     rowUi.rect(stableId + ".bg")
                                         .fill()
-                                        .radius(4.0f)
+                                        .radius(neo::corner(colors, 4.0f))
                                         .states(normal, hover, colors.pressed)
                                         .transition(quickTransition())
                                         .animate(core::AnimProperty::Color | core::AnimProperty::Border)
@@ -507,7 +510,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                                             state.vaultContextIsDir = row.isDir;
                                             state.vaultContextMenuX = static_cast<float>(event.x);
                                             state.vaultContextMenuY = static_cast<float>(event.y);
-                                            state.vaultContextMenuOpen = true;
+                                            popup_presentation::activate(state, popup_presentation::Owner::VaultContext);
                                             app::requestUpdate();
                                         })
                                         .build();

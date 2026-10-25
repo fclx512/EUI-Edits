@@ -3,6 +3,7 @@
 #include "eui_neo.h"
 #include "state/app_state.h"
 #include "ui/icons.h"
+#include "ui/interaction_reveal.h"
 
 #include <string>
 
@@ -34,16 +35,20 @@ inline bool animationsEnabled(const AppState& state) {
 // shouldAnimate() 返回 false，AnimatedValue::setTarget 会直接把 current_ 落到
 // 目标值并清 active_（core/animation.h:293），正在跑的过渡不会冻在半路。
 inline void applyInteractionDefaults(eui::Ui& ui, const char* fontFamily, bool animations) {
-    const auto visit = [fontFamily, animations](auto&& self, core::dsl::Element& element) -> void {
+    const auto reveal = interaction_reveal::effect(editorColors(),
+        interaction_reveal::enabled(currentUiStyle(), animations));
+    const auto visit = [fontFamily, animations, reveal](auto&& self, core::dsl::Element& element, bool blocked) -> void {
+        blocked = blocked || interaction_reveal::blocksSubtree(element);
+        interaction_reveal::apply(element, reveal, blocked);
         if (!animations) {
             element.transition = eui::Transition::none();
             element.smoothStateColors = false;
             element.pressedScale = 1.0f;
         }
         if (element.fontFamily.empty()) element.fontFamily = fontFamily;
-        for (const auto& child : element.children) self(self, *child);
+        for (const auto& child : element.children) self(self, *child, blocked);
     };
-    for (const auto& root : ui.roots()) visit(visit, *root);
+    for (const auto& root : ui.roots()) visit(visit, *root, false);
 }
 
 inline eui::Color transparentColor() {
@@ -140,7 +145,7 @@ inline void toolButton(eui::Ui& ui,
     const float glyph = std::min(fontSize, height - 8.0f);
     const float labelX = hasIcon ? 8.0f + glyph + 7.0f : 0.0f;
     ui.stack(id).size(width, height).content([&] {
-        auto background = ui.rect(id + ".bg").fill().radius(6.0f)
+        auto background = ui.rect(id + ".bg").fill().radius(neo::corner(colors, 6.0f))
             .states(normal, hover, pressed).disabled(!enabled).preserveFocusOnPress()
             .transition(quickTransition());
         if (enabled) background.cursor(eui::CursorShape::Hand);

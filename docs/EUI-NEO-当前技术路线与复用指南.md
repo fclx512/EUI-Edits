@@ -242,14 +242,14 @@ Win32包含PMv2初始化与WM_DPICHANGED建议矩形处理，不等于任意布�
 | retained子树层 | `supportsRetainedLayers=false`，Runtime跳过预热/分配 | 整窗render cache仍存在；禁retained层不等于闲置时持续重绘，也不等于每次重画整窗 |
 | render cache / blit | 有容量防抖、缩容/重建；blit当前忽略dirtyRects并全幅拷贝 | Runtime脏区流程与局部屏幕present是不同能力 |
 | 设备丢失 | D2DERR_RECREATE_TARGET释放设备资源、保留纹理CPU恢复源、唤醒/full paint；Win32另有notePresentationLost | 目标组合需故障/恢复验收，尤其GLFW+D2D |
-| 特效/高级接口 | backdrop/image blur未实现；不覆写ShaderToy、GPU图像/纹理族；变换只处理仿射 | 使用前检查实际能力，明确回退；不把3D/透视退化当正确显示 |
+| 特效/高级接口 | 通用实时 backdrop/image blur 未实现；D2D 保留显式 FrozenBackdrop 与独立窄条缓存（EUI-Edits 菜单/顶栏已停止使用），失效时纯色回退，详见[渲染合同](渲染后端与CPU处理契约.md)；不覆写ShaderToy、GPU图像/纹理族；变换只处理仿射 | 快照不是实时透射；使用前检查实际能力，明确回退，不把3D/透视退化当正确显示 |
 | 透明窗口 | 当前目标ALPHA_MODE_IGNORE | 不能直接支持逐像素透明分层窗口方案 |
 
 单靠换D2D目标不会自动得到DirectWrite、ClearType、GPU effect或可靠device-loss流程。DeviceContext/DXGI/DComposition属于后续架构评估方向，未实现，也不是新项目必须迁移的默认下一步。
 
 应用侧可参照而不应固化为框架默认的内容包括：EditorColors映射theme tokens、UI/编辑字号、语义字体、动画开关、快捷键、可读行宽、标签/侧栏组织、LP和恢复调度。要启用动画可通过应用配置/组件transition，但无需搬入编辑器整套设置系统。
 
-`ContextMenuBuilder::skipClosedContent` 默认false；仅在明确opt-in、闭合且transition关闭时省去隐藏树，并清cascade状态/根offset。开启动画仍保留闭合树。其它项目应选择适合的契约；第十批收益只覆盖编辑器已测条件。
+`ContextMenuBuilder::skipClosedContent` 默认false；仅在明确opt-in、闭合且 transition / motion 入退场均关闭时省去隐藏树，并清cascade状态/根offset。开启动画仍保留根级闭合树。可选 `ContextMenuMotion` 提供分别入场/退场/高亮时间及不缩放的短位移；子级退场后回收行树，未配置 motion 的旧 transition 行为保留。其它项目应选择适合的契约；第十批收益只覆盖编辑器已测条件。
 
 内嵌资源的 [bundled_resources.h](../core/platform/bundled_resources.h) 带有EuiEditsLicenses、AboutIcon固定ID和产品导出CLI/对话框。可参考RCDATA字节view机制，但新项目须定义自己的ID、RC生成、命令和许可证内容；不把这个接口当现成通用资源库。普通框架helper仍可能复制assets，产品单EXE能力来自编辑器专用CMake资源块。
 

@@ -7,55 +7,52 @@
 
 namespace core::dsl {
 
-inline bool isRectAnimating(const Element& element, const runtime::RectInstance& instance) {
+inline bool isRectDecorating(const Element& element, const runtime::RectInstance& instance) {
     const bool interactive = element.interactive && !element.disabled;
     const bool stateColorsVisible = element.hasStateColors &&
         (!closeEnough(element.color, element.hoverColor) || !closeEnough(element.color, element.pressedColor));
     return instance.hoverBlend.isMovingTo(interactive && stateColorsVisible && instance.interaction.hover ? 1.0f : 0.0f) ||
            instance.pressBlend.isMovingTo(interactive && stateColorsVisible && instance.interaction.pressed ? 1.0f : 0.0f) ||
-           instance.frame.isActive() ||
            instance.color.isActive() ||
-           instance.radius.isActive() ||
-           instance.blur.isActive() ||
            instance.opacity.isActive() ||
            instance.border.isActive() ||
-           instance.shadow.isActive() ||
-           instance.transform.isActive();
+           instance.shadow.isActive();
 }
 
-inline bool isPolygonAnimating(const Element& element, const runtime::PolygonInstance& instance) {
+inline bool isRectAnimating(const runtime::RectInstance& instance) {
+    return instance.frame.isActive() || instance.radius.isActive() ||
+           instance.blur.isActive() || instance.transform.isActive();
+}
+
+inline bool isPolygonDecorating(const Element& element, const runtime::PolygonInstance& instance) {
     const bool interactive = element.interactive && !element.disabled;
     const bool stateColorsVisible = element.hasStateColors &&
         (!closeEnough(element.color, element.hoverColor) || !closeEnough(element.color, element.pressedColor));
     return instance.hoverBlend.isMovingTo(interactive && stateColorsVisible && instance.interaction.hover ? 1.0f : 0.0f) ||
            instance.pressBlend.isMovingTo(interactive && stateColorsVisible && instance.interaction.pressed ? 1.0f : 0.0f) ||
-           instance.frame.isActive() ||
            instance.color.isActive() ||
-           instance.radius.isActive() ||
-           instance.opacity.isActive() ||
+           instance.opacity.isActive();
+}
+
+inline bool isPolygonAnimating(const runtime::PolygonInstance& instance) {
+    return instance.frame.isActive() || instance.radius.isActive() ||
            instance.transform.isActive();
 }
 
 inline bool isTextAnimating(const runtime::TextInstance& instance) {
-    return instance.frame.isActive() ||
-           instance.color.isActive() ||
-           instance.opacity.isActive() ||
-           instance.transform.isActive();
+    return instance.frame.isActive() || instance.transform.isActive();
 }
 
 inline bool isImageAnimating(const runtime::ImageInstance& instance) {
     return instance.frame.isActive() ||
-           instance.tint.isActive() ||
            instance.radius.isActive() ||
            instance.blur.isActive() ||
-           instance.opacity.isActive() ||
            instance.transform.isActive() ||
            instance.primitive->isAnimating();
 }
 
 inline bool isLayoutAnimating(const runtime::LayoutInstance& instance) {
-    return instance.transform.isActive() ||
-           instance.opacity.isActive();
+    return instance.transform.isActive();
 }
 
 inline bool shouldAnimate(const Element& element, AnimProperty property) {

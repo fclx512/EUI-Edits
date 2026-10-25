@@ -20,6 +20,7 @@
 #include FT_FREETYPE_H
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -33,6 +34,7 @@
 #include <memory>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -106,10 +108,100 @@ struct FontFace {
     }
 };
 
+struct GlyphAdvanceCacheSlot {
+    std::uint64_t key = 0; // makeGlyphKey is never zero (face index is stored +1)
+    float advance = 0.0f;
+};
+
+constexpr std::size_t kGlyphAdvanceBudgetBytes = 2u * 1024u * 1024u;
+
+struct GlyphAdvanceBudgetState {
+    std::atomic<std::size_t> currentBytes{0};
+
+    bool tryReserve(std::size_t bytes) noexcept {
+        if (bytes > kGlyphAdvanceBudgetBytes) return false;
+        std::size_t current = currentBytes.load(std::memory_order_relaxed);
+        while (current <= kGlyphAdvanceBudgetBytes - bytes) {
+            if (currentBytes.compare_exchange_weak(current, current + bytes,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_relaxed)) return true;
+        }
+        return false;
+    }
+
+    void release(std::size_t bytes) noexcept {
+        currentBytes.fetch_sub(bytes, std::memory_order_acq_rel);
+    }
+};
+
+// The global owner can die before a renderer-held FontInfoHolder during static
+// teardown. Each table keeps its own strong reference for destructor release.
+std::shared_ptr<GlyphAdvanceBudgetState>& glyphAdvanceBudgetOwner() {
+    static std::shared_ptr<GlyphAdvanceBudgetState> owner;
+    return owner;
+}
+
+struct GlyphAdvanceCacheTable {
+    static constexpr std::size_t setCount = 512;
+    static constexpr std::size_t ways = 8;
+    static constexpr std::size_t capacity = setCount * ways;
+    static_assert((setCount & (setCount - 1)) == 0, "set count must be a power of two");
+    std::array<std::array<GlyphAdvanceCacheSlot, ways>, setCount> sets{};
+    std::array<std::uint8_t, setCount> nextVictim{};
+    std::shared_ptr<GlyphAdvanceBudgetState> budget;
+
+    explicit GlyphAdvanceCacheTable(std::shared_ptr<GlyphAdvanceBudgetState> reservedBudget) noexcept
+        : budget(std::move(reservedBudget)) {}
+    GlyphAdvanceCacheTable(const GlyphAdvanceCacheTable&) = delete;
+    GlyphAdvanceCacheTable& operator=(const GlyphAdvanceCacheTable&) = delete;
+    ~GlyphAdvanceCacheTable() { budget->release(sizeof(*this)); }
+};
+
+static_assert(sizeof(GlyphAdvanceCacheTable) <= kGlyphAdvanceBudgetBytes,
+              "one glyph advance table must fit the process budget");
+
+struct GlyphAdvanceDebugStats {
+    std::uint64_t hits = 0;
+    std::uint64_t misses = 0;
+    std::uint64_t collisions = 0;
+    std::uint64_t budgetDenials = 0;
+    std::uint64_t allocationFailures = 0;
+};
+
+GlyphAdvanceDebugStats& glyphAdvanceDebugStats() {
+    static GlyphAdvanceDebugStats stats;
+    return stats;
+}
+
 struct FontInfoHolder {
     std::vector<FontFace> faces;
     std::vector<std::string> lazyFallbackPaths;
+    // Per fixed-size font stack; allocated only after a successful uncached
+    // glyph load. Holder destruction/eviction releases this small table.
+    std::unique_ptr<GlyphAdvanceCacheTable> advanceCache;
 };
+
+void ensureGlyphAdvanceCache(FontInfoHolder& holder) {
+    if (holder.advanceCache) return;
+    std::shared_ptr<GlyphAdvanceBudgetState> budget;
+    bool reserved = false;
+    try {
+        auto& owner = glyphAdvanceBudgetOwner();
+        if (!owner) owner = std::make_shared<GlyphAdvanceBudgetState>();
+        budget = owner;
+        if (!budget->tryReserve(sizeof(GlyphAdvanceCacheTable))) {
+            ++glyphAdvanceDebugStats().budgetDenials;
+            return;
+        }
+        reserved = true;
+        holder.advanceCache = std::make_unique<GlyphAdvanceCacheTable>(budget);
+        reserved = false; // the table now owns the reservation and releases it in its destructor
+    } catch (...) {
+        if (reserved) budget->release(sizeof(GlyphAdvanceCacheTable));
+        ++glyphAdvanceDebugStats().allocationFailures;
+        // Cache allocation is optional; the measured advance is still returned.
+    }
+}
 
 constexpr std::size_t kFontStackCacheCapacity = 16;
 constexpr std::size_t kTextSizeCacheCapacity = 1024;
@@ -831,6 +923,17 @@ void releaseSharedTextAtlas() {
 
 std::uint64_t makeGlyphKey(size_t faceIndex, unsigned int glyphIndex) {
     return ((static_cast<std::uint64_t>(faceIndex) + 1ULL) << 32) | static_cast<std::uint64_t>(glyphIndex);
+}
+
+std::size_t glyphAdvanceSlotIndex(std::uint64_t key) {
+    // Mix both halves: adjacent glyph indices and adjacent fallback faces
+    // should not systematically occupy neighboring slots.
+    key ^= key >> 30;
+    key *= 0xbf58476d1ce4e5b9ULL;
+    key ^= key >> 27;
+    key *= 0x94d049bb133111ebULL;
+    key ^= key >> 31;
+    return static_cast<std::size_t>(key) & (GlyphAdvanceCacheTable::setCount - 1);
 }
 
 size_t faceIndexFromGlyphKey(std::uint64_t key) {
@@ -1611,17 +1714,33 @@ size_t findEmojiFaceForCodepoint(FontInfoHolder& holder, unsigned int codepoint,
     return findFaceForCodepoint(holder, codepoint, fontSize);
 }
 
-float loadGlyphAdvance(const FontFace& face,
+float loadGlyphAdvance(FontInfoHolder& holder,
+                       size_t faceIndex,
                        unsigned int glyphIndex,
                        unsigned int codepoint,
                        float fontSize,
-                       float maxGlyphHeight) {
+                       float maxGlyphHeight,
+                       bool cacheEnabled) {
     if (codepoint == '\t') {
         return fontSize * 4.0f;
     }
     if (isCombiningMark(codepoint)) {
         return 0.0f;
     }
+    const std::uint64_t key = cacheEnabled ? makeGlyphKey(faceIndex, glyphIndex) : 0;
+    const std::size_t setIndex = cacheEnabled ? glyphAdvanceSlotIndex(key) : 0;
+    if (cacheEnabled) {
+        if (holder.advanceCache) {
+            for (const auto& slot : holder.advanceCache->sets[setIndex]) {
+                if (slot.key == key) {
+                    ++glyphAdvanceDebugStats().hits;
+                    return slot.advance;
+                }
+            }
+        }
+        ++glyphAdvanceDebugStats().misses;
+    }
+    const FontFace& face = holder.faces[faceIndex];
     if (FT_Load_Glyph(face.face, glyphIndex, kGlyphLoadFlags) != 0) {
         return fontSize * 0.5f;
     }
@@ -1643,32 +1762,55 @@ float loadGlyphAdvance(const FontFace& face,
     // docs/渲染问题标本-2026-09-26.md「补充四」。
     // 注意：若将来把 kGlyphLoadFlags 改成 FT_LOAD_NO_HINTING，这里必须换回
     // linearHoriAdvance（那时栅格化的字形才是未 hint 的）。
-    return static_cast<float>(face.face->glyph->advance.x) / 64.0f * glyphScale;
+    const float advance = static_cast<float>(face.face->glyph->advance.x) / 64.0f * glyphScale;
+    if (cacheEnabled) {
+        ensureGlyphAdvanceCache(holder);
+        if (holder.advanceCache) {
+            auto& table = *holder.advanceCache;
+            auto& set = table.sets[setIndex];
+            for (auto& slot : set) {
+                if (slot.key == 0) {
+                    slot = {key, advance};
+                    return advance;
+                }
+            }
+            auto& next = table.nextVictim[setIndex];
+            auto& victim = set[next];
+            next = static_cast<std::uint8_t>((next + 1u) % GlyphAdvanceCacheTable::ways);
+            if (victim.key != key) ++glyphAdvanceDebugStats().collisions;
+            victim = {key, advance};
+        }
+    }
+    return advance;
+}
+
+TextPrimitive::ShapedGlyph shapeNextWithFallback(FontInfoHolder& holder,
+                                                 const std::string& text, size_t& index,
+                                                 float fontSize, float maxGlyphHeight,
+                                                 bool cacheEnabled) {
+    const size_t start = index;
+    const unsigned int codepoint = readUtf8Codepoint(text, index);
+    const bool preferEmoji = isEmojiCodepoint(codepoint) || nextCodepointIsEmojiPresentation(text, index);
+    const size_t faceIndex = preferEmoji
+        ? findEmojiFaceForCodepoint(holder, codepoint, fontSize)
+        : findFaceForCodepoint(holder, codepoint, fontSize);
+    const unsigned int glyphIndex = codepoint == '\t' ? 0 : FT_Get_Char_Index(holder.faces[faceIndex].face, codepoint);
+    const float advance = loadGlyphAdvance(holder, faceIndex, glyphIndex, codepoint,
+                                           fontSize, maxGlyphHeight, cacheEnabled);
+    return {glyphIndex == 0 && codepoint == '\t' ? 0 : makeGlyphKey(faceIndex, glyphIndex),
+            codepoint, static_cast<int>(start), static_cast<int>(index), advance, 0.0f, 0.0f};
 }
 
 std::vector<TextPrimitive::ShapedGlyph> shapeWithFallback(FontInfoHolder& holder,
                                                           const std::string& text,
-                                                          float fontSize) {
+                                                           float fontSize,
+                                                           bool cacheEnabled) {
     std::vector<TextPrimitive::ShapedGlyph> shaped;
     const float maxGlyphHeight = holder.faces.front().ascent - holder.faces.front().descent;
     size_t index = 0;
     while (index < text.size()) {
-        const size_t start = index;
-        const unsigned int codepoint = readUtf8Codepoint(text, index);
-        const bool preferEmoji = isEmojiCodepoint(codepoint) || nextCodepointIsEmojiPresentation(text, index);
-        const size_t faceIndex = preferEmoji
-            ? findEmojiFaceForCodepoint(holder, codepoint, fontSize)
-            : findFaceForCodepoint(holder, codepoint, fontSize);
-        const FontFace& face = holder.faces[faceIndex];
-        const unsigned int glyphIndex = codepoint == '\t' ? 0 : FT_Get_Char_Index(face.face, codepoint);
-        const float advance = loadGlyphAdvance(face, glyphIndex, codepoint, fontSize, maxGlyphHeight);
-        shaped.push_back({glyphIndex == 0 && codepoint == '\t' ? 0 : makeGlyphKey(faceIndex, glyphIndex),
-                          codepoint,
-                          static_cast<int>(start),
-                          static_cast<int>(index),
-                          advance,
-                          0.0f,
-                          0.0f});
+        shaped.push_back(shapeNextWithFallback(holder, text, index, fontSize,
+                                               maxGlyphHeight, cacheEnabled));
     }
     return shaped;
 }
@@ -1681,14 +1823,14 @@ std::vector<TextPrimitive::ShapedGlyph> shapeTextWithFontStack(const std::shared
     // 先取锁：下面无论是查缓存、走兜底字体扫描（会写 holder->faces 与
     // systemFontScanMemo），还是算完回填，都要在同一临界区里。
     std::scoped_lock lock(textCacheMutex());
+    const bool cacheOn = !textCacheDisabled();
 
     if (!holder || holder->faces.empty() || text.empty()) {
-        return holder ? shapeWithFallback(*holder, text, fontSize)
+        return holder ? shapeWithFallback(*holder, text, fontSize, cacheOn)
                       : std::vector<TextPrimitive::ShapedGlyph>{};
     }
 
     ShapingCache& cache = sharedShapingCache();
-    const bool cacheOn = !textCacheDisabled();
     const ShapingCacheKey key{holder.get(), text};
     if (cacheOn) {
         if (const std::vector<TextPrimitive::ShapedGlyph>* cached = cache.find(key, holder)) {
@@ -1696,7 +1838,7 @@ std::vector<TextPrimitive::ShapedGlyph> shapeTextWithFontStack(const std::shared
         }
     }
 
-    std::vector<TextPrimitive::ShapedGlyph> shaped = shapeWithFallback(*holder, text, fontSize);
+    std::vector<TextPrimitive::ShapedGlyph> shaped = shapeWithFallback(*holder, text, fontSize, cacheOn);
     if (cacheOn) {
         cache.insert(key, shaped, holder);
     }
@@ -3196,6 +3338,10 @@ struct TextPrimitive::FontResolutionScope::Impl {
 TextPrimitive::FontResolutionScope::FontResolutionScope() : impl_(std::make_unique<Impl>()) {}
 TextPrimitive::FontResolutionScope::~FontResolutionScope() = default;
 
+std::uint64_t TextPrimitive::fontConfigurationGeneration() noexcept {
+    return fontResolutionGeneration().load(std::memory_order_relaxed);
+}
+
 TextPrimitive::TextPrimitive()
     : impl_(std::make_unique<Impl>()) {}
 
@@ -3273,6 +3419,154 @@ TextPrimitive::TextMetrics TextPrimitive::measureTextMetrics(const std::string& 
     return metrics;
 }
 
+struct TextPrimitive::MetricsCursor::Impl {
+    enum class Phase { Initialize, Measure, Store, Scale, Done, Cancelled };
+    std::string text;
+    std::string family;
+    float scale;
+    float size;
+    int weight;
+    std::uint64_t generation;
+    Phase phase = Phase::Initialize;
+    std::shared_ptr<FontInfoHolder> holder;
+    TextMetricsCacheKey cacheKey;
+    bool cacheEnabled = false;
+    TextMetrics metrics;
+    std::size_t nextByte = 0;
+    std::size_t scaleIndex = 0;
+    float cursorX = 0.0f;
+    float maxGlyphHeight = 0.0f;
+
+    Impl(std::string value, const std::string& fontFamily, float fontSize, int fontWeight)
+        : text(std::move(value)), family(fontFamily),
+          scale(TextPrimitive::layoutPixelScale()), size(std::max(1.0f, fontSize * scale)),
+          weight(fontWeight), generation(TextPrimitive::fontConfigurationGeneration()) {}
+
+    bool contextCurrent() const noexcept {
+        return scale == TextPrimitive::layoutPixelScale() &&
+               generation == TextPrimitive::fontConfigurationGeneration();
+    }
+
+    void addStop(int byteIndex, float x) {
+        byteIndex = std::clamp(byteIndex, 0, static_cast<int>(text.size()));
+        if (!metrics.byteIndices.empty() && metrics.byteIndices.back() == byteIndex) {
+            metrics.caretX.back() = x;
+        } else {
+            metrics.byteIndices.push_back(byteIndex);
+            metrics.caretX.push_back(x);
+        }
+    }
+
+    // Called under textCacheMutex. Font/path loading, a cache hit copy and cache
+    // insertion are atomic operations; glyph work and logical scaling are resumable.
+    void initialize() {
+        if (text.empty()) {
+            addStop(0, 0.0f);
+            phase = Phase::Scale;
+            return;
+        }
+        cacheEnabled = !textCacheDisabled();
+        const std::string requestedPath = TextPrimitive::Impl::resolveFontPath(family, weight);
+        if (cacheEnabled) {
+            cacheKey = {requestedPath, text, size};
+            if (const auto* cached = sharedTextMetricsCache().find(cacheKey)) {
+                metrics = *cached;
+                phase = Phase::Scale;
+                return;
+            }
+        }
+        holder = loadSharedFontStack(requestedPath, size);
+        if (!holder || holder->faces.empty()) {
+            addStop(0, 0.0f);
+            cacheEnabled = false;
+            phase = Phase::Scale;
+            return;
+        }
+        if (cacheEnabled && holder->faces.front().path != requestedPath) {
+            // Never store fallback measurements under an unavailable requested path.
+            cacheKey = {holder->faces.front().path, text, size};
+            if (const auto* cached = sharedTextMetricsCache().find(cacheKey)) {
+                metrics = *cached;
+                phase = Phase::Scale;
+                return;
+            }
+        }
+        const auto reserve = std::min<std::size_t>(text.size() + 1, 4096);
+        metrics.byteIndices.reserve(reserve);
+        metrics.caretX.reserve(reserve);
+        addStop(0, 0.0f);
+        maxGlyphHeight = holder->faces.front().ascent - holder->faces.front().descent;
+        phase = Phase::Measure;
+    }
+
+    bool step(std::size_t budget, std::chrono::steady_clock::time_point deadline) {
+        if (!contextCurrent()) phase = Phase::Cancelled;
+        if (phase == Phase::Done || phase == Phase::Cancelled) return true;
+        if (!budget || std::chrono::steady_clock::now() >= deadline) return false;
+        std::scoped_lock lock(textCacheMutex());
+        if (!contextCurrent()) {
+            phase = Phase::Cancelled;
+            return true;
+        }
+        while (budget && std::chrono::steady_clock::now() < deadline) {
+            --budget;
+            if (phase == Phase::Initialize) {
+                initialize();
+            } else if (phase == Phase::Measure) {
+                if (nextByte < text.size()) {
+                    // Use the full source for emoji presentation lookahead, even at
+                    // a batch boundary; preserve makeTextMetrics' physical float order.
+                    const auto glyph = shapeNextWithFallback(*holder, text, nextByte,
+                        size, maxGlyphHeight, !textCacheDisabled());
+                    const float startX = cursorX;
+                    cursorX += glyph.advance;
+                    addStop(glyph.byteStart, startX);
+                    addStop(glyph.byteEnd, cursorX);
+                } else {
+                    metrics.width = cursorX;
+                    addStop(static_cast<int>(text.size()), cursorX);
+                    phase = Phase::Store;
+                }
+            } else if (phase == Phase::Store) {
+                if (cacheEnabled && !textCacheDisabled())
+                    sharedTextMetricsCache().insert(std::move(cacheKey), metrics);
+                phase = Phase::Scale;
+            } else if (phase == Phase::Scale) {
+                if (scale != 1.0f && scaleIndex < metrics.caretX.size()) {
+                    metrics.caretX[scaleIndex++] /= scale;
+                } else {
+                    if (scale != 1.0f) metrics.width /= scale;
+                    phase = Phase::Done;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+};
+
+TextPrimitive::MetricsCursor::MetricsCursor(std::string text, const std::string& fontFamily,
+                                            float fontSize, int fontWeight)
+    : impl_(std::make_unique<Impl>(std::move(text), fontFamily, fontSize, fontWeight)) {}
+TextPrimitive::MetricsCursor::~MetricsCursor() = default;
+TextPrimitive::MetricsCursor::MetricsCursor(MetricsCursor&&) noexcept = default;
+TextPrimitive::MetricsCursor& TextPrimitive::MetricsCursor::operator=(MetricsCursor&&) noexcept = default;
+bool TextPrimitive::MetricsCursor::step(std::size_t maxCodepoints,
+                                        std::chrono::steady_clock::time_point deadline) {
+    return !impl_ || impl_->step(maxCodepoints, deadline);
+}
+bool TextPrimitive::MetricsCursor::complete() const noexcept {
+    return impl_ && impl_->phase == Impl::Phase::Done && impl_->contextCurrent();
+}
+bool TextPrimitive::MetricsCursor::cancelled() const noexcept {
+    return !impl_ || impl_->phase == Impl::Phase::Cancelled || !impl_->contextCurrent();
+}
+TextPrimitive::TextMetrics TextPrimitive::MetricsCursor::takeMetrics() {
+    if (!complete()) return {};
+    return std::move(impl_->metrics);
+}
+
+
 Vec2 TextPrimitive::measureTextSize(const TextStyle& style) {
     const float scale = g_layoutPixelScale;
     if (scale == 1.0f) {
@@ -3289,13 +3583,24 @@ Vec2 TextPrimitive::measureTextSize(const TextStyle& style) {
 }
 
 Vec2 TextPrimitive::measureSingleLineInk(const TextStyle& style) {
+    TextStyle singleLine = style;
+    singleLine.wrap = false;
+    singleLine.maxWidth = 0;
+    // Preserve the existing API's first-explicit-line contract as well as its
+    // no-wrap behavior when the supplied source contains a newline.
+    if (const auto newline = singleLine.text.find('\n'); newline != std::string::npos)
+        singleLine.text.resize(newline);
+    return measureTextInk(singleLine);
+}
+
+Vec2 TextPrimitive::measureTextInk(const TextStyle& style) {
     std::scoped_lock lock(textCacheMutex());
     const float scale = std::max(.1f, layoutPixelScale());
     Impl probe;
     probe.style_ = style;
     probe.style_.fontSize = std::max(1.0f, style.fontSize * scale);
-    probe.style_.wrap = false;
-    probe.style_.maxWidth = 0;
+    probe.style_.maxWidth = style.maxWidth > 0 ? style.maxWidth * scale : 0;
+    probe.style_.lineHeight = style.lineHeight > 0 ? style.lineHeight * scale : 0;
     if (!probe.loadFont()) return {0, style.fontSize};
     // Weak ownership follows the font-stack cache, including unavailable-font
     // fingerprint refresh. Configuration generation also invalidates old bounds.
@@ -3306,6 +3611,8 @@ Vec2 TextPrimitive::measureSingleLineInk(const TextStyle& style) {
         float size;
         int weight;
         bool italic;
+        bool wrap;
+        float width, lineHeight;
         Vec2 pixels;
     };
     static std::vector<CachedInk> cache;
@@ -3313,20 +3620,31 @@ Vec2 TextPrimitive::measureSingleLineInk(const TextStyle& style) {
     for (const auto& entry : cache) {
         if (!textCacheDisabled() && entry.generation == generation && entry.holder.lock() == probe.fontInfoStorage_ &&
             entry.size == probe.style_.fontSize && entry.weight == style.fontWeight &&
-            entry.italic == style.fontItalic && entry.text == style.text)
+            entry.italic == style.fontItalic && entry.text == style.text && entry.wrap == style.wrap &&
+            entry.width == probe.style_.maxWidth && entry.lineHeight == probe.style_.lineHeight)
             return {entry.pixels.x / scale, entry.pixels.y / scale};
     }
     probe.rebuildLayout();
     Vec2 bounds{0, probe.style_.fontSize};
-    if (!probe.lines_.empty() && probe.lines_.front().hasInk)
-        bounds = {probe.lines_.front().inkTop, probe.lines_.front().inkBottom};
+    const float lineHeight = probe.style_.lineHeight > 0 ? probe.style_.lineHeight : probe.style_.fontSize * 1.2f;
+    bool found = false;
+    for (std::size_t index = 0; index < probe.lines_.size(); ++index) {
+        const auto& line = probe.lines_[index];
+        if (!line.hasInk) continue;
+        const float top = index * lineHeight + line.inkTop;
+        const float bottom = index * lineHeight + line.inkBottom;
+        if (!found) bounds = {top, bottom};
+        else { bounds.x = std::min(bounds.x, top); bounds.y = std::max(bounds.y, bottom); }
+        found = true;
+    }
     if (!textCacheDisabled() && style.text.size() <= 4096) {
         cache.erase(std::remove_if(cache.begin(), cache.end(), [generation](const CachedInk& entry) {
             return entry.generation != generation || entry.holder.expired();
         }), cache.end());
         if (cache.size() >= 128) cache.erase(cache.begin());
         cache.push_back({probe.fontInfoStorage_, generation, style.text, probe.style_.fontSize,
-                         style.fontWeight, style.fontItalic, bounds});
+                         style.fontWeight, style.fontItalic, style.wrap,
+                         probe.style_.maxWidth, probe.style_.lineHeight, bounds});
     }
     return {bounds.x / scale, bounds.y / scale};
 }
@@ -3410,6 +3728,48 @@ std::size_t neoTextCacheShapingHits() {
 std::size_t neoTextCacheShapingMisses() {
     std::scoped_lock lock(textCacheMutex());
     return static_cast<std::size_t>(sharedShapingCache().misses);
+}
+
+std::size_t neoGlyphAdvanceHits() {
+    std::scoped_lock lock(textCacheMutex());
+    return static_cast<std::size_t>(glyphAdvanceDebugStats().hits);
+}
+
+std::size_t neoGlyphAdvanceMisses() {
+    std::scoped_lock lock(textCacheMutex());
+    return static_cast<std::size_t>(glyphAdvanceDebugStats().misses);
+}
+
+std::size_t neoGlyphAdvanceCollisions() {
+    std::scoped_lock lock(textCacheMutex());
+    return static_cast<std::size_t>(glyphAdvanceDebugStats().collisions);
+}
+
+std::size_t neoGlyphAdvanceResidentBytes() {
+    std::scoped_lock lock(textCacheMutex());
+    const auto& budget = glyphAdvanceBudgetOwner();
+    return budget ? budget->currentBytes.load(std::memory_order_acquire) : 0;
+}
+
+std::size_t neoGlyphAdvanceLimitBytes() { return kGlyphAdvanceBudgetBytes; }
+
+std::size_t neoGlyphAdvanceAllocationFailures() {
+    std::scoped_lock lock(textCacheMutex());
+    return static_cast<std::size_t>(glyphAdvanceDebugStats().allocationFailures);
+}
+
+std::size_t neoGlyphAdvanceBudgetDenials() {
+    std::scoped_lock lock(textCacheMutex());
+    return static_cast<std::size_t>(glyphAdvanceDebugStats().budgetDenials);
+}
+
+void neoGlyphAdvanceResetStats() {
+    std::scoped_lock lock(textCacheMutex());
+    glyphAdvanceDebugStats().hits = 0;
+    glyphAdvanceDebugStats().misses = 0;
+    glyphAdvanceDebugStats().collisions = 0;
+    glyphAdvanceDebugStats().allocationFailures = 0;
+    glyphAdvanceDebugStats().budgetDenials = 0;
 }
 
 // 只清命中/未命中计数，缓存内容不动。

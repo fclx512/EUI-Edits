@@ -144,6 +144,22 @@ bool themeMetricsDriveComponentVisuals() {
            expectClose("markdown radius", markdown.radius, 7.0f);
 }
 
+bool squareCornerStyleZeroesRectangularTokens() {
+    components::theme::ThemeColorTokens tokens = components::theme::dark();
+    components::theme::applyCornerStyle(tokens.metrics, components::theme::CornerStyle::Square);
+    const components::theme::PageVisualTokens page = components::theme::pageVisuals(tokens);
+    const components::theme::FieldVisualTokens field = components::theme::fieldVisuals(tokens);
+    return expectClose("square page radius", page.sectionRounding, 0.0f) &&
+           expectClose("square field radius", field.rounding, 0.0f) &&
+           expectClose("square popup radius", field.popupRounding, 0.0f) &&
+           expectClose("square card token", tokens.metrics.radius.card, 0.0f) &&
+           expectClose("square overlay token", tokens.metrics.radius.overlay, 0.0f) &&
+           expectClose("square keeps pill token", tokens.metrics.radius.full, 999.0f) &&
+           expectClose("square hardcoded radius", components::theme::cornerRadius(tokens.metrics, 8.0f), 0.0f) &&
+           expectClose("rounded hardcoded radius",
+                       components::theme::cornerRadius(components::theme::dark().metrics, 8.0f), 8.0f);
+}
+
 } // namespace
 
 int main() {
@@ -153,5 +169,6 @@ int main() {
     ok = intrinsicLeafDoesNotFillColumn() && ok;
     ok = fillLeafStillUsesAvailableSize() && ok;
     ok = themeMetricsDriveComponentVisuals() && ok;
+    ok = squareCornerStyleZeroesRectangularTokens() && ok;
     return ok ? 0 : 1;
 }

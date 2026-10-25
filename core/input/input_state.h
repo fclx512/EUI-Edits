@@ -47,6 +47,11 @@ struct PointerState {
     bool dispatchedPositionValid = false;
     bool hasPosition = false;
     bool inside = false;
+    // Window-local visual position can continue across a native caption while
+    // client input remains outside. It never enters the interaction queue.
+    double visualX = 0.0;
+    double visualY = 0.0;
+    bool visualInside = false;
 };
 
 inline std::unordered_map<window::Handle, InputQueue>& inputQueues() {
@@ -153,6 +158,9 @@ inline void queuePointerMotion(window::Handle window,
     state.modifiers = modifiers;
     state.hasPosition = true;
     state.inside = true;
+    state.visualX = x;
+    state.visualY = y;
+    state.visualInside = true;
     detail::pushPointerEvent(state, {x, y, PointerAction::Move, PointerButton::None, buttons, modifiers});
 }
 
@@ -173,11 +181,38 @@ inline void queuePointerButton(window::Handle window,
     state.modifiers = modifiers;
     state.hasPosition = true;
     state.inside = true;
+    state.visualX = x;
+    state.visualY = y;
+    state.visualInside = true;
     detail::pushPointerEvent(state, {x, y, action, button, state.buttons, modifiers});
 }
 
 inline void queuePointerPresence(window::Handle window, bool inside) {
-    detail::pointerState(window).inside = inside;
+    detail::PointerState& state = detail::pointerState(window);
+    state.inside = inside;
+    if (!inside) state.visualInside = false;
+}
+
+inline void queueVisualPointerMotion(window::Handle window, double x, double y) {
+    detail::PointerState& state = detail::pointerState(window);
+    state.visualX = x;
+    state.visualY = y;
+    state.visualInside = true;
+}
+
+inline void queueVisualPointerPresence(window::Handle window, bool inside) {
+    detail::pointerState(window).visualInside = inside;
+}
+
+struct VisualPointerPosition {
+    double x = 0.0;
+    double y = 0.0;
+    bool inside = false;
+};
+
+inline VisualPointerPosition visualPointerPosition(window::Handle window, float pointerScale = 1.0f) {
+    const detail::PointerState& state = detail::pointerState(window);
+    return {state.visualX * pointerScale, state.visualY * pointerScale, state.visualInside};
 }
 
 inline void cancelPointerInput(window::Handle window) {
@@ -196,6 +231,7 @@ inline void cancelPointerInput(window::Handle window) {
         });
     }
     state.inside = false;
+    state.visualInside = false;
 }
 
 inline void queueTextInput(window::Handle window, const std::string& text) {

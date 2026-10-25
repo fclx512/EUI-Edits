@@ -8,8 +8,12 @@
 #include "eui/signal.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <functional>
+#include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -44,6 +48,11 @@ struct InputStyle {
     float radius = 10.0f;
 };
 
+struct InputWidthReflowSchedule {
+    std::uint64_t lastStepUpdate = std::numeric_limits<std::uint64_t>::max();
+    std::chrono::steady_clock::time_point nextSliceDue{};
+};
+
 class InputBuilder {
 public:
     InputBuilder(core::dsl::Ui& ui, std::string id)
@@ -76,6 +85,13 @@ public:
     InputBuilder& placeholder(std::string value) { placeholder_ = std::move(value); return *this; }
     InputBuilder& multiline(bool value = true) { multiline_ = value; return *this; }
     InputBuilder& wordWrap(bool value = true) { wordWrap_ = value; return *this; }
+    // Opt in only for a document editor. The serial identifies an app update,
+    // which may compose this input more than once.
+    InputBuilder& widthReflowFrameToken(std::uint64_t updateSerial) {
+        widthReflowEnabled_ = true;
+        widthReflowUpdateSerial_ = updateSerial;
+        return *this;
+    }
     InputBuilder& viewportMetrics(bool value = true) { viewportMetrics_ = value; return *this; }
     InputBuilder& typewriter(bool value = true) { typewriter_ = value; return *this; }
     InputBuilder& focusLine(bool value = true, bool animated = true) { focusLine_ = value; focusLineAnimated_ = animated; return *this; }
@@ -344,14 +360,172 @@ public:
         const auto snapshot = snapshotDecorator_ ? snapshotDecorator_(display.text, editInfo)
                                                   : input_detail::LineDecorationSnapshot{};
         const input_detail::LineDecorationView table = snapshot ? input_detail::LineDecorationView(snapshot.get()) : input_detail::LineDecorationView(decorations.empty() ? nullptr : &decorations);
-        // All pointer callbacks use the same frame's layout. In particular, a
-        // long cursor line's metrics must not be deep-copied into each closure.
-        // Keep the layout object alive after build() returns; its cache pointers
-        // retain their existing InputState lifetime and are replaced next frame.
+        bool widthReflowPending = false;
+        if (widthReflowEnabled_) {
+            if (multiline_ && wordWrap_ && !hasComposition) {
+                widthReflowPending = InputModel::requestWidthReflow(
+                    state, fontFamily, fontSize, textWidth, table, snapshot);
+                if (widthReflowPending) {
+                    auto& schedule = ui_.state<InputWidthReflowSchedule>(id_ + ".width-reflow-schedule");
+                    const auto now = std::chrono::steady_clock::now();
+                    if (schedule.lastStepUpdate != widthReflowUpdateSerial_ &&
+                        now >= schedule.nextSliceDue) {
+                        schedule.lastStepUpdate = widthReflowUpdateSerial_;
+                        // Manual scrolling keeps the top visible source byte at
+                        // roughly the same Y after the complete generation swaps.
+                        // Caret following retains its normal precedence.
+                        int anchorByte = -1;
+                        int anchorSourceStart = -1;
+                        int anchorTableId = -1;
+                        int anchorColumn = -1;
+                        float anchorOffset = 0.0f;
+                        if (!state.followCaret && !state.cachedLines.empty() &&
+                            state.cachedGeometry.count() == static_cast<int>(state.cachedLines.size())) {
+                            const int oldRow = std::clamp(
+                                state.cachedGeometry.lineAtY(state.verticalScroll),
+                                0, static_cast<int>(state.cachedLines.size()) - 1);
+                            const auto& oldLine = state.cachedLines[static_cast<std::size_t>(oldRow)];
+                            anchorByte = anchorSourceStart = oldLine.start;
+                            anchorOffset = state.verticalScroll - state.cachedGeometry.top(oldRow);
+                            if (oldLine.tableId >= 0) {
+                                // Every visual segment of a table source row has
+                                // the same start/end. Pick an active cell with the
+                                // widest byte span; an empty cell contributes only
+                                // a zero-span stop on segment zero.
+                                const auto& stops = oldLine.rare().tableDocCaretStops;
+                                int bestSpan = -1;
+                                for (std::size_t i = 0; i < stops.size();) {
+                                    const int column = stops[i].column;
+                                    int first = stops[i].byteIndex;
+                                    int last = first;
+                                    do {
+                                        first = std::min(first, stops[i].byteIndex);
+                                        last = std::max(last, stops[i].byteIndex);
+                                        ++i;
+                                    } while (i < stops.size() && stops[i].column == column);
+                                    if (last - first > bestSpan) {
+                                        bestSpan = last - first;
+                                        anchorByte = first;
+                                        anchorColumn = column;
+                                        anchorTableId = oldLine.tableId;
+                                    }
+                                }
+                            }
+                        }
+                        // The deadline is cooperative: a single text metrics call may
+                        // still run past it. The operation cap bounds the number of
+                        // such calls made by this compose.
+                        const auto result = InputModel::stepWidthReflow(
+                            state, now + std::chrono::milliseconds(3), 4096);
+                        if (result == InputModel::WidthReflowStep::Published &&
+                            anchorByte >= 0 && !state.cachedLines.empty() &&
+                            state.cachedGeometry.count() == static_cast<int>(state.cachedLines.size())) {
+                            const int lookupByte = anchorTableId >= 0 ? anchorSourceStart : anchorByte;
+                            const auto it = std::lower_bound(
+                                state.cachedLines.begin(), state.cachedLines.end(), lookupByte,
+                                [](const InputModel::TextLine& row, int byte) { return row.start < byte; });
+                            auto row = it != state.cachedLines.end() && it->start == lookupByte
+                                ? it : it == state.cachedLines.begin() ? it : std::prev(it);
+                            if (anchorTableId >= 0 && row != state.cachedLines.end() &&
+                                row->start == anchorSourceStart && row->tableId == anchorTableId) {
+                                const auto groupEnd = std::upper_bound(
+                                    row, state.cachedLines.end(), anchorSourceStart,
+                                    [](int byte, const InputModel::TextLine& line) {
+                                        return byte < line.start;
+                                    });
+                                const auto firstStopForColumn = [anchorColumn](const InputModel::TextLine& line)
+                                    -> std::optional<int> {
+                                    for (const auto& stop : line.rare().tableDocCaretStops)
+                                        if (stop.column == anchorColumn) return stop.byteIndex;
+                                    return std::nullopt;
+                                };
+                                // This cell's segments form a prefix. Another
+                                // column can keep the table row taller after it
+                                // ends, so search only rows with this cell active.
+                                const auto activeEnd = std::partition_point(row, groupEnd,
+                                    [&](const InputModel::TextLine& line) {
+                                        return line.tableId == anchorTableId &&
+                                            firstStopForColumn(line).has_value();
+                                    });
+                                if (activeEnd != row) {
+                                    const auto beyond = std::upper_bound(row, activeEnd, anchorByte,
+                                        [&](int byte, const InputModel::TextLine& line) {
+                                            return byte < *firstStopForColumn(line);
+                                        });
+                                    row = beyond == row ? row : std::prev(beyond);
+                                }
+                            }
+                            const int newIndex = static_cast<int>(row - state.cachedLines.begin());
+                            state.verticalScroll = std::max(
+                                0.0f, state.cachedGeometry.top(newIndex) + anchorOffset);
+                        }
+                        schedule.nextSliceDue = std::chrono::steady_clock::now() +
+                                                std::chrono::milliseconds(16);
+                        widthReflowPending = InputModel::widthReflowPending(state);
+                    }
+                }
+            } else {
+                InputModel::cancelWidthReflow(state);
+            }
+        } else {
+            // The same input ID can be reused after a Markdown document closes.
+            InputModel::cancelWidthReflow(state);
+        }
+        // All pointer callbacks use this frame's layout. The opt-in path retains
+        // a published generation so a later width publication or preedit reset
+        // cannot change the row table underneath an older callback.
         const auto callbackLayout = std::make_shared<const InputLayout>(InputLayout::build(
             display, textWidth, textHeight, width, inset, rightInset, textY, textLineHeight,
-            fontFamily_, fontSize, multiline_, table, snapshot, &decorationChanges));
+            fontFamily_, fontSize, multiline_, table, snapshot, &decorationChanges,
+            widthReflowEnabled_ && multiline_ && wordWrap_));
         const InputLayout& layout = *callbackLayout;
+        const auto preeditRangeForCallback = InputModel::selectionRange(state);
+        std::string preeditReplacedForCallback = hasComposition
+            ? state.text.substr(static_cast<std::size_t>(preeditRangeForCallback.first),
+                                static_cast<std::size_t>(preeditRangeForCallback.second -
+                                                         preeditRangeForCallback.first))
+            : std::string{};
+        const auto callbackContextCurrent =
+            [&state, callbackLayout, textRevision = state.textRevision,
+             compositionRevision = state.compositionRevision,
+             preeditOwner = hasComposition ? state.preedit.get() : nullptr,
+             preeditRange = preeditRangeForCallback,
+             preeditReplaced = std::move(preeditReplacedForCallback),
+             preeditText = hasComposition ? state.compositionText : std::string{},
+             hasComposition]() {
+                // An old width generation is safe while text and composition
+                // match. Font/DPI changes and a replaced preedit are not.
+                if (!callbackLayout->contextCurrent() ||
+                    state.textRevision != textRevision ||
+                    state.compositionRevision != compositionRevision) return false;
+                if (!hasComposition) {
+                    if (!callbackLayout->callbackOwner) return true;
+                    return callbackLayout->owner->text == state.text &&
+                        InputModel::activeDecorations(*callbackLayout->owner) ==
+                            InputModel::activeDecorations(state);
+                }
+                if (!state.preedit || state.preedit.get() != preeditOwner ||
+                    InputModel::selectionRange(state) != preeditRange ||
+                    state.compositionText != preeditText) return false;
+                if (!callbackLayout->callbackOwner) return true;
+                if (InputModel::activeDecorations(*callbackLayout->owner) !=
+                    InputModel::activeDecorations(*state.preedit)) return false;
+                // The owner already holds the full preedit display text. Only
+                // the replaced selection bytes are absent from it; capture
+                // that span, then compare all three committed-text regions.
+                if (preeditRange.first < 0 || preeditRange.second < preeditRange.first ||
+                    static_cast<std::size_t>(preeditRange.second) > state.text.size()) return false;
+                const auto begin = static_cast<std::size_t>(preeditRange.first);
+                const auto end = static_cast<std::size_t>(preeditRange.second);
+                const auto& shown = callbackLayout->owner->text;
+                if (shown.size() != state.text.size() - (end - begin) + preeditText.size())
+                    return false;
+                return shown.compare(0, begin, state.text, 0, begin) == 0 &&
+                    state.text.compare(begin, end - begin, preeditReplaced) == 0 &&
+                    shown.compare(begin, preeditText.size(), preeditText) == 0 &&
+                    shown.compare(begin + preeditText.size(), std::string::npos,
+                                  state.text, end, std::string::npos) == 0;
+            };
         // 输入光标用字体字号的近似高度；将它放到单行行盒中心，使其与由实际墨迹范围
         // 居中的文字共享同一中心。多行仍采用布局给出的行内坐标。
         const float cursorFontSize = layout.cursorLineFontSize();
@@ -385,12 +559,19 @@ public:
         // textWidth / fontSize 也要进 key：窗口缩放、改字号只改几何输入，textRevision 不动；
         // 漏了它们框架会认为"文本没变"，把旧字号/旧宽度的字形直接搬到新位置 —— 偶发的
         // "个别行字重合"就是这么来的。
+        // A pending frame already uses the requested width in this key. When its
+        // draft publishes, each retained text node must also see the new layout
+        // generation; changing only the parent key leaves its old run text alive.
         const std::string textDirtyKey = id_ + ".text|" + std::to_string(state.textRevision) + "|" +
             std::to_string(display.textRevision) + "|" + std::to_string(display.decorationRevision) +
             "|" + std::to_string(static_cast<int>(std::lround(state.horizontalScroll * 64.0f))) +
             "|" + std::to_string(static_cast<int>(std::lround(state.verticalScroll * 64.0f))) +
             "|" + std::to_string(static_cast<int>(std::lround(textWidth * 64.0f))) +
             "|" + std::to_string(static_cast<int>(std::lround(fontSize * 64.0f))) +
+            (widthReflowEnabled_
+                ? "|published:" + std::to_string(display.cachedLayoutGeneration) + ":" +
+                      std::to_string(static_cast<int>(std::lround(display.cachedViewportWidth * 64.0f)))
+                : std::string{}) +
             (wordWrap_ ? "|wrap" : "|nowrap") +
             (empty ? "|p" : "|v") + (hasComposition ? "|ime" : "") + placeholderKey;
         const float renderedTextHeight = multiline_ ? layout.contentHeight : textHeight;
@@ -411,6 +592,10 @@ public:
             .dirtyKey(InputModel::makeDirtyKey(state, focused, layout) +
                       "|d" + std::to_string(display.decorationRevision) +
                       (wordWrap_ ? "|wrap" : "|nowrap") +
+                      (widthReflowEnabled_
+                          ? (widthReflowPending ? "|reflow-pending" : "|reflow-idle") +
+                                std::string("|layout-width:") + std::to_string(display.cachedViewportWidth)
+                          : std::string{}) +
                       (typewriter_ ? "|typewriter" : "|normal") +
                       (focusLine_ ? (focusLineAnimated_ ? "|focus-animated" : "|focus-static") : "|unfocused-lines") +
                       (scrollbar_ ? "|bar" : "|no-bar") + placeholderKey +
@@ -432,6 +617,15 @@ public:
             });
         }
         root.content([&] {
+                if (widthReflowPending) {
+                    // Runtime timers sleep until the next slice. A separate child
+                    // keeps the root's caret-blink timer independent.
+                    ui_.rect(id_ + ".width-reflow-timer")
+                        .size(0.0f, 0.0f)
+                        .hitTestMode(core::dsl::HitTestMode::None)
+                        .onTimer(0.016f, [] {})
+                        .build();
+                }
                 // Keep the antialiased surface inside the input's scissor at
                 // fractional DPI. Pointer/IME bounds retain the full control size.
                 const float surfaceInset = 0.5f;
@@ -447,7 +641,8 @@ public:
                     .color(core::Color{0,0,0,0})
                     .focusable()
                     .imeRect(caretX, caretY, 1.5f, std::max(1.0f, layout.cursorLineHeight()))
-                    .onPress([&state, controlWidth, inset, baseInset, callbackLayout, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
+                    .onPress([&state, controlWidth, inset, baseInset, callbackLayout, callbackContextCurrent, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
+                        if (!callbackContextCurrent()) return;
                         const auto& layout = *callbackLayout;
                         state.lastBounds = bounds;
                         const InputModel::PointerHit hit =
@@ -495,14 +690,15 @@ public:
                             onPointerHit(payload);
                         }
                     })
-                    .onRelease([&state, callbackLayout, controlWidth, inset, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
-                        const auto& layout = *callbackLayout;
+                    .onRelease([&state, callbackLayout, callbackContextCurrent, controlWidth, inset, documentIndex, onPointerHit](const core::PointerEvent& event, const core::Rect& bounds) {
                         const int pressed = state.pressedGlyphLine;
                         const int pressedLink = state.pressedLinkByte;
                         state.pressedLinkByte = -1;
                         state.pressedGlyphLine = -1;
                         // 松手 = 拖选结束：显隐从下一帧起重新跟随实时光标。
                         state.selecting = false;
+                        if (!callbackContextCurrent()) return;
+                        const auto& layout = *callbackLayout;
                         if (pressedLink >= 0 && onPointerHit &&
                             bounds.contains(static_cast<float>(event.x), static_cast<float>(event.y)) &&
                             std::fabs(static_cast<float>(event.x) - state.pressedLinkX) < 4.0f &&
@@ -521,8 +717,9 @@ public:
                             }
                         }
                     })
-                    .onContextMenu([&state, controlWidth, inset, callbackLayout, documentIndex,
+                    .onContextMenu([&state, controlWidth, inset, callbackLayout, callbackContextCurrent, documentIndex,
                                     onContextMenu](const core::PointerEvent& event, const core::Rect& bounds) {
+                        if (!callbackContextCurrent()) return;
                         const auto& layout = *callbackLayout;
                         // 与左键同一套落点换算（IME 区间映射回文档坐标）。
                         const InputModel::PointerHit hit =
@@ -566,7 +763,8 @@ public:
                             state.pointerHoverLinkBeg = state.pointerHoverLinkEnd = -1;
                         }
                     })
-                    .onMove([&state, callbackLayout, controlWidth, inset](const core::PointerEvent& event, const core::Rect& bounds) {
+                    .onMove([&state, callbackLayout, callbackContextCurrent, controlWidth, inset](const core::PointerEvent& event, const core::Rect& bounds) {
+                        if (!callbackContextCurrent()) return false;
                         const auto& layout = *callbackLayout;
                         // 记下悬停位置并换算成可视行；行号位据此决定画箭头还是行号。
                         const float localY = static_cast<float>(event.y) - bounds.y;
@@ -585,7 +783,8 @@ public:
                         }
                         return false;
                     })
-                    .onDragUpdate([&state, controlWidth, inset, textWidth, fontSize, fontFamily, allowMultiline, textHeight, callbackLayout, documentIndex](const core::dsl::DragEvent& event) {
+                    .onDragUpdate([&state, controlWidth, inset, textWidth, fontSize, fontFamily, allowMultiline, textHeight, callbackLayout, callbackContextCurrent, documentIndex](const core::dsl::DragEvent& event) {
+                        if (!callbackContextCurrent()) return false;
                         const auto& layout = *callbackLayout;
                         const int oldPressedLinkByte = state.pressedLinkByte;
                         if (state.pressedLinkByte >= 0 &&
@@ -622,7 +821,8 @@ public:
                     // 设成 Hand（应用配置再把 Hand 映射成箭头），覆盖回去 = 悬停编辑区
                     // 显示 I-beam（否则全应用只有默认箭头，实测 2026-09-25）。
                     .cursor(cursor_)
-                    .cursorAt([callbackLayout, controlWidth, inset, cursor = cursor_](const core::PointerEvent& event, const core::Rect& bounds) {
+                    .cursorAt([callbackLayout, callbackContextCurrent, controlWidth, inset, cursor = cursor_](const core::PointerEvent& event, const core::Rect& bounds) {
+                        if (!callbackContextCurrent()) return cursor;
                         const auto& layout = *callbackLayout;
                         const auto hit = layout.pointerHit(event.x, event.y, bounds, controlWidth, inset);
                         if (hit.onGlyph || hit.onImage || hit.onLink) return core::CursorShape::Hand;
@@ -630,7 +830,8 @@ public:
                         return cursor;
                     });
                 if (allowMultiline && (layout.maxVerticalScroll > 0.0f || !state.wordWrap)) {
-                    hit.onScroll([&state, callbackLayout, fontSize](const core::ScrollEvent& event) {
+                    hit.onScroll([&state, callbackLayout, callbackContextCurrent, fontSize](const core::ScrollEvent& event) {
+                        if (!callbackContextCurrent()) return;
                         const auto& layout = *callbackLayout;
                         const float step = std::max(12.0f, fontSize * 2.2f);
                         state.followCaret = false;
@@ -1470,6 +1671,7 @@ public:
                         if (focused && InputModel::caretVisible(caretBlink_, focused, state)) {
                             // 光标高度跟随光标所在行的字号（标题行更高，行高不再全局统一）。
                             ui_.rect(id_ + ".cursor")
+                                .excludeFromBackdropSnapshot()
                                 .position(caretX - inset, caretY - textY)
                                 .size(1.5f, caretHeight)
                                 .color(style_.cursor)
@@ -1598,6 +1800,8 @@ private:
     std::string placeholder_ = "Hello EUI-NEO 😉";
     bool multiline_ = false;
     bool wordWrap_ = true;
+    bool widthReflowEnabled_ = false;
+    std::uint64_t widthReflowUpdateSerial_ = 0;
     bool caretBlink_ = false;
     core::CursorShape cursor_ = core::CursorShape::IBeam;
     bool scrollbar_ = false;

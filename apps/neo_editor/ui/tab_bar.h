@@ -49,7 +49,7 @@ inline TabActionsLayout tabActionsLayout(float left, float right) {
 inline void pinButtonView(eui::Ui& ui, const EditorColors& colors, float x, float height, bool interactive) {
     const bool pinned = platform::chrome::alwaysOnTop();
     platform::chrome::exclude(x + 1, 4, 26, height - 8);
-    ui.rect("menubar.tabs.pin.hit").position(x + 1, 4).size(26, height - 8).radius(7)
+    ui.rect("menubar.tabs.pin.hit").position(x + 1, 4).size(26, height - 8).radius(neo::corner(colors, 7.0f))
         .states(pinned ? core::mixColor(colors.editor, colors.accent, .18f) : transparentColor(),
                 colors.rowHover, colors.pressed)
         .preserveFocusOnPress().disabled(!interactive)
@@ -68,7 +68,7 @@ inline void pinButtonView(eui::Ui& ui, const EditorColors& colors, float x, floa
         const float width = std::max(60.0f, core::TextPrimitive::measureTextWidth(label, kUiFontFamily, 12) + 20);
         ui.stack("menubar.tabs.pin.tip").position(x + 28 - width, height + 4).size(width, 28)
             .zIndex(2800).hitTestMode(core::dsl::HitTestMode::None).content([&] {
-                ui.rect("menubar.tabs.pin.tip.bg").fill().radius(5).color(colors.panel)
+                ui.rect("menubar.tabs.pin.tip.bg").fill().radius(neo::corner(colors, 5.0f)).color(colors.panel)
                     .border(1, colors.border).build();
                 ui.text("menubar.tabs.pin.tip.label").fill()
                     .text(label)
@@ -389,7 +389,7 @@ inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
     // One closed face, with no bottom stroke. The lower concave shoulders and
     // upper convex corners share endpoints instead of overlapping clipped shapes.
     if (active && !placeholder) {
-        constexpr float r = 8.0f;
+        const float r = neo::corner(colors, 8.0f);
         constexpr float pi = 3.14159265358979323846f;
         const float topRadius = std::min(r, width * 0.5f);
         std::vector<core::Vec2> face;
@@ -424,7 +424,7 @@ inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
         .size(std::min(8.0f, width), 8.0f).color(hoverFill)
         .hitTestMode(core::dsl::HitTestMode::None).build();
     auto surface = ui.rect(id + ".surface");
-    surface.position(x, y).size(width, height).radius(8.0f)
+    surface.position(x, y).size(width, height).radius(neo::corner(colors, 8.0f))
         .color(hoverFill)
         .preserveFocusOnPress().disabled(!interactive)
         .onClick([&ui, &state, idValue = tab.id] {
@@ -555,7 +555,7 @@ inline void tabCard(eui::Ui& ui, AppState& state, const EditorColors& colors,
     if (showClose) {
         ui.rect(id + ".close.hit")
             .position(closeHitX, y + (height - closeWidth) * 0.5f)
-            .size(closeWidth, closeWidth).radius(6.0f)
+            .size(closeWidth, closeWidth).radius(neo::corner(colors, 6.0f))
             .states(transparentColor(), colors.rowHover, colors.pressed)
             .preserveFocusOnPress().disabled(!interactive)
             .onHover([&ui, idValue = tab.id](bool hovered) {
@@ -703,7 +703,7 @@ inline void tabList(eui::Ui& ui, AppState& state, const eui::Screen& screen,
             app::requestUpdate();
         })
         .content([&] {
-            ui.rect("menubar.tabs.list.bg").fill().radius(10.0f)
+            ui.rect("menubar.tabs.list.bg").fill().radius(neo::corner(colors, 10.0f))
                 .color(colors.panel).border(1.0f, colors.border)
                 .shadow(components::theme::popupShadow(colors.tokens)).build();
             ui.stack("menubar.tabs.list.rows")
@@ -734,7 +734,7 @@ inline void tabList(eui::Ui& ui, AppState& state, const eui::Screen& screen,
 
                         // 行命中层（在三个动作按钮之下）。
                         ui.rect(rowId + ".hit")
-                            .position(0.0f, cardTop).size(cardWidth, lm.cardHeight).radius(8.0f)
+                            .position(0.0f, cardTop).size(cardWidth, lm.cardHeight).radius(neo::corner(colors, 8.0f))
                             .color(active ? rgba(colors.accent.r, colors.accent.g, colors.accent.b, 0.12f)
                                           : colors.toolbar)
                             .border(1.0f, active ? rgba(colors.accent.r, colors.accent.g, colors.accent.b, 0.55f)
@@ -817,7 +817,7 @@ inline void tabList(eui::Ui& ui, AppState& state, const eui::Screen& screen,
                                                     UiIcon icon, bool enabled,
                                                     std::function<void()> onClick) {
                             ui.rect(buttonId).position(buttonX, actionsY).size(24.0f, 24.0f)
-                                .radius(5.0f).states(transparentColor(), colors.rowHover, colors.pressed)
+                                .radius(neo::corner(colors, 5.0f)).states(transparentColor(), colors.rowHover, colors.pressed)
                                 .preserveFocusOnPress().disabled(!interactive || !enabled)
                                 .onClick([onClick = std::move(onClick), interactive, enabled] {
                                     if (interactive && enabled) onClick();
@@ -915,7 +915,7 @@ inline void tabList(eui::Ui& ui, AppState& state, const eui::Screen& screen,
                     app::requestUpdate();
                 })
                 .content([&] {
-                    ui.rect("menubar.tabs.list.info.bg").fill().radius(8.0f)
+                    ui.rect("menubar.tabs.list.info.bg").fill().radius(neo::corner(colors, 8.0f))
                         .color(colors.panel).border(1.0f, colors.border)
                         .shadow(components::theme::popupShadow(colors.tokens)).build();
                     const float textX = 10.0f;
@@ -979,7 +979,7 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
 
     if (available > 0.0f) {
         ui.rect("menubar.tabs.region.bg").position(left - leftBleed, 2.0f)
-            .size(regionWidth + leftBleed + 8.0f, metrics.menuBarHeight - 4.0f).radius(10.0f)
+            .size(regionWidth + leftBleed + 8.0f, metrics.menuBarHeight - 4.0f).radius(neo::corner(colors, 10.0f))
             .color(railColor).build();
         if (flushVaultEdge) ui.rect("menubar.tabs.region.squareLeft").position(left, 2.0f)
             .size(std::min(10.0f, regionWidth), metrics.menuBarHeight - 4.0f)
@@ -1198,7 +1198,7 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
                 .position(ghostX, 3.0f).size(tab_bar_detail::kTabWidth, metrics.menuBarHeight - 3.0f)
                 .zIndex(2100).hitTestMode(core::dsl::HitTestMode::None)
                 .content([&] {
-                    ui.rect("menubar.tabs.dragGhost.bg").fill().radius(8.0f)
+                    ui.rect("menubar.tabs.dragGhost.bg").fill().radius(neo::corner(colors, 8.0f))
                         .color(colors.editor).border(1.0f, colors.accent)
                         .shadow(components::theme::popupShadow(colors.tokens)).build();
                     ui.text("menubar.tabs.dragGhost.label")
@@ -1214,8 +1214,12 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
     // Rounded action group, separated from both the tab shoulders and the
     // native window controls; keep the existing draggable space to its right.
     if (actions.showPin) {
+        // Keep the whole visible group in the client area. Caption seams cause
+        // WM_MOUSELEAVE to clear the shared pointer and interrupt Reveal light.
+        // Individual DSL hit boxes still own their actions and hover tooltips.
+        platform::chrome::exclude(newX, 3.0f, right - newX, metrics.menuBarHeight - 6.0f);
         ui.rect("menubar.tabs.actions.bg").position(newX, 3.0f)
-            .size(right - newX, metrics.menuBarHeight - 6.0f).radius(10.0f)
+            .size(right - newX, metrics.menuBarHeight - 6.0f).radius(neo::corner(colors, 10.0f))
             .color(core::mixColor(colors.toolbar, colors.editor, 0.72f))
             .border(1.0f, core::mixColor(colors.toolbar, colors.border, 0.65f))
             .hitTestMode(core::dsl::HitTestMode::None).build();
@@ -1224,7 +1228,7 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
         platform::chrome::exclude(newX, 4, buttonWidth-2, metrics.menuBarHeight-8);
         ui.rect("menubar.tabs.new.hit")
             .position(newX + 1.0f, 4.0f).size(buttonWidth - 2.0f, metrics.menuBarHeight - 8.0f)
-            .radius(7.0f).states(transparentColor(), colors.rowHover, colors.pressed)
+            .radius(neo::corner(colors, 7.0f)).states(transparentColor(), colors.rowHover, colors.pressed)
             .preserveFocusOnPress().disabled(!interactive)
             .onClick([&state, &ui, interactive] {
                 if (interactive) {
@@ -1242,7 +1246,7 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
         platform::chrome::exclude(listX, 4, buttonWidth-2, metrics.menuBarHeight-8);
         ui.rect("menubar.tabs.list.hit")
             .position(listX + 1.0f, 4.0f).size(buttonWidth - 2.0f, metrics.menuBarHeight - 8.0f)
-            .radius(7.0f).states(state.tabListOpen ? colors.rowHover : transparentColor(),
+            .radius(neo::corner(colors, 7.0f)).states(state.tabListOpen ? colors.rowHover : transparentColor(),
                                   colors.rowHover, colors.pressed)
             .preserveFocusOnPress().disabled(!interactive)
             .onClick([&state, &ui, interactive] {
@@ -1302,9 +1306,10 @@ inline void tabBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen,
             const float rootHeight = tab_bar_detail::wrappedHeight(rootText, uiFontFamily(state), fontSize, textWidth);
             const float tooltipHeight = 12.0f + pathHeight + rootHeight;
             ui.stack("menubar.tabs.tooltip")
+                .excludeFromBackdropSnapshot()
                 .position(x, y).size(tooltipWidth, tooltipHeight).zIndex(2600)
                 .content([&] {
-                    ui.rect("menubar.tabs.tooltip.bg").fill().radius(7.0f)
+                    ui.rect("menubar.tabs.tooltip.bg").fill().radius(neo::corner(colors, 7.0f))
                         .color(colors.panel).border(1.0f, colors.border)
                         .shadow(components::theme::popupShadow(colors.tokens)).build();
                     ui.text("menubar.tabs.tooltip.path")

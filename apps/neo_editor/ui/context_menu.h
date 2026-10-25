@@ -3,6 +3,7 @@
 #include "model/i18n.h"
 
 #include "components/contextmenu.h"
+#include "ui/popup_presentation.h"
 #include "model/link_target.h"
 #include "model/lp_decorations.h"
 #include "state/app_actions.h"
@@ -206,16 +207,17 @@ inline void editorContextMenuOverlay(eui::Ui& ui, AppState& state, const eui::Sc
     }
     const bool onLink = presentation.onLink;
 
-    components::contextMenu(ui, "editor.contextmenu")
+    auto menu = components::contextMenu(ui, "editor.contextmenu")
         .open(state.contextMenuOpen)
         .screen(screen.width, screen.height)
         .position(state.contextMenuX, state.contextMenuY)
         .size(metrics.menuWidth, metrics.menuItemHeight)
         .items(context_menu_detail::editorContextMenuItems(
             onLink, presentation.hasSelection, presentation.headingLevel))
-        .theme(menuTokens)
-        .transition(animationsEnabled(state) ? quickTransition() : core::Transition::none())
-        .skipClosedContent()
+        .theme(menuTokens);
+    popup_presentation::apply(menu, state,
+                          menuTokens, state.contextMenuOpen);
+    menu.skipClosedContent()
         .zIndex(1100)
         .onSelectPath([&state, onLink, &ui](const std::vector<int>& path) {
             context_menu_detail::dispatchEditorContextItem(state, path, onLink, ui);

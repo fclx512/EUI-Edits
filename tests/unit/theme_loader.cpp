@@ -371,6 +371,38 @@ void testUnicodePathAndCache(const fs::path& root) {
     check(neo::activeTheme().revision > 0, "reset 必须推进主题版本（否则缓存不重建）");
 }
 
+// ── ⑧ 界面风格轴：圆角 ↔ 直角只改几何，不动配色，缓存按风格版本失效 ───────
+void testUiStyleAxis() {
+    neo::themeloader::reset();
+    neo::setUiStyle(neo::UiStyle::Rounded);
+    const neo::EditorColors& rounded = neo::editorColors(neo::ThemeMode::Dark);
+    const std::string windowBefore = hexOf(rounded.window);
+    const float roundedCard = rounded.tokens.metrics.radius.card;
+    check(rounded.tokens.metrics.corners == components::theme::CornerStyle::Rounded,
+          "默认界面风格应为圆角");
+    check(roundedCard > 0.0f, "圆角模式下矩形控件半径应保持非零");
+
+    neo::setUiStyle(neo::UiStyle::Square);
+    const neo::EditorColors& square = neo::editorColors(neo::ThemeMode::Dark);
+    check(square.tokens.metrics.corners == components::theme::CornerStyle::Square,
+          "切直角后令牌应记录 CornerStyle::Square");
+    check(square.tokens.metrics.radius.card == 0.0f &&
+              square.tokens.metrics.radius.overlay == 0.0f &&
+              square.tokens.metrics.radius.section == 0.0f,
+          "直角模式应压平矩形控件半径");
+    check(square.tokens.metrics.radius.full == 999.0f,
+          "直角模式必须保留胶囊/滚动条的 full 半径");
+    check(components::theme::pageVisuals(square.tokens).sectionRounding == 0.0f &&
+              components::theme::fieldVisuals(square.tokens).rounding == 0.0f,
+          "页面/输入框派生半径应跟随直角模式");
+    check(hexOf(square.window) == windowBefore,
+          "切风格不得改变任何配色");
+
+    neo::setUiStyle(neo::UiStyle::Rounded);
+    check(neo::editorColors(neo::ThemeMode::Dark).tokens.metrics.radius.card == roundedCard,
+          "切回圆角后缓存应重建回原半径");
+}
+
 // ── ⑦ settings：解析 → 写出 → 换进程重读 ───────────────────────────────────
 void testSettingsRoundTrip(const fs::path& configRoot, const char* selfPath) {
     if (!redirectConfigTo(configRoot)) {
@@ -559,6 +591,7 @@ int main(int argc, char** argv) {
     testTypographyOverride();
     testErrorPaths(root);
     testUnicodePathAndCache(root);
+    testUiStyleAxis();
     testSettingsRoundTrip(root / "config", argv[0]);
     testDualAndObsidianImport(root);
 

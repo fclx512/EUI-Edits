@@ -92,7 +92,7 @@ int main() {
     if (!check(findSuffix(ui, ".level.1.item.0") != nullptr,
                "format submenu failed to open")) return 4;
 
-    // Closing still builds the disabled transition tree and clears cascades,
+    // Closing still builds the disabled transition tree and clears active paths,
     // while retaining the last open presentation without another LP query.
     state.contextMenuOpen = false;
     input.contextLinkByte = -1;
@@ -104,9 +104,10 @@ int main() {
     compose(ui, state);
     const auto& closing = ui.state<Presentation>("editor.contextmenu.presentation");
     auto* oldFirstItem = findSuffix(ui, ".level.0.item.0");
+    auto* closedHighlight = findSuffix(ui, ".level.0.highlight");
     if (!check(closing.onLink && closing.hasSelection && closing.headingLevel == 2 &&
                oldFirstItem && oldFirstItem->disabled &&
-               findSuffix(ui, ".level.0.highlight") == nullptr &&
+               closedHighlight && closedHighlight->opacity == 0.0f &&
                neo::lp::planCache().text == preeditText &&
                neo::lp::planCache().version == closingVersion &&
                neo::planDebugStats().full == closingFull,
@@ -123,7 +124,8 @@ int main() {
     if (!check(disabledCut && !disabledCut->disabled &&
                disabledCut->cursor == core::CursorShape::Arrow,
                "reopened menu cut row has wrong availability or visibility")) return 7;
-    if (!check(findSuffix(ui, ".level.0.highlight") == nullptr &&
+    auto* reopenedHighlight = findSuffix(ui, ".level.0.highlight");
+    if (!check(reopenedHighlight && reopenedHighlight->opacity == 0.0f &&
                findSuffix(ui, ".level.1.item.0") == nullptr,
                "reopened menu retained a stale active cascade")) return 8;
     return 0;

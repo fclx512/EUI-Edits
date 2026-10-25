@@ -282,6 +282,13 @@ public:
         }
 
         if (closeEnough(target_, target)) {
+            if (active_ && (!transition.enabled || !animateProperty || transition.durationSeconds <= 0.0f)) {
+                const bool changed = !closeEnough(current_, target_);
+                start_ = current_ = target_;
+                active_ = false;
+                elapsedSeconds_ = 0.0f;
+                return changed;
+            }
             return false;
         }
 

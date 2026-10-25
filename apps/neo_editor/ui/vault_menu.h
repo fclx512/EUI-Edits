@@ -4,6 +4,7 @@
 
 #include "components/button.h"
 #include "components/contextmenu.h"
+#include "ui/popup_presentation.h"
 #include "components/dialog.h"
 #include "components/input.h"
 #include "components/scroll.h"
@@ -88,15 +89,16 @@ inline void vaultContextMenuOverlay(eui::Ui& ui, AppState& state, const eui::Scr
     components::theme::ThemeColorTokens menuTokens = colors.tokens;
     menuTokens.metrics.typography.option = metrics.menuFontSize;
 
-    components::contextMenu(ui, "vault.contextmenu")
+    auto menu = components::contextMenu(ui, "vault.contextmenu")
         .open(state.vaultContextMenuOpen)
         .screen(screen.width, screen.height)
         .position(state.vaultContextMenuX, state.vaultContextMenuY)
         .size(metrics.menuWidth, metrics.menuItemHeight)
         .items(vault_menu_detail::vaultContextMenuItems(state.vaultContextIsDir))
-        .theme(menuTokens)
-        .transition(quickTransition())
-        .zIndex(1100)
+        .theme(menuTokens);
+    popup_presentation::apply(menu, state,
+                          menuTokens, state.vaultContextMenuOpen);
+    menu.zIndex(1100)
         .onSelectPath([&state](const std::vector<int>& path) {
             if (!path.empty()) {
                 vault_menu_detail::dispatchVaultContextItem(state, path[0]);
@@ -177,7 +179,7 @@ inline void vaultPromptOverlay(eui::Ui& ui, AppState& state, const eui::Screen& 
             inputStyle.focusBorder = colors.accent;
             inputStyle.text = colors.text;
             inputStyle.cursor = colors.accent;
-            inputStyle.radius = 6.0f;
+            inputStyle.radius = components::theme::cornerRadius(tokens.metrics, 6.0f);
             inputStyle.shadow = eui::Shadow{};
             components::input(ui, "vault.prompt.input")
                 .position(kPad, 54.0f)
@@ -232,7 +234,7 @@ inline void vaultPromptOverlay(eui::Ui& ui, AppState& state, const eui::Screen& 
                 .size(buttonWidth, 32.0f)
                 .text(i18n::tr("common.cancel"))
                 .fontSize(13.0f)
-                .radius(6.0f)
+                .radius(components::theme::cornerRadius(tokens.metrics, 6.0f))
                 .border(1.0f, tokens.border)
                 .shadow(0.0f, 0.0f, 0.0f, components::theme::color(0.0f, 0.0f, 0.0f, 0.0f))
                 .onClick([&state] { cancelVaultPrompt(state); })
@@ -245,7 +247,7 @@ inline void vaultPromptOverlay(eui::Ui& ui, AppState& state, const eui::Screen& 
                     (state.vaultRenameExtensionApprovalName == state.vaultPromptText && !state.vaultPromptText.empty()
                         ? i18n::tr("rename.confirm_extension") : i18n::tr("vault.rename")) : i18n::tr("vault.create"))
                 .fontSize(13.0f)
-                .radius(6.0f)
+                .radius(components::theme::cornerRadius(tokens.metrics, 6.0f))
                 .border(1.0f, components::theme::withAlpha(tokens.primary, 0.64f))
                 .shadow(10.0f, 0.0f, 3.0f, components::theme::withAlpha(tokens.primary, 0.18f))
                 .onClick(submit)

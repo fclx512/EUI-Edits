@@ -10,6 +10,7 @@
 #include "core/window/window_backend.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -883,6 +884,7 @@ struct TableColumns {
 // IDs are source anchors and may be sparse or change after an edit.
 using TableColumnIndex = std::unordered_map<int, std::size_t>;
 
+    struct WidthReflowJob;
     struct InputState {
         std::string text;
         std::string compositionText;
@@ -910,6 +912,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         std::string cachedFontFamily;
         float cachedFontSize = 0.0f;
         float cachedLayoutPixelScale = 0.0f;
+        std::uint64_t cachedFontConfigurationGeneration = 0;
         float cachedViewportWidth = -1.0f;
         bool cachedMultiline = false;
         std::string cachedLayoutText;
@@ -930,6 +933,12 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         std::vector<TableColumns> cachedTableIntrinsic;
         float cachedTextWidth = 0.0f;
         bool layoutCacheValid = false;
+        // Opt-in editor reflow keeps callback data from one completed generation alive.
+        // The normal synchronous input path does not allocate this snapshot.
+        std::uint64_t cachedLayoutGeneration = 0;
+        std::uint64_t callbackLayoutGeneration = static_cast<std::uint64_t>(-1);
+        std::shared_ptr<InputState> callbackLayoutOwner;
+        std::shared_ptr<WidthReflowJob> widthReflow;
         // ── Live Preview 装饰 ──
         // Legacy providers own a vector; snapshot providers leave it empty and share an
         // immutable generation. Read either representation through activeDecorations().
@@ -1020,6 +1029,9 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         // Single-line mode owns its metrics here. Multiline mapping uses the
         // owner's row cache; only the cursor row width is mirrored here.
         core::TextPrimitive::TextMetrics metrics;
+        // Callback closures can outlive both a width publication and InputState.
+        // Only the editor's explicit opt-in path populates this owner.
+        std::shared_ptr<InputState> callbackOwner;
         const std::vector<Line>* lines = nullptr;
         // 逐行几何（指向 state.cachedGeometry，生命周期由调用方保证，与 lines 同）。
         const LineGeometryTable* geometry = nullptr;
@@ -1069,7 +1081,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                  bool multiline,
                                  LineDecorationView decorations = {},
                                  const LineDecorationSnapshot& snapshot = {},
-                                 const LineDecorationChanges* changes = nullptr) {
+                                 const LineDecorationChanges* changes = nullptr,
+                                 bool allowPendingWidth = false) {
             InputLayout layout;
             layout.viewportWidth = viewportWidth;
             layout.viewportHeight = viewportHeight;
@@ -1079,18 +1092,23 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             layout.textTop = textTop;
             layout.lineHeight = lineHeight;
             layout.multiline = multiline;
-            ensureLayoutCache(state, fontFamily, fontSize, viewportWidth, multiline, decorations, snapshot, changes);
-            layout.owner = &state;
-            resetDetailTracking(state);
-            layout.lines = &state.cachedLines;
-            layout.geometry = &state.cachedGeometry;
+            if (!allowPendingWidth || !widthReflowPendingFor(state, fontFamily, fontSize,
+                    viewportWidth, multiline, decorations, snapshot)) {
+                cancelWidthReflow(state);
+                ensureLayoutCache(state, fontFamily, fontSize, viewportWidth, multiline, decorations, snapshot, changes);
+            }
+            if (allowPendingWidth) layout.callbackOwner = callbackLayoutSnapshot(state);
+            layout.owner = layout.callbackOwner ? layout.callbackOwner.get() : &state;
+            resetDetailTracking(*layout.owner);
+            layout.lines = &layout.owner->cachedLines;
+            layout.geometry = &layout.owner->cachedGeometry;
             // 表格列几何（画网格用）：empty 时给 nullptr，渲染层免判表。
-            layout.tables = state.cachedTables.empty() ? nullptr : &state.cachedTables;
-            layout.tableIndex = layout.tables ? &state.cachedTableIndex : nullptr;
+            layout.tables = layout.owner->cachedTables.empty() ? nullptr : &layout.owner->cachedTables;
+            layout.tableIndex = layout.tables ? &layout.owner->cachedTableIndex : nullptr;
 
             if (multiline) {
                 layout.cursorLine = layout.lineIndexFor(state.cursor);
-                ensureLineDetails(state, layout.cursorLine);
+                ensureLineDetails(*layout.owner, layout.cursorLine);
                 const Line& cursorLine = layout.lineList()[static_cast<size_t>(layout.cursorLine)];
                 // Multiline hit testing/selection/navigation already reads the
                 // detailed row cache. Keeping another owned pair of arrays in
@@ -1121,7 +1139,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 }
                 state.verticalScroll = std::clamp(state.verticalScroll, 0.0f, layout.maxVerticalScroll);
                 layout.currentVerticalScroll = state.verticalScroll;
-                prepareViewportDetails(state, viewportHeight);
+                layout.owner->verticalScroll = state.verticalScroll;
+                prepareViewportDetails(*layout.owner, viewportHeight);
                 // 光标 Y 跟随行内文字下移量（标题行的 padding-top 在文字上方，
                 // 光标要对着文字而不是行盒顶）。
                 const std::vector<Line>& cursorLineList = layout.lineList();
@@ -1185,7 +1204,17 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             return list[static_cast<std::size_t>(std::clamp(cursorLine, 0, static_cast<int>(list.size()) - 1))].fontSize;
         }
 
+        // Deferred compact caret data may be reconstructed only under the
+        // generation that measured the published geometry.
+        bool contextCurrent() const {
+            return !callbackOwner ||
+                (callbackOwner->cachedLayoutPixelScale == core::TextPrimitive::layoutPixelScale() &&
+                 callbackOwner->cachedFontConfigurationGeneration ==
+                    core::TextPrimitive::fontConfigurationGeneration());
+        }
+
         float xFor(int byteIndex) const {
+            if (!contextCurrent()) return 0.0f;
             const int lineIndex = lineIndexFor(byteIndex);
             if (owner) ensureLineDetails(*owner, lineIndex);
             const Line& line = lineList()[static_cast<size_t>(lineIndex)];
@@ -1203,6 +1232,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         // 命中的完整结果。cursorFromPointer 是它的 byteIndex 视图 —— 收口到同一处，
         // "回调给应用的字节位置 == cursorFromPointer 的结果"就恒成立，不靠两处同步。
         PointerHit pointerHit(double pointerX, double pointerY, const core::Rect& bounds, float width, float inputInset) const {
+            if (!contextCurrent()) return {};
             const float scale = width > 0.0f ? bounds.width / width : 1.0f;
             const float localX = static_cast<float>((pointerX - bounds.x) / std::max(0.001f, scale));
             const float localY = static_cast<float>((pointerY - bounds.y) / std::max(0.001f, scale));
@@ -1243,6 +1273,11 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         }
 
         int closestCaret(int lineIndex, float targetX) const {
+            if (!contextCurrent()) {
+                const auto& lines = lineList();
+                return lines.empty() ? 0 : lines[static_cast<std::size_t>(
+                    std::clamp(lineIndex, 0, static_cast<int>(lines.size()) - 1))].start;
+            }
             if (owner) ensureLineDetails(*owner, lineIndex);
             const std::vector<Line>& lineListRef = lineList();
             if (lineListRef.empty()) {
@@ -2248,6 +2283,165 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         }
     };
 
+    struct StyledReflowCursor {
+        enum class Phase { Whole, Scan, Segment, Done };
+        struct SegmentPlan { int from, to, docBeg, docEnd; bool hardBreak; };
+        Phase phase = Phase::Whole;
+        int start = 0, end = 0, visibleLen = 0;
+        bool hardBreakAfter = false;
+        float fontSize = 0.0f, lineHeight = 0.0f, wrapWidth = 0.0f;
+        core::Color color{0, 0, 0, 0};
+        std::string fontFamily;
+        std::vector<LineHole> holes;
+        std::vector<LineRun> runs;
+        std::vector<VisiblePiece> pieces;
+        std::optional<StyledProjection> projection;
+        StyledLineLayout whole;
+        StyledLineLayout partial;
+        std::vector<SegmentPlan> plans;
+        std::vector<TextLine> readyLines;
+        std::size_t pieceIndex = 0, scanIndex = 1, planIndex = 0;
+        int segmentProjected = 0, previousProjected = 0, previousDocumentEnd = 0;
+        float segmentStartX = 0.0f;
+        float wholeWidth = 0.0f;
+        bool padded = false;
+        bool cancelled = false;
+        std::unique_ptr<core::TextPrimitive::MetricsCursor> activeMetrics;
+    };
+
+    struct PlainReflowCursor {
+        enum class Phase { Whole, Scan, Segment, Done };
+        struct SegmentPlan { int from, to, docBeg, docEnd; bool hardBreak; };
+        Phase phase = Phase::Whole;
+        int start = 0, end = 0, visibleLen = 0;
+        bool hardBreakAfter = false;
+        float fontSize = 0.0f, lineHeight = 0.0f, wrapWidth = 0.0f;
+        core::Color color{0, 0, 0, 0};
+        std::string fontFamily, visible;
+        std::vector<LineHole> holes;
+        core::TextPrimitive::TextMetrics whole;
+        std::vector<SegmentPlan> plans;
+        std::vector<TextLine> readyLines;
+        std::size_t scanIndex = 1, planIndex = 0;
+        int segmentProjected = 0, previousProjected = 0, previousDocumentEnd = 0;
+        float segmentStartX = 0.0f;
+        bool cancelled = false;
+        std::unique_ptr<core::TextPrimitive::MetricsCursor> metricCursor;
+        std::unique_ptr<core::TextPrimitive::MetricsCursor> segmentCursor;
+    };
+
+    struct TableCellSegments {
+        std::vector<StyledLineLayout> segs;
+        std::vector<int> segFrom;
+        float cellOffset = 0.0f;
+        int visBeg = 0, visEnd = 0;
+        bool empty = false;
+        std::vector<LineHole> cellHoles;
+    };
+
+    struct TableRowReflowCursor {
+        enum class Phase { Cells, Assembly, Done };
+        Phase phase = Phase::Cells;
+        int start = 0, end = 0, columns = 0;
+        bool hardBreakAfter = false;
+        float lineFontSize = 0.0f, lineHeight = 0.0f, rowWidth = 0.0f;
+        core::Color lineColor{0, 0, 0, 0};
+        std::string fontFamily;
+        const TableColumns* table = nullptr;
+        const LineDecoration* decoration = nullptr;
+        std::vector<LineHole> holes;
+        std::vector<LineRun> runs;
+        std::vector<TableCellSegments> cells;
+        std::unique_ptr<StyledReflowCursor> activeCell;
+        std::size_t maxSegments = 1, nextVisual = 0;
+        int nextColumn = 0;
+        std::vector<TextLine> readyLines;
+    };
+
+    enum class WidthReflowStep { Idle, Yield, Published, Cancelled };
+
+    struct WidthReflowJob {
+        std::string text;
+        std::string fontFamily;
+        float fontSize = 0.0f;
+        float width = 0.0f;
+        float pixelScale = 0.0f;
+        std::uint64_t fontConfigurationGeneration = 0;
+        unsigned long long textRevision = 0;
+        unsigned long long compositionRevision = 0;
+        bool compactMetrics = false;
+        LineDecorationSnapshot decorationSnapshot;
+        std::vector<LineDecoration> decorationRows;
+        std::vector<TableColumns> intrinsic;
+        std::vector<TableColumns> tables;
+        TableColumnIndex tableIndex;
+        std::vector<TextLine> lines;
+        LineGeometryTable geometry;
+        int nextByte = 0;
+        int nextSourceLine = 0;
+        bool tablePlanReady = false;
+        bool rowsComplete = false;
+        bool geometryComplete = false;
+        float textWidth = 0.0f;
+        std::size_t topCursor = 0;
+        std::unique_ptr<StyledReflowCursor> styled;
+        std::unique_ptr<PlainReflowCursor> plain;
+        std::unique_ptr<TableRowReflowCursor> tableRow;
+        std::shared_ptr<InputState> preparedCallbackOwner;
+        std::size_t callbackLineCursor = 0;
+        std::size_t callbackDecorationCursor = 0;
+        bool callbackMetadataReady = false;
+
+        LineDecorationView decorations() const {
+            return decorationSnapshot ? LineDecorationView(*decorationSnapshot)
+                                      : LineDecorationView(decorationRows);
+        }
+    };
+
+    template<bool Indexed>
+    static void appendStyledRangePiece(StyledLineLayout& layout,
+                                      const std::string& value,
+                                      int lineBeg,
+                                      const std::vector<LineHole>& holes,
+                                      const VisiblePiece& piece,
+                                      int visBeg, int visEnd,
+                                      float fontSize,
+                                      const std::string& defaultFontFamily,
+                                      const StyledProjection* projection,
+                                      bool padded,
+                                      core::TextPrimitive::TextMetrics* premeasured = nullptr) {
+        const int from = std::max(piece.visibleBeg, visBeg);
+        const int to = std::min(piece.visibleEnd, visEnd);
+        if (to <= from) return;
+        const int docBeg = std::max(lineBeg, Indexed ? projection->documentOffset(from) : unprojectVisible(holes, lineBeg, from));
+        const int docEnd = std::max(docBeg, Indexed ? projection->documentOffset(to) : unprojectVisible(holes, lineBeg, to));
+        const std::string text = Indexed ? projection->text.substr(static_cast<std::size_t>(from), static_cast<std::size_t>(to - from)) : holes.empty()
+            ? value.substr(static_cast<std::size_t>(docBeg), static_cast<std::size_t>(docEnd - docBeg))
+            : projectText(value, docBeg, docEnd, holes);
+        const LineRunStyle style = piece.style != nullptr ? *piece.style : LineRunStyle{};
+        const std::string family = style.fontFamily.empty() ? defaultFontFamily : style.fontFamily;
+        core::TextPrimitive::TextMetrics pieceMetrics = premeasured
+            ? std::move(*premeasured) : measureMetrics(text, family, fontSize, style.weight);
+        const float spacing = inlineChipSpacing(style, fontSize);
+        float x = layout.metrics.width + spacing;
+        const std::size_t stops = std::min(pieceMetrics.byteIndices.size(), pieceMetrics.caretX.size());
+        for (std::size_t i = 0; i < stops; ++i) {
+            const int byte = from - visBeg + pieceMetrics.byteIndices[i];
+            const float caret = x + pieceMetrics.caretX[i];
+            if (padded) {
+                const bool duplicate = !layout.metrics.byteIndices.empty() && layout.metrics.byteIndices.back() == byte;
+                overrideCaretStop(layout.metrics, byte, caret);
+                if (duplicate) layout.wrapBegins.back() = caret - spacing;
+                else {
+                    layout.wrapBegins.push_back(caret - spacing);
+                    layout.wrapEnds.push_back(caret + spacing);
+                }
+            } else addCaretStop(layout.metrics, byte, caret);
+        }
+        layout.runs.push_back({docBeg, docEnd, x, pieceMetrics.width, style});
+        layout.metrics.width = x + pieceMetrics.width + spacing;
+    }
+
     template<bool Indexed>
     static StyledLineLayout layoutStyledRangeImpl(const std::string& value,
                                               int lineBeg,
@@ -2263,50 +2457,11 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         const bool padded = std::any_of(pieces.begin(), pieces.end(), [](const VisiblePiece& piece) {
             return piece.style && piece.style->background.a > 0.0f;
         });
-        float x = 0.0f;
         for (const VisiblePiece& piece : pieces) {
-            const int from = std::max(piece.visibleBeg, visBeg);
-            const int to = std::min(piece.visibleEnd, visEnd);
-            if (to <= from) {
-                continue;
-            }
-            const int docBeg = std::max(lineBeg, Indexed ? projection->documentOffset(from) : unprojectVisible(holes, lineBeg, from));
-            const int docEnd = std::max(docBeg, Indexed ? projection->documentOffset(to) : unprojectVisible(holes, lineBeg, to));
-            const std::string text = Indexed ? projection->text.substr(static_cast<std::size_t>(from), static_cast<std::size_t>(to - from)) : holes.empty()
-                ? value.substr(static_cast<std::size_t>(docBeg), static_cast<std::size_t>(docEnd - docBeg))
-                : projectText(value, docBeg, docEnd, holes);
-            const LineRunStyle style = piece.style != nullptr ? *piece.style : LineRunStyle{};
-            const std::string family = style.fontFamily.empty() ? defaultFontFamily : style.fontFamily;
-            const core::TextPrimitive::TextMetrics pieceMetrics = measureMetrics(text, family, fontSize, style.weight);
-            const float spacing = inlineChipSpacing(style, fontSize);
-            x += spacing;
-            const std::size_t stops = std::min(pieceMetrics.byteIndices.size(), pieceMetrics.caretX.size());
-            for (std::size_t i = 0; i < stops; ++i) {
-                const int byte = from - visBeg + pieceMetrics.byteIndices[i];
-                const float caret = x + pieceMetrics.caretX[i];
-                if (padded) {
-                    const bool duplicate = !layout.metrics.byteIndices.empty() && layout.metrics.byteIndices.back() == byte;
-                    overrideCaretStop(layout.metrics, byte, caret);
-                    if (duplicate) {
-                        layout.wrapBegins.back() = caret - spacing;
-                    } else {
-                        layout.wrapBegins.push_back(caret - spacing);
-                        layout.wrapEnds.push_back(caret + spacing);
-                    }
-                } else {
-                    addCaretStop(layout.metrics, byte, caret);
-                }
-            }
-            TextRun run;
-            run.beg = docBeg;
-            run.end = docEnd;
-            run.x = x;
-            run.width = pieceMetrics.width;
-            run.style = style;
-            layout.runs.push_back(std::move(run));
-            x += pieceMetrics.width + spacing;
+            appendStyledRangePiece<Indexed>(layout, value, lineBeg, holes, piece,
+                                            visBeg, visEnd, fontSize, defaultFontFamily,
+                                            projection, padded);
         }
-        layout.metrics.width = x;
         (void) lineEnd;
         return layout;
     }
@@ -2319,6 +2474,482 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                               const std::string& defaultFontFamily) {
         return layoutStyledRangeImpl<false>(value, lineBeg, lineEnd, holes, pieces,
                                             visBeg, visEnd, fontSize, defaultFontFamily, nullptr);
+    }
+
+    static std::unique_ptr<StyledReflowCursor> beginStyledReflowCursor(
+            const std::string& value, int start, int end, bool hardBreakAfter,
+            float defaultFontSize, float viewportWidth, const std::string& fontFamily,
+            const LineDecoration& decoration) {
+        auto cursor = std::make_unique<StyledReflowCursor>();
+        cursor->start = start;
+        cursor->end = end;
+        cursor->hardBreakAfter = hardBreakAfter;
+        cursor->fontSize = decoration.fontSize > 0.0f ? decoration.fontSize : defaultFontSize;
+        cursor->lineHeight = decoration.lineHeight > 0.0f
+            ? decoration.lineHeight : cursor->fontSize * 1.2f;
+        cursor->color = decoration.textColor;
+        cursor->fontFamily = decoration.rare().fontFamily.empty()
+            ? fontFamily : decoration.rare().fontFamily;
+        cursor->holes = clipHoles(normalizeHoles(decoration.holes), start, end);
+        cursor->runs = decoration.runs;
+        cursor->visibleLen = visibleLength(cursor->holes, start, end);
+        cursor->pieces = buildVisiblePieces(cursor->holes, start, end, cursor->runs);
+        if (cursor->pieces.empty() || cursor->visibleLen <= 0) return {};
+        cursor->padded = std::any_of(cursor->pieces.begin(), cursor->pieces.end(),
+            [](const VisiblePiece& piece) { return piece.style && piece.style->background.a > 0.0f; });
+        if (cursor->holes.size() >= 32 && cursor->pieces.size() >= 32 && viewportWidth > 1.0f)
+            cursor->projection.emplace(value, start, end, cursor->holes);
+        LineGlyph glyph = decoration.glyph;
+        float indent = std::max(0.0f, decoration.contentIndent);
+        if (decoration.listIndentBeg >= 0 && decoration.listIndentEnd > decoration.listIndentBeg &&
+            decoration.listIndentEnd <= static_cast<int>(value.size())) {
+            const std::string source = value.substr(static_cast<std::size_t>(decoration.listIndentBeg),
+                static_cast<std::size_t>(decoration.listIndentEnd - decoration.listIndentBeg));
+            const float bodyColumn = core::TextPrimitive::measureTextWidth(source,
+                cursor->fontFamily, cursor->fontSize);
+            if (!glyph.text.empty() && glyph.codepoint == 0 && glyph.advance <= 0.0f)
+                glyph.advance = bodyColumn;
+            else indent += bodyColumn;
+        }
+        const float reserved = indent + glyphAdvanceOf(glyph, cursor->fontSize);
+        cursor->wrapWidth = reserved > 0.0f ? std::max(0.0f, viewportWidth - reserved) : viewportWidth;
+        cursor->previousDocumentEnd = start;
+        return cursor;
+    }
+
+    static bool advanceStyledReflowPiece(StyledReflowCursor& cursor,
+            StyledLineLayout& destination, const std::string& value,
+            int visBeg, int visEnd, std::chrono::steady_clock::time_point deadline) {
+        const VisiblePiece& piece = cursor.pieces[cursor.pieceIndex];
+        const int from = std::max(piece.visibleBeg, visBeg);
+        const int to = std::min(piece.visibleEnd, visEnd);
+        if (to <= from) { ++cursor.pieceIndex; return true; }
+        if (!cursor.activeMetrics) {
+            const int docBeg = std::max(cursor.start, cursor.projection
+                ? cursor.projection->documentOffset(from)
+                : unprojectVisible(cursor.holes, cursor.start, from));
+            const int docEnd = std::max(docBeg, cursor.projection
+                ? cursor.projection->documentOffset(to)
+                : unprojectVisible(cursor.holes, cursor.start, to));
+            std::string text = cursor.projection
+                ? cursor.projection->text.substr(static_cast<std::size_t>(from),
+                                                  static_cast<std::size_t>(to - from))
+                : cursor.holes.empty()
+                    ? value.substr(static_cast<std::size_t>(docBeg),
+                                   static_cast<std::size_t>(docEnd - docBeg))
+                    : projectText(value, docBeg, docEnd, cursor.holes);
+            if (text.size() > 1024) {
+                const LineRunStyle style = piece.style ? *piece.style : LineRunStyle{};
+                const std::string family = style.fontFamily.empty()
+                    ? cursor.fontFamily : style.fontFamily;
+                cursor.activeMetrics = std::make_unique<core::TextPrimitive::MetricsCursor>(
+                    std::move(text), family, cursor.fontSize,
+                    style.weight > 0 ? style.weight : 400);
+            }
+        }
+        core::TextPrimitive::TextMetrics metrics;
+        core::TextPrimitive::TextMetrics* measured = nullptr;
+        if (cursor.activeMetrics) {
+            if (!cursor.activeMetrics->step(128, deadline)) return false;
+            if (!cursor.activeMetrics->complete()) {
+                cursor.cancelled = true;
+                return false;
+            }
+            metrics = cursor.activeMetrics->takeMetrics();
+            measured = &metrics;
+        }
+        if (cursor.projection)
+            appendStyledRangePiece<true>(destination, value, cursor.start,
+                cursor.holes, piece, visBeg, visEnd, cursor.fontSize,
+                cursor.fontFamily, &*cursor.projection, cursor.padded, measured);
+        else appendStyledRangePiece<false>(destination, value, cursor.start,
+                cursor.holes, piece, visBeg, visEnd, cursor.fontSize,
+                cursor.fontFamily, nullptr, cursor.padded, measured);
+        cursor.activeMetrics.reset();
+        ++cursor.pieceIndex;
+        return true;
+    }
+
+    // One operation performs at most one styled piece or 128 glyphs in a long
+    // piece, 256 wrap-stop checks, or one segment finalization.
+    static bool advanceStyledReflowCursor(StyledReflowCursor& cursor,
+                                          const std::string& value,
+                                          std::chrono::steady_clock::time_point deadline) {
+        if (cursor.phase == StyledReflowCursor::Phase::Whole) {
+            if (cursor.pieceIndex < cursor.pieces.size()) {
+                advanceStyledReflowPiece(cursor, cursor.whole, value,
+                                         0, cursor.visibleLen, deadline);
+                return false;
+            }
+            if (cursor.wrapWidth <= 1.0f || cursor.whole.metrics.byteIndices.size() <= 2 ||
+                cursor.whole.metrics.width <= cursor.wrapWidth) {
+                cursor.wholeWidth = cursor.whole.metrics.width;
+                cursor.readyLines.push_back({cursor.start, cursor.end, cursor.hardBreakAfter,
+                    std::move(cursor.whole.metrics), cursor.fontSize, cursor.lineHeight, 0.0f,
+                    cursor.holes, cursor.color, std::move(cursor.whole.runs)});
+                cursor.phase = StyledReflowCursor::Phase::Done;
+                return true;
+            }
+            cursor.wholeWidth = cursor.whole.metrics.width;
+            cursor.phase = StyledReflowCursor::Phase::Scan;
+            return false;
+        }
+        if (cursor.phase == StyledReflowCursor::Phase::Scan) {
+            const auto count = std::min(cursor.whole.metrics.byteIndices.size(),
+                                        cursor.whole.metrics.caretX.size());
+            const std::size_t limit = std::min(count, cursor.scanIndex + 256);
+            for (; cursor.scanIndex < limit; ++cursor.scanIndex) {
+                const int stop = cursor.whole.metrics.byteIndices[cursor.scanIndex];
+                const float x = cursor.whole.wrapEndAt(cursor.scanIndex);
+                if (cursor.previousProjected > cursor.segmentProjected &&
+                    x - cursor.segmentStartX > cursor.wrapWidth) {
+                    const int docBeg = std::max(cursor.previousDocumentEnd,
+                        unprojectVisible(cursor.holes, cursor.start, cursor.segmentProjected));
+                    const int docEnd = std::max(docBeg,
+                        unprojectVisible(cursor.holes, cursor.start, cursor.previousProjected));
+                    cursor.plans.push_back({cursor.segmentProjected, cursor.previousProjected,
+                                            docBeg, docEnd, false});
+                    cursor.previousDocumentEnd = docEnd;
+                    cursor.segmentProjected = cursor.previousProjected;
+                    cursor.segmentStartX = cursor.whole.wrapStartAt(cursor.segmentProjected);
+                }
+                cursor.previousProjected = stop;
+            }
+            if (cursor.scanIndex == count) {
+                if (cursor.segmentProjected < cursor.visibleLen) {
+                    const int docBeg = std::max(cursor.previousDocumentEnd,
+                        unprojectVisible(cursor.holes, cursor.start, cursor.segmentProjected));
+                    cursor.plans.push_back({cursor.segmentProjected, cursor.visibleLen,
+                                            docBeg, cursor.end, cursor.hardBreakAfter});
+                }
+                cursor.phase = StyledReflowCursor::Phase::Segment;
+                cursor.pieceIndex = 0;
+            }
+            return false;
+        }
+        if (cursor.phase == StyledReflowCursor::Phase::Segment) {
+            if (cursor.planIndex >= cursor.plans.size()) {
+                cursor.phase = StyledReflowCursor::Phase::Done;
+                return true;
+            }
+            const auto& plan = cursor.plans[cursor.planIndex];
+            while (cursor.pieceIndex < cursor.pieces.size() &&
+                   cursor.pieces[cursor.pieceIndex].visibleEnd <= plan.from) ++cursor.pieceIndex;
+            if (cursor.pieceIndex < cursor.pieces.size() &&
+                cursor.pieces[cursor.pieceIndex].visibleBeg < plan.to) {
+                advanceStyledReflowPiece(cursor, cursor.partial, value,
+                                         plan.from, plan.to, deadline);
+                return false;
+            }
+            cursor.readyLines.push_back({plan.docBeg, plan.docEnd, plan.hardBreak,
+                std::move(cursor.partial.metrics), cursor.fontSize, cursor.lineHeight, 0.0f,
+                clipHoles(cursor.holes, plan.docBeg, plan.docEnd), cursor.color,
+                std::move(cursor.partial.runs)});
+            cursor.partial = {};
+            ++cursor.planIndex;
+            // A piece crossing the segment edge must be visited again.
+            if (cursor.pieceIndex > 0 && cursor.pieces[cursor.pieceIndex - 1].visibleEnd > plan.to)
+                --cursor.pieceIndex;
+            return false;
+        }
+        return true;
+    }
+
+    static std::unique_ptr<TableRowReflowCursor> beginTableRowReflowCursor(
+            int start, int end, bool hardBreakAfter, float defaultFontSize,
+            const std::string& fontFamily, const TableColumns& table,
+            const LineDecoration& decoration) {
+        auto cursor = std::make_unique<TableRowReflowCursor>();
+        cursor->start = start;
+        cursor->end = end;
+        cursor->hardBreakAfter = hardBreakAfter;
+        cursor->lineFontSize = decoration.fontSize > 0.0f ? decoration.fontSize : defaultFontSize;
+        cursor->lineHeight = decoration.lineHeight > 0.0f
+            ? decoration.lineHeight : cursor->lineFontSize * 1.2f;
+        cursor->lineColor = decoration.textColor;
+        cursor->fontFamily = decoration.rare().fontFamily.empty()
+            ? fontFamily : decoration.rare().fontFamily;
+        cursor->table = &table;
+        cursor->decoration = &decoration;
+        cursor->columns = std::min(table.count(), static_cast<int>(decoration.cells.size()));
+        cursor->holes = clipHoles(normalizeHoles(decoration.holes), start, end);
+        cursor->runs = decoration.runs;
+        cursor->cells.resize(static_cast<std::size_t>(cursor->columns));
+        return cursor;
+    }
+
+    static std::unique_ptr<StyledReflowCursor> beginTableCellReflowCursor(
+            const std::string& value, const TableRowReflowCursor& row,
+            const LineCell& cell, float columnWidth) {
+        auto cursor = std::make_unique<StyledReflowCursor>();
+        cursor->start = cell.beg;
+        cursor->end = cell.end;
+        cursor->fontSize = row.lineFontSize;
+        cursor->lineHeight = row.lineHeight;
+        cursor->fontFamily = row.fontFamily;
+        cursor->holes = row.holes;
+        cursor->runs = row.runs;
+        cursor->visibleLen = visibleLength(cursor->holes, cell.beg, cell.end);
+        cursor->pieces = buildVisiblePieces(cursor->holes, cell.beg, cell.end, cursor->runs);
+        if (cursor->pieces.empty()) return {};
+        cursor->padded = std::any_of(cursor->pieces.begin(), cursor->pieces.end(),
+            [](const VisiblePiece& piece) { return piece.style && piece.style->background.a > 0.0f; });
+        cursor->wrapWidth = columnWidth;
+        cursor->previousDocumentEnd = cell.beg;
+        (void)value;
+        return cursor;
+    }
+
+    static bool advanceTableRowCells(TableRowReflowCursor& row,
+                                     const std::string& value,
+                                     std::chrono::steady_clock::time_point deadline) {
+        if (row.nextColumn >= row.columns) {
+            row.phase = TableRowReflowCursor::Phase::Assembly;
+            return false;
+        }
+        const int c = row.nextColumn;
+        const LineCell& cell = row.decoration->cells[static_cast<std::size_t>(c)];
+        const float columnX = row.table->x[static_cast<std::size_t>(c)];
+        const float columnWidth = row.table->width[static_cast<std::size_t>(c)];
+        row.rowWidth = std::max(row.rowWidth, columnX + columnWidth);
+        TableCellSegments& wrapped = row.cells[static_cast<std::size_t>(c)];
+        if (!row.activeCell) {
+            wrapped.cellHoles = clipHoles(row.holes, cell.beg, cell.end);
+            wrapped.visBeg = visibleLength(row.holes, row.start, cell.beg);
+            wrapped.visEnd = visibleLength(row.holes, row.start, cell.end);
+            if (cell.beg >= cell.end) {
+                wrapped.empty = true;
+                ++row.nextColumn;
+                return false;
+            }
+            row.activeCell = beginTableCellReflowCursor(value, row, cell, columnWidth);
+            if (!row.activeCell) {
+                wrapped.empty = true;
+                ++row.nextColumn;
+                return false;
+            }
+        }
+        if (!advanceStyledReflowCursor(*row.activeCell, value, deadline)) return false;
+        const auto& active = *row.activeCell;
+        if (cell.align == 2 || cell.align == 3) {
+            const float contentWidth = std::min(active.wholeWidth, columnWidth);
+            wrapped.cellOffset = cell.align == 2 ? (columnWidth - contentWidth) * 0.5f
+                                                 : columnWidth - contentWidth;
+        }
+        wrapped.segs.reserve(active.readyLines.size());
+        wrapped.segFrom.reserve(active.readyLines.size());
+        for (std::size_t i = 0; i < active.readyLines.size(); ++i) {
+            TextLine& line = row.activeCell->readyLines[i];
+            StyledLineLayout segment;
+            segment.metrics.width = line.metrics.width;
+            auto& details = line.metrics.editDetails();
+            segment.metrics.byteIndices = std::move(details.byteIndices);
+            segment.metrics.caretX = std::move(details.caretX);
+            segment.runs = std::move(line.editPresentation().runs);
+            wrapped.segs.push_back(std::move(segment));
+            wrapped.segFrom.push_back(active.plans.empty() ? 0 : active.plans[i].from);
+        }
+        if (active.plans.empty()) ++debugLayoutStats().tableWholeCellReused;
+        row.maxSegments = std::max(row.maxSegments, wrapped.segs.size());
+        row.activeCell.reset();
+        ++row.nextColumn;
+        return false;
+    }
+
+    static bool advanceTableRowAssembly(TableRowReflowCursor& row) {
+        if (row.nextVisual >= row.maxSegments) {
+            row.phase = TableRowReflowCursor::Phase::Done;
+            return true;
+        }
+        const std::size_t v = row.nextVisual++;
+        core::TextPrimitive::TextMetrics metrics;
+        std::vector<TextRun> outRuns;
+        std::vector<TableDocCaretStop> docStops;
+        const bool lastSegment = v + 1 == row.maxSegments;
+        for (int c = 0; c < row.columns; ++c) {
+            const float columnX = row.table->x[static_cast<std::size_t>(c)];
+            TableCellSegments& wrapped = row.cells[static_cast<std::size_t>(c)];
+            if (wrapped.empty) {
+                if (v == 0) {
+                    overrideCaretStop(metrics, wrapped.visBeg, columnX);
+                    docStops.push_back({row.decoration->cells[static_cast<std::size_t>(c)].beg,
+                                        columnX, c});
+                }
+                continue;
+            }
+            if (v >= wrapped.segs.size()) {
+                overrideCaretStop(metrics, wrapped.visEnd, columnX);
+                continue;
+            }
+            StyledLineLayout& segment = wrapped.segs[v];
+            const int segBase = wrapped.visBeg + wrapped.segFrom[v];
+            const std::size_t stops = std::min(segment.metrics.byteIndices.size(),
+                                               segment.metrics.caretX.size());
+            for (std::size_t i = 0; i < stops; ++i) {
+                const int cellVisibleOffset = wrapped.segFrom[v] + segment.metrics.byteIndices[i];
+                overrideCaretStop(metrics, segBase + segment.metrics.byteIndices[i],
+                                  columnX + wrapped.cellOffset + segment.metrics.caretX[i]);
+                docStops.push_back({unprojectVisible(wrapped.cellHoles,
+                    row.decoration->cells[static_cast<std::size_t>(c)].beg, cellVisibleOffset),
+                    columnX + wrapped.cellOffset + segment.metrics.caretX[i], c});
+            }
+            for (TextRun& run : segment.runs) {
+                if (run.beg >= run.end) continue;
+                run.x += columnX + wrapped.cellOffset;
+                outRuns.push_back(std::move(run));
+            }
+        }
+        metrics.width = row.rowWidth;
+        const float paddingY = std::max(0.0f, row.decoration->textShiftY);
+        const float textLineHeight = std::max(1.0f, row.lineHeight - 2.0f * paddingY);
+        const float segmentHeight = textLineHeight + (v == 0 ? paddingY : 0.0f)
+            + (lastSegment ? paddingY : 0.0f);
+        row.readyLines.push_back({row.start, row.end, row.hardBreakAfter && lastSegment,
+            std::move(metrics), row.lineFontSize, segmentHeight, 0.0f,
+            row.holes, row.lineColor, std::move(outRuns)});
+        row.readyLines.back().editRare().tableDocCaretStops = std::move(docStops);
+        row.readyLines.back().editRare().textBandHeight = textLineHeight;
+        row.readyLines.back().editRare().tableCellRanges.assign(row.decoration->cells.begin(),
+            row.decoration->cells.begin() + row.columns);
+        return false;
+    }
+
+    static std::unique_ptr<PlainReflowCursor> beginPlainReflowCursor(
+            const std::string& value, int start, int end, bool hardBreakAfter,
+            float defaultFontSize, float viewportWidth, const std::string& fontFamily,
+            const LineDecoration* decoration) {
+        auto cursor = std::make_unique<PlainReflowCursor>();
+        cursor->start = start;
+        cursor->end = end;
+        cursor->hardBreakAfter = hardBreakAfter;
+        cursor->fontSize = decoration && decoration->fontSize > 0.0f
+            ? decoration->fontSize : defaultFontSize;
+        cursor->lineHeight = decoration && decoration->lineHeight > 0.0f
+            ? decoration->lineHeight : cursor->fontSize * 1.2f;
+        cursor->fontFamily = decoration && !decoration->rare().fontFamily.empty()
+            ? decoration->rare().fontFamily : fontFamily;
+        if (decoration) {
+            cursor->color = decoration->textColor;
+            cursor->holes = clipHoles(normalizeHoles(decoration->holes), start, end);
+        }
+        cursor->visible = cursor->holes.empty()
+            ? value.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start))
+            : projectText(value, start, end, cursor->holes);
+        cursor->visibleLen = static_cast<int>(cursor->visible.size());
+        LineGlyph glyph;
+        float indent = 0.0f;
+        if (decoration) {
+            glyph = decoration->glyph;
+            indent = decoration->contentIndent > 0.0f ? decoration->contentIndent : 0.0f;
+            if (decoration->listIndentBeg >= 0 && decoration->listIndentEnd > decoration->listIndentBeg &&
+                decoration->listIndentEnd <= static_cast<int>(value.size())) {
+                const std::string source = value.substr(static_cast<std::size_t>(decoration->listIndentBeg),
+                    static_cast<std::size_t>(decoration->listIndentEnd - decoration->listIndentBeg));
+                const float bodyColumn = core::TextPrimitive::measureTextWidth(source,
+                    cursor->fontFamily, cursor->fontSize);
+                if (!glyph.text.empty() && glyph.codepoint == 0 && glyph.advance <= 0.0f)
+                    glyph.advance = bodyColumn;
+                else indent += bodyColumn;
+            }
+        }
+        const float reserved = indent + glyphAdvanceOf(glyph, cursor->fontSize);
+        cursor->wrapWidth = reserved > 0.0f ? std::max(0.0f, viewportWidth - reserved) : viewportWidth;
+        cursor->previousDocumentEnd = start;
+        cursor->metricCursor = std::make_unique<core::TextPrimitive::MetricsCursor>(
+            cursor->visible, cursor->fontFamily, cursor->fontSize);
+        return cursor;
+    }
+
+    // Chunks only the whole-line stop plan; each published wrapped segment is
+    // still measured from its exact source slice by the synchronous oracle API.
+    static bool advancePlainReflowCursor(PlainReflowCursor& cursor,
+                                         const std::string& value,
+                                         std::chrono::steady_clock::time_point deadline) {
+        if (cursor.phase == PlainReflowCursor::Phase::Whole) {
+            if (!cursor.metricCursor->step(128, deadline)) return false;
+            if (!cursor.metricCursor->complete()) {
+                cursor.cancelled = true;
+                return false;
+            }
+            cursor.whole = cursor.metricCursor->takeMetrics();
+            cursor.metricCursor.reset();
+            if (cursor.wrapWidth <= 1.0f || cursor.whole.byteIndices.size() <= 2 ||
+                cursor.whole.width <= cursor.wrapWidth) {
+                cursor.readyLines.push_back({cursor.start, cursor.end, cursor.hardBreakAfter,
+                    std::move(cursor.whole), cursor.fontSize, cursor.lineHeight, 0.0f,
+                    cursor.holes, cursor.color, {}});
+                cursor.phase = PlainReflowCursor::Phase::Done;
+                return true;
+            }
+            cursor.phase = PlainReflowCursor::Phase::Scan;
+            return false;
+        }
+        if (cursor.phase == PlainReflowCursor::Phase::Scan) {
+            const auto count = std::min(cursor.whole.byteIndices.size(), cursor.whole.caretX.size());
+            const std::size_t limit = std::min(count, cursor.scanIndex + 256);
+            for (; cursor.scanIndex < limit; ++cursor.scanIndex) {
+                const int stop = cursor.whole.byteIndices[cursor.scanIndex];
+                const float x = cursor.whole.caretX[cursor.scanIndex];
+                if (cursor.previousProjected > cursor.segmentProjected &&
+                    x - cursor.segmentStartX > cursor.wrapWidth) {
+                    const int docBeg = std::max(cursor.previousDocumentEnd,
+                        unprojectVisible(cursor.holes, cursor.start, cursor.segmentProjected));
+                    const int docEnd = std::max(docBeg,
+                        unprojectVisible(cursor.holes, cursor.start, cursor.previousProjected));
+                    cursor.plans.push_back({cursor.segmentProjected, cursor.previousProjected,
+                                            docBeg, docEnd, false});
+                    cursor.previousDocumentEnd = docEnd;
+                    cursor.segmentProjected = cursor.previousProjected;
+                    cursor.segmentStartX = caretXInMetrics(cursor.whole, cursor.segmentProjected);
+                }
+                cursor.previousProjected = stop;
+            }
+            if (cursor.scanIndex == count) {
+                if (cursor.segmentProjected < cursor.visibleLen || cursor.visible.empty()) {
+                    const int docBeg = std::max(cursor.previousDocumentEnd,
+                        unprojectVisible(cursor.holes, cursor.start, cursor.segmentProjected));
+                    cursor.plans.push_back({cursor.segmentProjected, cursor.visibleLen,
+                                            docBeg, cursor.end, cursor.hardBreakAfter});
+                }
+                cursor.phase = PlainReflowCursor::Phase::Segment;
+            }
+            return false;
+        }
+        if (cursor.phase == PlainReflowCursor::Phase::Segment) {
+            if (cursor.planIndex >= cursor.plans.size()) {
+                cursor.phase = PlainReflowCursor::Phase::Done;
+                return true;
+            }
+            const auto& plan = cursor.plans[cursor.planIndex];
+            core::TextPrimitive::TextMetrics metrics;
+            if (cursor.segmentCursor) {
+                if (!cursor.segmentCursor->step(128, deadline)) return false;
+                if (!cursor.segmentCursor->complete()) {
+                    cursor.cancelled = true;
+                    return false;
+                }
+                metrics = cursor.segmentCursor->takeMetrics();
+                cursor.segmentCursor.reset();
+            } else {
+                std::string text = cursor.holes.empty()
+                    ? value.substr(static_cast<std::size_t>(plan.docBeg),
+                                   static_cast<std::size_t>(plan.docEnd - plan.docBeg))
+                    : projectText(value, plan.docBeg, plan.docEnd, cursor.holes);
+                if (text.size() > 1024) {
+                    cursor.segmentCursor = std::make_unique<core::TextPrimitive::MetricsCursor>(
+                        std::move(text), cursor.fontFamily, cursor.fontSize);
+                    return false;
+                }
+                metrics = measureMetrics(text, cursor.fontFamily, cursor.fontSize);
+            }
+            cursor.readyLines.push_back({plan.docBeg, plan.docEnd, plan.hardBreak,
+                std::move(metrics), cursor.fontSize,
+                cursor.lineHeight, 0.0f,
+                clipHoles(cursor.holes, plan.docBeg, plan.docEnd), cursor.color, {}});
+            ++cursor.planIndex;
+            return false;
+        }
+        return true;
     }
 
     // 记下"这一次排版用的装饰"。内容变了就推进版本号——渲染侧的 dirtyKey 靠它决定要不要
@@ -2581,10 +3212,292 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         state.cachedTextWidth = width;
         if (geometryChanged) rebuildGeometry(state, fontSize * 1.2f);
         setDecorations(state, *snapshot, snapshot);
+        ++state.cachedLayoutGeneration;
         ++debugLayoutStats().incremental;
         ++debugLayoutStats().cursorPatched;
         debugLayoutStats().cursorMeasuredRows += changes.rows.size();
         return true;
+    }
+
+    static void cancelWidthReflow(InputState& state) { state.widthReflow.reset(); }
+
+    static bool widthReflowPending(const InputState& state) { return !!state.widthReflow; }
+
+    static bool widthReflowPendingFor(const InputState& state,
+                                      const std::string& fontFamily, float fontSize,
+                                      float width, bool multiline,
+                                      LineDecorationView decorations = {},
+                                      const LineDecorationSnapshot& snapshot = {}) {
+        const auto& job = state.widthReflow;
+        const LineDecorationView next = decorations ? decorations : LineDecorationView{};
+        return job && multiline && state.wordWrap && state.layoutCacheValid &&
+            state.cachedMultiline && state.cachedViewportMetrics == compactMetricsEnabled(state) &&
+            state.cachedTextRevision == state.textRevision &&
+            state.cachedLayoutText == state.text && job->text == state.text &&
+            job->textRevision == state.textRevision &&
+            job->compositionRevision == state.compositionRevision &&
+            job->fontFamily == fontFamily && state.cachedFontFamily == fontFamily &&
+            job->fontSize == fontSize && std::fabs(state.cachedFontSize - fontSize) < 0.001f &&
+            job->width == width && job->pixelScale == core::TextPrimitive::layoutPixelScale() &&
+            job->fontConfigurationGeneration == core::TextPrimitive::fontConfigurationGeneration() &&
+            state.cachedFontConfigurationGeneration == job->fontConfigurationGeneration &&
+            state.cachedLayoutPixelScale == job->pixelScale &&
+            job->compactMetrics == compactMetricsEnabled(state) &&
+            job->decorations() == next && activeDecorations(state) == next &&
+            (!snapshot || !job->decorationSnapshot ||
+             LineDecorationView(*snapshot) == job->decorations());
+    }
+
+    // Returns true only if a private width draft is pending after the call.
+    // A return to the already-published width cancels an older draft.
+    static bool requestWidthReflow(InputState& state, const std::string& fontFamily,
+                                   float fontSize, float targetWidth,
+                                   LineDecorationView decorations = {},
+                                   const LineDecorationSnapshot& snapshot = {}) {
+        if (state.layoutCacheValid && state.cachedMultiline && state.wordWrap &&
+            std::fabs(state.cachedViewportWidth - targetWidth) < 0.001f) {
+            cancelWidthReflow(state);
+            return false;
+        }
+        if (widthReflowPendingFor(state, fontFamily, fontSize, targetWidth, true,
+                                  decorations, snapshot)) return true;
+        cancelWidthReflow(state);
+        const LineDecorationView next = decorations ? decorations : LineDecorationView{};
+        if (!state.layoutCacheValid || !state.cachedMultiline || !state.wordWrap ||
+            state.cachedViewportWidth <= 1.0f || targetWidth <= 1.0f ||
+            state.cachedTextRevision != state.textRevision ||
+            state.cachedLayoutText != state.text ||
+            state.cachedFontFamily != fontFamily ||
+            std::fabs(state.cachedFontSize - fontSize) >= 0.001f ||
+            state.cachedLayoutPixelScale != core::TextPrimitive::layoutPixelScale() ||
+            state.cachedFontConfigurationGeneration != core::TextPrimitive::fontConfigurationGeneration() ||
+            state.cachedViewportMetrics != compactMetricsEnabled(state) ||
+            activeDecorations(state) != next) return false;
+        // The previous completed layout owns every table's unconstrained plan.
+        // An absent plan for a decorated table would require a whole-table scan;
+        // let the existing synchronous path handle that unusual case.
+        if (state.cachedTableIntrinsic.empty() &&
+            std::any_of(next.begin(), next.end(), [](const LineDecoration& row) {
+                return row.tableId >= 0 && !row.cells.empty();
+            })) return false;
+        auto job = std::make_shared<WidthReflowJob>();
+        job->text = state.text;
+        job->fontFamily = fontFamily;
+        job->fontSize = fontSize;
+        job->width = targetWidth;
+        job->pixelScale = core::TextPrimitive::layoutPixelScale();
+        job->fontConfigurationGeneration = core::TextPrimitive::fontConfigurationGeneration();
+        job->textRevision = state.textRevision;
+        job->compositionRevision = state.compositionRevision;
+        job->compactMetrics = compactMetricsEnabled(state);
+        if (snapshot) job->decorationSnapshot = snapshot;
+        else job->decorationRows = next.copyRows();
+        job->intrinsic = state.cachedTableIntrinsic;
+        state.widthReflow = std::move(job);
+        return true;
+    }
+
+    static WidthReflowStep stepWidthReflow(InputState& state,
+                      std::chrono::steady_clock::time_point deadline,
+                      std::size_t opBudget) {
+        if (!state.widthReflow) return WidthReflowStep::Idle;
+        auto job = state.widthReflow;
+        if (!widthReflowPendingFor(state, job->fontFamily, job->fontSize,
+                                   job->width, true, job->decorations(), job->decorationSnapshot)) {
+            cancelWidthReflow(state);
+            return WidthReflowStep::Cancelled;
+        }
+        std::optional<core::TextPrimitive::FontResolutionScope> fontScope;
+        if (!job->decorations().empty()) fontScope.emplace();
+        while (opBudget && std::chrono::steady_clock::now() < deadline) {
+            --opBudget;
+            if (!job->tablePlanReady) {
+                job->tables = job->intrinsic;
+                for (std::size_t i = 0; i < job->tables.size(); ++i)
+                    job->tableIndex.emplace(job->tables[i].tableId, i);
+                constrainTableColumns(job->tables, job->fontSize, job->width);
+                job->tablePlanReady = true;
+                continue;
+            }
+            if (!job->rowsComplete) {
+                const int start = job->nextByte;
+                const std::size_t newline = job->text.find('\n', static_cast<std::size_t>(start));
+                const int end = newline == std::string::npos
+                    ? static_cast<int>(job->text.size()) : static_cast<int>(newline);
+                const auto view = job->decorations();
+                const LineDecoration* decoration =
+                    job->nextSourceLine < static_cast<int>(view.size())
+                        ? &view[static_cast<std::size_t>(job->nextSourceLine)] : nullptr;
+                const TableColumns* table = decoration && decoration->tableId >= 0
+                    ? findTableColumns(job->tables, job->tableIndex, decoration->tableId) : nullptr;
+                if (!job->tableRow && table && decoration &&
+                    std::any_of(decoration->cells.begin(), decoration->cells.end(),
+                        [](const LineCell& cell) { return cell.end - cell.beg > 1024; })) {
+                    job->tableRow = beginTableRowReflowCursor(start, end,
+                        newline != std::string::npos, job->fontSize, job->fontFamily,
+                        *table, *decoration);
+                    continue;
+                }
+                if (job->tableRow) {
+                    auto& row = *job->tableRow;
+                    const bool done = row.phase == TableRowReflowCursor::Phase::Cells
+                        ? advanceTableRowCells(row, job->text, deadline)
+                        : row.phase == TableRowReflowCursor::Phase::Assembly
+                            ? advanceTableRowAssembly(row) : true;
+                    if (row.activeCell && row.activeCell->cancelled) {
+                        cancelWidthReflow(state);
+                        return WidthReflowStep::Cancelled;
+                    }
+                    if (!done) continue;
+                }
+                if (!job->styled && decoration && table == nullptr &&
+                    !decoration->runs.empty() && end - start > 1024) {
+                    job->styled = beginStyledReflowCursor(job->text, start, end,
+                        newline != std::string::npos, job->fontSize, job->width,
+                        job->fontFamily, *decoration);
+                    if (job->styled) continue;
+                }
+                if (!job->styled && !job->plain && table == nullptr &&
+                    (!decoration || decoration->runs.empty()) && end - start > 1024) {
+                    job->plain = beginPlainReflowCursor(job->text, start, end,
+                        newline != std::string::npos, job->fontSize, job->width,
+                        job->fontFamily, decoration);
+                    continue;
+                }
+                if (job->styled) {
+                    const bool done = advanceStyledReflowCursor(*job->styled, job->text, deadline);
+                    if (job->styled->cancelled) {
+                        cancelWidthReflow(state);
+                        return WidthReflowStep::Cancelled;
+                    }
+                    if (!done) continue;
+                }
+                if (job->plain) {
+                    const bool done = advancePlainReflowCursor(*job->plain, job->text, deadline);
+                    if (job->plain->cancelled) {
+                        cancelWidthReflow(state);
+                        return WidthReflowStep::Cancelled;
+                    }
+                    if (!done) continue;
+                }
+                const std::size_t firstNew = job->lines.size();
+                appendMeasuredLine(job->lines, job->text, start, end,
+                    newline != std::string::npos, job->fontSize, job->fontSize * 1.2f,
+                    job->fontFamily, job->width, decoration,
+                    job->nextSourceLine + 1, table, !job->compactMetrics || table != nullptr,
+                    job->tableRow ? &job->tableRow->readyLines
+                    : job->styled ? &job->styled->readyLines
+                    : job->plain ? &job->plain->readyLines : nullptr);
+                for (std::size_t i = firstNew; i < job->lines.size(); ++i)
+                    job->textWidth = std::max(job->textWidth, job->lines[i].metrics.width);
+                job->styled.reset();
+                job->plain.reset();
+                job->tableRow.reset();
+                if (newline == std::string::npos) job->rowsComplete = true;
+                else {
+                    job->nextByte = end + 1;
+                    ++job->nextSourceLine;
+                }
+                continue;
+            }
+            if (!job->geometryComplete) {
+                std::vector<float> heights, spaces;
+                heights.reserve(job->lines.size());
+                spaces.reserve(job->lines.size());
+                for (const auto& line : job->lines) {
+                    heights.push_back(line.hidden ? 0.0f :
+                        (line.lineHeight > 0.0f ? line.lineHeight : job->fontSize * 1.2f));
+                    spaces.push_back(line.hidden ? 0.0f : std::max(0.0f, line.spaceBefore));
+                }
+                job->geometry.build(heights, spaces);
+                job->geometryComplete = true;
+                continue;
+            }
+            if (job->topCursor < job->lines.size()) {
+                const auto limit = std::min(job->lines.size(), job->topCursor + 256);
+                for (; job->topCursor < limit; ++job->topCursor)
+                    job->lines[job->topCursor].top =
+                        job->geometry.top(static_cast<int>(job->topCursor));
+                continue;
+            }
+            if (!job->preparedCallbackOwner) {
+                auto owner = std::make_shared<InputState>();
+                owner->text = job->text;
+                owner->cachedLayoutText = job->text;
+                owner->textRevision = job->textRevision;
+                owner->compositionRevision = job->compositionRevision;
+                owner->cachedTextRevision = job->textRevision;
+                owner->wordWrap = true;
+                owner->viewportMetrics = job->compactMetrics;
+                owner->cachedViewportMetrics = job->compactMetrics;
+                owner->cachedMultiline = true;
+                owner->cachedFontFamily = job->fontFamily;
+                owner->cachedFontSize = job->fontSize;
+                owner->cachedViewportWidth = job->width;
+                owner->cachedLayoutPixelScale = job->pixelScale;
+                owner->cachedFontConfigurationGeneration = job->fontConfigurationGeneration;
+                owner->cachedTextWidth = job->textWidth;
+                owner->layoutCacheValid = true;
+                owner->cachedLayoutGeneration = state.cachedLayoutGeneration + 1;
+                owner->cachedLines.reserve(job->lines.size());
+                if (job->decorationSnapshot) owner->decorationSnapshot = job->decorationSnapshot;
+                else owner->decorations.reserve(job->decorationRows.size());
+                job->preparedCallbackOwner = std::move(owner);
+                continue;
+            }
+            if (job->callbackLineCursor < job->lines.size()) {
+                const auto limit = std::min(job->lines.size(), job->callbackLineCursor + 128);
+                job->preparedCallbackOwner->cachedLines.insert(
+                    job->preparedCallbackOwner->cachedLines.end(),
+                    job->lines.begin() + static_cast<std::ptrdiff_t>(job->callbackLineCursor),
+                    job->lines.begin() + static_cast<std::ptrdiff_t>(limit));
+                job->callbackLineCursor = limit;
+                continue;
+            }
+            if (!job->decorationSnapshot &&
+                job->callbackDecorationCursor < job->decorationRows.size()) {
+                const auto limit = std::min(job->decorationRows.size(),
+                                            job->callbackDecorationCursor + 128);
+                job->preparedCallbackOwner->decorations.insert(
+                    job->preparedCallbackOwner->decorations.end(),
+                    job->decorationRows.begin() +
+                        static_cast<std::ptrdiff_t>(job->callbackDecorationCursor),
+                    job->decorationRows.begin() + static_cast<std::ptrdiff_t>(limit));
+                job->callbackDecorationCursor = limit;
+                continue;
+            }
+            if (!job->callbackMetadataReady) {
+                auto& owner = *job->preparedCallbackOwner;
+                owner.cachedGeometry = job->geometry;
+                owner.cachedTables = job->tables;
+                owner.cachedTableIndex = job->tableIndex;
+                owner.cachedTableIntrinsic = job->intrinsic;
+                job->callbackMetadataReady = true;
+                continue;
+            }
+            // The complete generation is published in one UI-thread phase.
+            if (!widthReflowPendingFor(state, job->fontFamily, job->fontSize,
+                                       job->width, true, job->decorations(), job->decorationSnapshot)) {
+                cancelWidthReflow(state);
+                return WidthReflowStep::Cancelled;
+            }
+            state.cachedLines = std::move(job->lines);
+            state.cachedGeometry = std::move(job->geometry);
+            state.cachedTables = std::move(job->tables);
+            state.cachedTableIndex = std::move(job->tableIndex);
+            state.cachedMetrics = {};
+            state.cachedTextWidth = job->textWidth;
+            stampCacheKey(state, job->fontFamily, job->fontSize, job->width, true);
+            setDecorations(state, job->decorations(), job->decorationSnapshot);
+            job->preparedCallbackOwner->decorationRevision = state.decorationRevision;
+            state.callbackLayoutOwner = std::move(job->preparedCallbackOwner);
+            state.callbackLayoutGeneration = state.cachedLayoutGeneration;
+            cancelWidthReflow(state);
+            ++debugLayoutStats().full;
+            ++debugLayoutStats().geometryRebuilt;
+            return WidthReflowStep::Published;
+        }
+        return WidthReflowStep::Yield;
     }
 
     static void ensureLayoutCache(InputState& state,
@@ -2608,9 +3521,11 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             state.cachedViewportMetrics == compactMetricsEnabled(state) &&
             std::fabs(state.cachedFontSize - fontSize) < 0.001f &&
             state.cachedLayoutPixelScale == core::TextPrimitive::layoutPixelScale() &&
+            state.cachedFontConfigurationGeneration == core::TextPrimitive::fontConfigurationGeneration() &&
             std::fabs(state.cachedViewportWidth - viewportWidth) < 0.001f;
         // 文本也没变：剩下的唯一变量是装饰（光标换到别的块了）。
-        const bool layoutUnchanged = inputsUnchanged && state.cachedTextRevision == state.textRevision;
+        const bool layoutUnchanged = inputsUnchanged && state.cachedTextRevision == state.textRevision &&
+            (!multiline || state.cachedLayoutText == state.text);
 
         // ── 事件相位的装饰引用别名（T4 复审 1）────────────────────────────────
         // cachedLines() 这类入口递进来的就是 **state.decorations 自己**。文本一旦已经变了
@@ -2627,7 +3542,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         // it may intentionally share an unchanged generation across a text edit.
         if (decorations != nullptr && decorations.identity() == activeDecorations(state).identity() &&
             !(snapshot && snapshot.get() == decorations.identity()) &&
-            !activeDecorations(state).empty() && state.cachedTextRevision != state.textRevision) {
+            !activeDecorations(state).empty() &&
+            (state.cachedTextRevision != state.textRevision || state.cachedLayoutText != state.text)) {
             rebuildLayoutFull(state, fontFamily, fontSize, viewportWidth, multiline, kNoDecorations);
             return;
         }
@@ -2714,6 +3630,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                 state.cachedTextRevision == state.textRevision && state.cachedFontFamily == fontFamily &&
                 std::fabs(state.cachedFontSize - fontSize) < 0.001f &&
                 state.cachedLayoutPixelScale == core::TextPrimitive::layoutPixelScale() &&
+                state.cachedFontConfigurationGeneration == core::TextPrimitive::fontConfigurationGeneration() &&
                 !state.cachedTableIntrinsic.empty() &&
                 ((snapshot && snapshot == state.decorationSnapshot) ||
                  nextDecorations.identity() == activeDecorations(state).identity() || nextDecorations == activeDecorations(state));
@@ -2777,11 +3694,49 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         state.cachedFontFamily = fontFamily;
         state.cachedFontSize = fontSize;
         state.cachedLayoutPixelScale = core::TextPrimitive::layoutPixelScale();
+        state.cachedFontConfigurationGeneration = core::TextPrimitive::fontConfigurationGeneration();
         state.cachedViewportWidth = viewportWidth;
         state.cachedMultiline = multiline;
         state.cachedViewportMetrics = compactMetricsEnabled(state);
         state.detailTrackingValid = false;
         state.layoutCacheValid = true;
+        ++state.cachedLayoutGeneration;
+    }
+
+    static std::shared_ptr<InputState> callbackLayoutSnapshot(InputState& state) {
+        if (state.callbackLayoutOwner &&
+            state.callbackLayoutGeneration == state.cachedLayoutGeneration) {
+            return state.callbackLayoutOwner;
+        }
+        auto owner = std::make_shared<InputState>();
+        owner->text = state.cachedLayoutText;
+        owner->textRevision = state.cachedTextRevision;
+        owner->wordWrap = state.wordWrap;
+        owner->viewportMetrics = state.cachedViewportMetrics;
+        owner->cachedViewportMetrics = state.cachedViewportMetrics;
+        owner->cachedFontFamily = state.cachedFontFamily;
+        owner->cachedFontSize = state.cachedFontSize;
+        owner->cachedViewportWidth = state.cachedViewportWidth;
+        owner->cachedLayoutPixelScale = state.cachedLayoutPixelScale;
+        owner->cachedFontConfigurationGeneration = state.cachedFontConfigurationGeneration;
+        owner->cachedTextRevision = state.cachedTextRevision;
+        owner->cachedLayoutText = state.cachedLayoutText;
+        owner->cachedMetrics = state.cachedMetrics;
+        owner->cachedLines = state.cachedLines;
+        owner->cachedGeometry = state.cachedGeometry;
+        owner->cachedTables = state.cachedTables;
+        owner->cachedTableIndex = state.cachedTableIndex;
+        owner->cachedTableIntrinsic = state.cachedTableIntrinsic;
+        owner->cachedTextWidth = state.cachedTextWidth;
+        owner->layoutCacheValid = state.layoutCacheValid;
+        owner->cachedMultiline = state.cachedMultiline;
+        owner->decorationSnapshot = state.decorationSnapshot;
+        owner->decorations = state.decorations;
+        owner->decorationRevision = state.decorationRevision;
+        owner->verticalScroll = state.verticalScroll;
+        state.callbackLayoutOwner = owner;
+        state.callbackLayoutGeneration = state.cachedLayoutGeneration;
+        return owner;
     }
 
     // Called only after the byte-for-byte prefix/suffix proof below. With the same
@@ -2882,7 +3837,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         const auto previousDecorations = activeDecorations(state);
         // 文本与装饰都没动：一行都不用碰。**必须先看文本**——纯文本行的装饰可能全空，
         // 文本变了而装饰逐字节相同是完全可能的（此时不重测就会渲染旧行）。
-        if (state.cachedTextRevision == state.textRevision &&
+        if (state.cachedTextRevision == state.textRevision && oldText == newText &&
             nextDecorations == previousDecorations) {
             return true;
         }
@@ -3256,6 +4211,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
     }
 
     static void transferLayoutCache(InputState& source, InputState& target) {
+        cancelWidthReflow(source);
+        cancelWidthReflow(target);
         target.cachedLines = std::move(source.cachedLines);
         target.viewportMetrics = source.viewportMetrics;
         target.cachedViewportMetrics = source.cachedViewportMetrics;
@@ -3270,6 +4227,7 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         target.cachedFontFamily = std::move(source.cachedFontFamily);
         target.cachedFontSize = source.cachedFontSize;
         target.cachedLayoutPixelScale = source.cachedLayoutPixelScale;
+        target.cachedFontConfigurationGeneration = source.cachedFontConfigurationGeneration;
         target.cachedViewportWidth = source.cachedViewportWidth;
         target.cachedMultiline = source.cachedMultiline;
         target.cachedTextWidth = source.cachedTextWidth;
@@ -3279,7 +4237,9 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
         target.decorationSnapshot = source.decorationSnapshot;
         target.decorationRevision = source.decorationRevision;
         target.cachedTextRevision = target.textRevision - 1;
+        ++target.cachedLayoutGeneration;
         source.layoutCacheValid = false;
+        ++source.cachedLayoutGeneration;
     }
 
     static InputState& displayState(InputState& state, bool composing) {
@@ -3331,7 +4291,12 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                                             float fontSize,
                                                             float viewportWidth,
                                                             bool multiline) {
-        ensureLayoutCache(state, fontFamily, fontSize, viewportWidth, multiline, activeDecorations(state));
+        if (!widthReflowPendingFor(state, fontFamily, fontSize, viewportWidth,
+                                   multiline, activeDecorations(state))) {
+            cancelWidthReflow(state);
+            ensureLayoutCache(state, fontFamily, fontSize, viewportWidth,
+                              multiline, activeDecorations(state));
+        }
         resetDetailTracking(state);
         const int cursorLine = lineIndexFor(state.cachedLines, state.cursor);
         for (int row = std::max(0, cursorLine - 1); row <= cursorLine + 1; ++row)
@@ -3481,7 +4446,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                    const LineDecoration* decoration,
                                    int sourceLineNumber = 1,
                                    const TableColumns* table = nullptr,
-                                   bool detailed = true) {
+                                   bool detailed = true,
+                                   std::vector<TextLine>* premeasuredStyled = nullptr) {
         const std::size_t firstNew = out.size();
         // 换行宽度先扣掉行内容左缩进 + 行首图元占位（T19 视觉修正 2）：这两块都是
         // **测量之后**才平移上去的（applyLineIndent / applyLineGlyph），不减的话满行的
@@ -3527,7 +4493,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             ? std::max(0.0f, viewportWidth - reservedWidth)
             : viewportWidth;
         appendMeasuredLineCore(out, value, start, end, hardBreakAfter, defaultFontSize,
-                               defaultLineHeight, fontFamily, wrapWidth, decoration, table, detailed);
+                               defaultLineHeight, fontFamily, wrapWidth, decoration, table, detailed,
+                               premeasuredStyled);
         // 行号盖章：软换行产生的多条可视行共享同一源行号，lineStart 只标第一条。
         for (std::size_t index = firstNew; index < out.size(); ++index) {
             out[index].lineNumber = sourceLineNumber;
@@ -3681,7 +4648,8 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
                                    float viewportWidth,
                                    const LineDecoration* decoration,
                                    const TableColumns* table = nullptr,
-                                   bool detailed = true) {
+                                   bool detailed = true,
+                                   std::vector<TextLine>* premeasuredStyled = nullptr) {
         float lineFontSize = defaultFontSize;
         float lineHeight = defaultLineHeight;
         // alpha == 0 = "本行没有行级颜色，交给控件默认"（见 TextLine::color 的约定）。
@@ -3707,6 +4675,13 @@ using TableColumnIndex = std::unordered_map<int, std::size_t>;
             if (!decoration->runs.empty()) {
                 runs = decoration->runs;
             }
+        }
+
+        if (premeasuredStyled != nullptr) {
+            out.insert(out.end(), std::make_move_iterator(premeasuredStyled->begin()),
+                       std::make_move_iterator(premeasuredStyled->end()));
+            premeasuredStyled->clear();
+            return;
         }
 
         // ── 表格行：逐格排版 + 平移到列 x（S3f 批次 D）──

@@ -119,6 +119,12 @@ struct Element {
 
     Color color = {1.0f, 1.0f, 1.0f, 1.0f};
     Gradient gradient;
+    // Opt-in retained pointer lighting. It never owns hit testing or callbacks.
+    std::unique_ptr<RevealEffect> reveal;
+    std::unique_ptr<FrozenBackdrop> frozenBackdrop;
+    bool excludeFromBackdropSnapshot = false;
+    std::uint64_t subtreeFrozenBackdropSession = 0;
+    std::uint64_t subtreeCachedStripSession = 0;
     Border border;
     Shadow shadow;
     Transform transform;
@@ -825,6 +831,11 @@ public:
         return self();
     }
 
+    Derived& excludeFromBackdropSnapshot(bool value = true) {
+        element_->excludeFromBackdropSnapshot = value;
+        return self();
+    }
+
     Derived& animate(AnimProperty property) {
         element_->transition.enabled = true;
         element_->transition.properties = property;
@@ -862,6 +873,11 @@ public:
 
     Derived& gradient(const Gradient& value) {
         this->element_->gradient = value;
+        return this->self();
+    }
+
+    Derived& reveal(const RevealEffect& value) {
+        this->element_->reveal = value.enabled ? std::make_unique<RevealEffect>(value) : nullptr;
         return this->self();
     }
 
@@ -912,6 +928,11 @@ public:
 
     Derived& blur(float value) {
         this->element_->blur = std::max(0.0f, value);
+        return this->self();
+    }
+
+    Derived& frozenBackdrop(const FrozenBackdrop& material) {
+        this->element_->frozenBackdrop = std::make_unique<FrozenBackdrop>(material);
         return this->self();
     }
 
@@ -1501,6 +1522,32 @@ public:
     bool hasBackdropBlur() const {
         return hasBackdropBlur_;
     }
+    std::uint64_t frozenBackdropSession() const {
+        for (const auto* root : orderedRoots_) {
+            if (root->subtreeFrozenBackdropSession) return root->subtreeFrozenBackdropSession;
+        }
+        return 0;
+    }
+
+    std::uint64_t cachedStripSession() const {
+        for (const auto* root : orderedRoots_)
+            if (root->subtreeCachedStripSession) return root->subtreeCachedStripSession;
+        return 0;
+    }
+
+    const Element* cachedStripElement() const {
+        const auto visit = [&](auto&& self, const Element& element) -> const Element* {
+            if (element.frozenBackdrop && element.frozenBackdrop->cachedStrip) return &element;
+            for (const auto* child : element.orderedChildren)
+                if (child->subtreeCachedStripSession)
+                    if (const auto* found = self(self, *child)) return found;
+            return nullptr;
+        };
+        for (const auto* root : orderedRoots_)
+            if (root->subtreeCachedStripSession)
+                if (const auto* found = visit(visit, *root)) return found;
+        return nullptr;
+    }
 
     bool isFocused(const std::string& id) const {
         return !focusedId_.empty() && focusedId_ == resolveId(id);
@@ -1720,6 +1767,10 @@ private:
     }
 
     static void rebuildOrderedChildren(Element& element) {
+        element.subtreeFrozenBackdropSession = element.frozenBackdrop && !element.frozenBackdrop->cachedStrip
+            ? element.frozenBackdrop->session : 0;
+        element.subtreeCachedStripSession = element.frozenBackdrop && element.frozenBackdrop->cachedStrip
+            ? element.frozenBackdrop->session : 0;
         element.orderedChildren.clear();
         element.orderedChildren.reserve(element.children.size());
         element.subtreeNeedsUpdate = elementNeedsUpdate(element);
@@ -1729,6 +1780,10 @@ private:
         for (const auto& child : element.children) {
             element.orderedChildren.push_back(child.get());
             rebuildOrderedChildren(*child);
+            if (!element.subtreeFrozenBackdropSession)
+                element.subtreeFrozenBackdropSession = child->subtreeFrozenBackdropSession;
+            if (!element.subtreeCachedStripSession)
+                element.subtreeCachedStripSession = child->subtreeCachedStripSession;
             element.subtreeNeedsUpdate = element.subtreeNeedsUpdate || child->subtreeNeedsUpdate;
             element.subtreeHasDependentVisuals = element.subtreeHasDependentVisuals || child->subtreeHasDependentVisuals;
             element.subtreeHasBackdropBlur = element.subtreeHasBackdropBlur || child->subtreeHasBackdropBlur;
@@ -1741,6 +1796,7 @@ private:
 
     static bool elementNeedsUpdate(const Element& element) {
         return element.interactive ||
+               element.reveal != nullptr ||
                element.focusable ||
                element.disabled ||
                element.hasImeRect ||
@@ -1790,6 +1846,8 @@ private:
 
     static bool elementBlocksRetainedLayer(const Element& element) {
         return element.clip ||
+               element.frozenBackdrop != nullptr || element.excludeFromBackdropSnapshot ||
+               element.reveal != nullptr ||
                element.interactive ||
                element.focusable ||
                element.hasImeRect ||

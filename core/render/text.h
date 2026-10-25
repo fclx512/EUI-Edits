@@ -4,6 +4,7 @@
 #include "core/render/text_types.h"
 
 #include <cstddef>
+#include <chrono>
 #include <memory>
 #include <cstdint>
 #include <string>
@@ -64,6 +65,27 @@ public:
         std::vector<float> caretX;
     };
 
+    // UI-thread cooperative measurement. Each step releases the font lock before
+    // returning; no renderer or global DPI state may be changed concurrently.
+    // A terminal step can be successful or cancelled by a font/DPI generation change.
+    class MetricsCursor {
+    public:
+        MetricsCursor(std::string text, const std::string& fontFamily,
+                      float fontSize, int fontWeight = 400);
+        ~MetricsCursor();
+        MetricsCursor(const MetricsCursor&) = delete;
+        MetricsCursor& operator=(const MetricsCursor&) = delete;
+        MetricsCursor(MetricsCursor&&) noexcept;
+        MetricsCursor& operator=(MetricsCursor&&) noexcept;
+        bool step(std::size_t maxCodepoints, std::chrono::steady_clock::time_point deadline);
+        bool complete() const noexcept;
+        bool cancelled() const noexcept;
+        TextMetrics takeMetrics();
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl_;
+    };
+
     TextPrimitive();
     TextPrimitive(float x, float y);
     ~TextPrimitive();
@@ -108,6 +130,9 @@ public:
     // Single unwrapped line: ink top/bottom relative to a Top-aligned text origin,
     // in logical pixels, using the same hinted fallback glyphs as rendering.
     static Vec2 measureSingleLineInk(const TextStyle& style);
+    // Complete wrapped/unwrapped ink block, top/bottom relative to a Top origin.
+    // Uses the same hinted glyphs, wrapping width and line height as rendering.
+    static Vec2 measureTextInk(const TextStyle& style);
     static TextAtlasDebugStats debugAtlasStats();
 
     // Reuse font-file resolution only during one synchronous layout operation.
@@ -147,6 +172,9 @@ public:
     static float layoutPixelScale();
 
     static void setDefaultFontFiles(const std::string& textFontFile, const std::string& iconFontFile);
+    // Changes when the configured font stack/shared font caches are invalidated.
+    // Layout jobs spanning updates must reject results from an older generation.
+    static std::uint64_t fontConfigurationGeneration() noexcept;
     // 斜体字面解析（S3d 降级版）：给常规字面找同族斜体文件（X.ttf → Xi.ttf / X-Italic.ttf /
     // Regular→Italic …），并用 FreeType 校验候选确实是斜体。找不到返回**空串**，调用方据此
     // 保留常规字面；fontItalic 可为缺少斜体字面的字形合成倾斜，保持原 advance。

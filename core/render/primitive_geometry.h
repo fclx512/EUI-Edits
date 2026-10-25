@@ -18,6 +18,8 @@ struct RoundedRectDrawCommand {
     std::vector<PrimitiveGeometryVertex> vertices;
     Color fillColor{};
     Gradient gradient{};
+    RevealEffect reveal{};
+    FrozenBackdrop frozenBackdrop{};
     Border border{};
     Rect rect{};
     float radius = 0.0f;
@@ -59,8 +61,16 @@ inline bool roundedRectHasVisibleContent(const RoundedRectDrawCommand& command) 
     const bool hasBorder = !command.shadowPass &&
                            command.border.width > kVisibleEpsilon &&
                            command.border.color.a > kVisibleEpsilon;
+    const bool hasReveal = !command.shadowPass && command.reveal.enabled &&
+                           command.reveal.tint.a > kVisibleEpsilon &&
+                           ((command.reveal.radius > kVisibleEpsilon &&
+                             (command.reveal.fillOpacity > kVisibleEpsilon ||
+                              (command.reveal.borderWidth > kVisibleEpsilon &&
+                               command.reveal.borderOpacity > kVisibleEpsilon))) ||
+                            (command.reveal.pressRadius > kVisibleEpsilon &&
+                             command.reveal.pressOpacity > kVisibleEpsilon));
     const bool hasBackdropBlur = !command.shadowPass && command.backdropBlur > kVisibleEpsilon;
-    return hasFill || hasBorder || hasBackdropBlur;
+    return hasFill || hasBorder || hasReveal || hasBackdropBlur;
 }
 
 inline Vec3 transformPrimitivePoint(const Rect& bounds,

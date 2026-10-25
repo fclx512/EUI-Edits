@@ -41,6 +41,7 @@ inline std::vector<DslWindowRequest>& dslWindowRequests() {
 }
 
 struct DslAppState {
+    std::uint64_t updateSerial = 0;
     bool composed = false;
     bool iconApplied = false;
     bool closeRequested = false;
@@ -275,6 +276,10 @@ void requestUpdate() {
     core::platform::requestUiUpdate();
 }
 
+std::uint64_t updateSerial() noexcept {
+    return detail::dslAppState().updateSerial;
+}
+
 namespace detail {
 
 void requestFullPaint() {
@@ -314,6 +319,8 @@ bool update(core::window::Handle window, float deltaSeconds, int windowWidth, in
         return false;
     }
 
+    ++detail::dslAppState().updateSerial;
+
     const DslAppConfig& config = dslAppConfig();
     detail::dslRuntime().setInteractiveCursor(config.interactiveCursorValue);
     const float effectiveScale = dpiScale * uiScale();
@@ -340,15 +347,20 @@ bool update(core::window::Handle window, float deltaSeconds, int windowWidth, in
         state.logicalHeight = logicalHeight;
     };
 
-    if (!state.composed || state.logicalWidth != logicalWidth || state.logicalHeight != logicalHeight) {
+    const bool composeForSize = !state.composed || state.logicalWidth != logicalWidth || state.logicalHeight != logicalHeight;
+    // A native resize also requests an explicit update. Normally both reasons
+    // describe the same pre-update frame, so only one compose is needed.
+    if (composeForSize || updateRequested) {
         composeFrame();
+        // Compose itself can change focus or scroll bindings. Preserve the
+        // original follow-up in that case so focus-dependent content settles
+        // before Runtime::update consumes its pending compose flag.
+        if (composeForSize && updateRequested && detail::dslRuntime().composeRequested()) {
+            composeFrame();
+        }
     }
 
-    bool changed = false;
-    if (updateRequested) {
-        composeFrame();
-        changed = true;
-    }
+    bool changed = updateRequested;
 
     changed = detail::dslRuntime().update(window, deltaSeconds, pointerScale, effectiveScale, inputEnabled) || changed;
     if (detail::dslRuntime().composeRequested()) {

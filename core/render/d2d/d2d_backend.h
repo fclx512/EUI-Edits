@@ -28,6 +28,14 @@ public:
     void clear(const core::Color& color) override;
     void setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) override;
     void prepareBackdropBlur(const core::Rect&, float, int, int) override;
+    bool beginFrozenBackdropFrame(std::uint64_t session, std::uint64_t sceneRevision,
+                                  int width, int height, float dpiScale) override;
+    void captureFrozenBackdropScene() override;
+    bool beginCachedStripFrame(std::uint64_t session, std::uint64_t sceneRevision,
+                               int width, int height, float dpiScale) override;
+    void captureCachedStrip(const core::FrozenBackdrop& material) override;
+    bool cachedStripNeedsValidation(std::uint64_t session) const override;
+    void prepareFrozenBackdrop(const core::FrozenBackdrop& material) override;
     void drawRoundedRect(const RoundedRectDrawCommand& command, int, int) override;
     void drawPolygon(const PolygonDrawCommand& command, int, int) override;
     void drawText(const TextDrawCommand& command, int, int) override;

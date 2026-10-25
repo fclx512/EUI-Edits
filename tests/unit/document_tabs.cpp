@@ -250,22 +250,59 @@ void checkPrepareTitlesAndLanguage() {
         state.languageMenuOpen=false;
         ui.state<float>("editor.languageMenu.level.0.offset")=100;
         compose();
-        check(!ui.find("editor.languageMenu.level.0.item.1") && ui.state<float>("editor.languageMenu.level.0.offset")==0,
-              "closed language menu omits tree and resets root scroll in both animation settings");
+        check(!state.languageMenuOpen && !ui.find("editor.languageMenu.dismiss"),
+              "closed language menu releases its logical open state and dismiss input layer");
+        if(animations) {
+            const auto* root=ui.find("editor.languageMenu.level.0");
+            const auto* menu=ui.find("editor.languageMenu.menu");
+            int retainedItems=0;
+            const auto allItemsDisabled=[&](const auto& self,const core::dsl::Element& element)->bool {
+                bool disabled=true;
+                if(element.id.find(".item.")!=std::string::npos) {
+                    ++retainedItems;
+                    disabled=element.disabled;
+                }
+                for(const auto& child:element.children) disabled=self(self,*child) && disabled;
+                return disabled;
+            };
+            const bool retainedInputDisabled=menu && allItemsDisabled(allItemsDisabled,*menu);
+            check(root && root->disabled && root->opacity==0 && retainedItems>0 && retainedInputDisabled,
+                  "animated language-menu exit retains zero-opacity target content with every item disabled");
+            // This Ui-only harness does not advance Runtime time. The finite
+            // exit, child pruning and idle wake contract is covered by menu_motion;
+            // the closed root may remain as a disabled layout instance.
+        } else {
+            check(!ui.find("editor.languageMenu.level.0.item.1"),
+                  "language menu without animations immediately omits closed items");
+        }
+        check(ui.state<float>("editor.languageMenu.level.0.offset")==0,
+              "closed language menu resets root scroll within its non-scrolling viewport");
         state.languageMenuOpen=true;state.languageOverride="python";compose();
-        check(!ui.find("editor.languageMenu.level.1.item.0"),"reopening closed language menu clears previous cascade");
+        const auto* reopenedRoot=ui.find("editor.languageMenu.level.0");
+        check(reopenedRoot && !reopenedRoot->disabled && reopenedRoot->opacity==1 &&
+              ui.state<float>("editor.languageMenu.level.0.offset")==0 &&
+              !ui.find("editor.languageMenu.level.1.item.0"),
+              "reopening language menu restores input and resets root scroll and previous cascade");
         item=ui.find("editor.languageMenu.level.0.item.4");
-        check(item && item->onHoverChanged,"language menu reopens with scripts group");
+        check(item && !item->disabled && item->onHoverChanged,"language menu reopens with enabled scripts group");
         if(item && item->onHoverChanged) item->onHoverChanged(true);
         compose();
         item=ui.find("editor.languageMenu.level.1.item.0");
-        check(item && item->onClick,"reopened scripts cascade is usable");
+        check(item && !item->disabled && item->onClick,"reopened scripts cascade has an enabled action");
         if(item && item->onClick) item->onClick();
         check(state.languageOverride=="python" && !state.languageMenuOpen,"scripts dispatch retains selected language");
     }
 }
 
 int main() {
+    for (const char* name : {"photo.PNG", "photo.jpg", "photo.svg", "unsupported.webp"}) {
+        neo::vault::Row imageRow;imageRow.name=name;
+        check(neo::vault_detail::rowIcon(imageRow)==neo::UiIcon::ImageFile,"image entries use the internal photograph-file icon");
+        imageRow.isDir=true;
+        check(neo::vault_detail::rowIcon(imageRow)==neo::UiIcon::Folder,"image suffix does not change a directory icon");
+    }
+    check(!neo::filetypes::associationEligible("png") && !neo::filetypes::associationEligible("jpg") &&
+          !neo::filetypes::associationEligible("webp"),"internal image icons do not add image Open With candidates");
     AsyncShutdownGuard asyncShutdownGuard;
     neo::sessionwriter::resetForTest();
     neo::sessionwriter::setInlineForTest(true);
@@ -631,6 +668,35 @@ int main() {
     neo::tab_bar_detail::clearCloseAnchor(barState);
     check(!barState.closeAnchor.enabled && barState.closeAnchorRevealPending,
           "clearing a close chain requests ordinary active-page reveal");
+
+    // Visible action-group seams must stay in the client area, so the native
+    // mouse-leave path cannot cancel nearby Reveal lights between buttons.
+    for (float width : {380.0f, 420.0f, 500.0f, 1000.0f}) {
+        const float right = width - 152.0f;
+        const float height = neo::uiMetrics(barState).menuBarHeight;
+        neo::platform::chrome::beginFrame(width, height);
+        eui::Ui groupUi;
+        groupUi.begin("action-seams");
+        neo::tabBarView(groupUi, barState, {width, 400.0f}, 0.0f, right);
+        groupUi.end();
+        groupUi.layout(width, 400.0f);
+        const auto* bg = groupUi.find("menubar.tabs.actions.bg");
+        check(bg && !bg->onClick && bg->hitTestMode == core::dsl::HitTestMode::None,
+              "group background stays passive");
+        bool continuous = bg != nullptr;
+        if (bg) for (float x = bg->frame.x + .25f; x < bg->frame.x + bg->frame.width; x += .5f) {
+            for (float y : {bg->frame.y + .25f, 16.0f, bg->frame.y + bg->frame.height - .25f})
+                continuous = continuous && !neo::platform::chrome::captionAt(x, y, width, height);
+        }
+        check(continuous, "entire visible action group including seams stays client");
+        check(neo::platform::chrome::captionAt(right + 8, 16, width, height),
+              "empty title strip beside action group remains draggable");
+        for (const char* name : {"menubar.tabs.new.hit", "menubar.tabs.list.hit", "menubar.tabs.pin.hit"}) {
+            const auto* hit = groupUi.find(name);
+            check(hit && hit->onClick && hit->frame.width == 26.0f,
+                  "individual action hit widths and handlers remain intact");
+        }
+    }
 
     neo::AppState revealState;
     neo::loadDocument(revealState, path(barA)); const auto revealAId = revealState.tabId;

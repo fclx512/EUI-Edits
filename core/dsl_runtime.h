@@ -16,6 +16,7 @@
 #include "core/window/window_backend.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
@@ -40,6 +41,17 @@ public:
     }
 
     void setInteractiveCursor(CursorShape value) { interactiveCursor_ = value; }
+
+    // Passive UI transitions share at most 60 Hz, including geometry. Input,
+    // scroll/drag state and media clocks are independent. Zero is diagnostic:
+    // it restores per-update transitions; Reveal retains its own 60 Hz phase.
+    void setDecorationFrameRateLimit(float hz) {
+        decorationFrameRateLimit_ = std::isfinite(hz) && hz > 0.0f
+            ? std::min(hz, 60.0f) : 0.0f;
+        newDecorationTargets_.clear();
+        decorationElapsedSeconds_ = 0.0f;
+        previousDecorationPending_ = false;
+    }
 
     template <typename ComposeFn>
     void compose(const std::string& pageId, float logicalWidth, float logicalHeight, ComposeFn&& composeFn);
@@ -71,6 +83,9 @@ public:
     void releaseGraphicsResources(bool releaseCachedImageTextures = true);
 
 private:
+    // Test translation units can inspect retained instances without exposing a
+    // mutable runtime store through the public application API.
+    friend struct RuntimeTestAccess;
     template <typename Fn>
     void forEachElement(Fn&& fn) const;
 
@@ -123,6 +138,99 @@ private:
                                bool ancestorDisabled) const;
 
     bool elementHasActiveAnimation(const Element& element) const;
+
+    enum DecorationBit : unsigned {
+        ColorDecoration = 1u << 0,
+        OpacityDecoration = 1u << 1,
+        BorderDecoration = 1u << 2,
+        ShadowDecoration = 1u << 3,
+        HoverDecoration = 1u << 4,
+        PressDecoration = 1u << 5,
+        FrameDecoration = 1u << 6,
+        RadiusDecoration = 1u << 7,
+        BlurDecoration = 1u << 8,
+        TransformDecoration = 1u << 9
+    };
+
+    struct NewDecorationTargets {
+        unsigned bits = 0;
+        std::array<double, 10> startedAt{};
+    };
+
+    static unsigned decorationBitIndex(unsigned bit) {
+        unsigned index = 0;
+        while ((bit >>= 1u) != 0u) ++index;
+        return index;
+    }
+
+    void markNewDecorationTarget(const std::string& id, unsigned bit,
+                                 float initialStepSeconds = -1.0f) {
+        if (decorationFrameRateLimit_ <= 0.0f) return;
+        auto& state = newDecorationTargets_[id];
+        state.bits |= bit;
+        const double initialStep = initialStepSeconds >= 0.0f
+            ? static_cast<double>(initialStepSeconds)
+            : std::min(static_cast<double>(decorationEventDeltaSeconds_), 1.0 / 60.0);
+        state.startedAt[decorationBitIndex(bit)] = decorationClockSeconds_ -
+            initialStep;
+    }
+
+    float decorationStepSeconds(const std::string& id, unsigned bit,
+                                float deltaSeconds) {
+        const float elapsed = decorationDeltaSeconds(deltaSeconds);
+        if (decorationFrameRateLimit_ <= 0.0f || !decorationSampleAllowed_) return elapsed;
+        const auto it = newDecorationTargets_.find(id);
+        if (it == newDecorationTargets_.end() || !(it->second.bits & bit)) return elapsed;
+        const float step = static_cast<float>(std::max(0.0,
+            decorationClockSeconds_ - it->second.startedAt[decorationBitIndex(bit)]));
+        it->second.bits &= ~bit;
+        if (it->second.bits == 0) newDecorationTargets_.erase(it);
+        return step;
+    }
+
+    float decorationDeltaSeconds(float deltaSeconds) const {
+        return decorationFrameRateLimit_ <= 0.0f ? deltaSeconds :
+            (decorationSampleAllowed_ ? decorationElapsedSeconds_ : 0.0f);
+    }
+
+    template <typename T>
+    bool tickDecoration(AnimatedValue<T>& value, const std::string& id,
+                        unsigned bit, float deltaSeconds) {
+        if (decorationFrameRateLimit_ > 0.0f && !decorationSampleAllowed_) return false;
+        const bool wasActive = value.isActive();
+        const bool changed = value.tick(decorationStepSeconds(id, bit, deltaSeconds));
+        if (decorationFrameRateLimit_ > 0.0f && wasActive && changed)
+            decorationSampleCommitted_ = true;
+        return changed;
+    }
+
+    template <typename T>
+    bool setDecorationTarget(AnimatedValue<T>& value, const T& target,
+                             const Transition& transition, bool animate,
+                             const std::string& id, unsigned bit,
+                             float initialStepSeconds = -1.0f) {
+        const bool targetChanged = value.setTarget(target, transition, animate);
+        if (targetChanged && value.isActive())
+            markNewDecorationTarget(id, bit, initialStepSeconds);
+        else if (targetChanged && decorationFrameRateLimit_ > 0.0f) {
+            const auto it = newDecorationTargets_.find(id);
+            if (it != newDecorationTargets_.end()) {
+                it->second.bits &= ~bit;
+                if (it->second.bits == 0) newDecorationTargets_.erase(it);
+            }
+        }
+        // Unanimated input/layout changes and disabling an in-flight transition
+        // take effect immediately, even between two passive animation samples.
+        return targetChanged && (decorationFrameRateLimit_ <= 0.0f || !value.isActive());
+    }
+
+    void noteDecoration(bool active) {
+        if (decorationFrameRateLimit_ <= 0.0f) {
+            animating_ = animating_ || active;
+        } else {
+            decorationPending_ = decorationPending_ || active;
+        }
+    }
 
     runtime::PaintBoundsInstance updateElementTree(const Element& element,
                                                    const PointerEvent& event,
@@ -220,6 +328,10 @@ private:
                     const RenderTransform& inheritedTransform,
                     bool snapFrame);
 
+    void updateReveal(const Element& element, const PointerEvent& event,
+                      float deltaSeconds, float dpiScale,
+                      const RenderTransform& inheritedTransform, bool disabledTree);
+
     void updatePolygon(const Element& element,
                        float deltaSeconds,
                        float dpiScale,
@@ -295,6 +407,19 @@ private:
     bool animating_ = false;
     // 最近一次 update 结束时，最近的 pending 定时器还剩多少秒（+inf = 没有）。
     float nextTimerWakeSeconds_ = std::numeric_limits<float>::infinity();
+    bool revealSampleAllowed_ = true;
+    bool revealFinalEvent_ = true;
+    bool revealSampleCommitted_ = false;
+    float revealCooldownRemaining_ = 0.0f;
+    float decorationFrameRateLimit_ = 60.0f;
+    float decorationElapsedSeconds_ = 0.0f;
+    bool decorationSampleAllowed_ = true;
+    bool decorationSampleCommitted_ = false;
+    bool decorationPending_ = false;
+    bool previousDecorationPending_ = false;
+    float decorationEventDeltaSeconds_ = 0.0f;
+    double decorationClockSeconds_ = 0.0;
+    std::unordered_map<std::string, NewDecorationTargets> newDecorationTargets_;
     bool composeRequested_ = false;
     bool fullPaintRequested_ = true;
     // 悬停期望光标（每帧清成 Arrow）。文本输入的 IBeam、普通元素的 Arrow 都在这里收集，
@@ -310,6 +435,8 @@ private:
     std::string hoverTargetCacheId_;
     std::string focusedId_;
     core::window::Handle inputWindow_ = nullptr;
+    float visualPointerScale_ = 1.0f;
+    bool visualInputEnabled_ = true;
     bool composingText_ = false;
     std::function<void(const KeyEvent&)> keyEventHandler_;
     RenderTransform focusedElementRenderTransform_;

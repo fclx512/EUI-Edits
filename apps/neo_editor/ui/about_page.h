@@ -111,7 +111,7 @@ inline void aboutPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
             .lineHeight(size + 6.0f).color(color).horizontalAlign(align).build();
     };
     const auto card = [&](const std::string& id, float y, float height, bool hero = false) {
-        ui.rect(id).position(0, y).size(width, height).radius(hero ? 10.0f : 8.0f)
+        ui.rect(id).position(0, y).size(width, height).radius(neo::corner(colors, hero ? 10.0f : 8.0f))
             .color(hero ? core::mixColor(colors.editor, colors.accent, .055f) : colors.editor)
             .border(1.0f, components::theme::withAlpha(colors.border, .45f)).build();
     };
@@ -124,7 +124,7 @@ inline void aboutPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
             .text(label).fontSize(hintSize)
             .textColor(link ? colors.accent : colors.text)
             .colors(colors.editor, colors.rowHover, colors.pressed)
-            .border(1.0f, components::theme::withAlpha(colors.border, .7f)).radius(5.0f)
+            .border(1.0f, components::theme::withAlpha(colors.border, .7f)).radius(neo::corner(colors, 5.0f))
             .shadow(0, 0, 0, transparentColor()).pressScale(1.0f).preserveFocusOnPress()
             .onClick(std::move(action)).transition(quickTransition()).build();
     };

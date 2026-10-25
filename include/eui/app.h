@@ -5,6 +5,7 @@
 #include "eui/window.h"
 
 #include <functional>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,9 @@ bool trayEnabled();
 const char* trayTitle();
 const char* trayIconPath();
 void requestUpdate();
+// Main-window update generation; all compose passes inside one update share it.
+// Zero means no valid update has run. Components may use it to budget cooperative work.
+std::uint64_t updateSerial() noexcept;
 // Close requests are processed on the main thread and may be vetoed by the app.
 void requestClose();
 bool consumeCloseRequest();

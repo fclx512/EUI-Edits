@@ -2,6 +2,7 @@
 
 #include "ui/icons.h"
 #include "ui/metrics.h"
+#include "ui/popup_presentation.h"
 #include "platform/window_chrome.h"
 
 namespace neo {
@@ -53,9 +54,7 @@ inline void settingsHeaderView(eui::Ui& ui, AppState& state, const eui::Screen& 
     ui.stack("settings.backToEditor.slot").position(18, backY).size(154, backHeight).content([&] {
         iconTextButton(ui, "settings.backToEditor", UiIcon::ArrowLeft, i18n::tr("settings.back_editor"), 154,
                        metrics.panelFontSize, [&state] {
-                           state.settingsOpen = false;
-                           state.fontPicker = FontPickerTarget::None;
-                           state.themeListOpen = false;
+                           popup_presentation::setSettingsOpen(state, false);
                            app::requestUpdate();
                        }, uiFontFamily(state));
     }).build();

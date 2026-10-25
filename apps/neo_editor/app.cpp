@@ -24,6 +24,7 @@
 #include "ui/overlays.h"
 #include "ui/outline_view.h"
 #include "ui/settings_panel.h"
+#include "ui/settings_transition.h"
 #include "ui/window_layout.h"
 #include "ui/status_bar.h"
 #include "ui/vault_menu.h"
@@ -167,6 +168,11 @@ void restoreSession(neo::AppState& state) {
                 : saved.theme == 0 ? neo::ThemeMode::Dark
                 : (neo::settings::systemThemePrefersLight() ? neo::ThemeMode::Light
                                                             : neo::ThemeMode::Dark);
+    // 界面风格必须在首帧 editorColors() 之前写入全局：缓存按风格版本号失效，
+    // 晚写会让第一帧先按圆角建一份，而后面的重建又依赖这一帧之后的调用。
+    state.uiStyle = saved.uiStyle == 1 ? neo::UiStyle::Square : neo::UiStyle::Rounded;
+    neo::setUiStyle(state.uiStyle);
+    neo::platform::chrome::setSquareCorners(state.uiStyle == neo::UiStyle::Square);
     state.uiScale = std::clamp(saved.uiScale, neo::kMinimumUiScale, neo::kMaximumUiScale);
     state.editorFontSize =
         std::clamp(saved.editorFontSize, neo::kMinimumEditorFontSize, neo::kMaximumEditorFontSize);
@@ -271,12 +277,7 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
                 if (state.mindmapPreview.open) {
                     neo::closeMindmapPreview(state);
                 } else if (!state.imagePreviewPath.empty()) {
-                    state.imagePreviewPath.clear();
-                    state.imagePreviewWidth = 0.0f;
-                    state.imagePreviewHeight = 0.0f;
-                    state.imageViewport = neo::ImageViewport{};
-                    state.findEditorFocusPending = true;
-                    requestUpdate();
+                    neo::closeImagePreview(state);
                 } else if (state.pending!=neo::PendingAction::None) {
                     state.pending=neo::PendingAction::None;state.pendingNewMarkdown=false;requestUpdate();
                 } else if (state.languageMenuOpen) {
@@ -285,7 +286,7 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
                     state.markdownHeadingMenuOpen = false;
                     requestUpdate();
                 } else if (state.settingsOpen) {
-                    state.settingsOpen = false;
+                    neo::popup_presentation::setSettingsOpen(state, false);
                     requestUpdate();
                 } else if (state.contextMenuOpen || state.vaultContextMenuOpen) {
                     state.contextMenuOpen = false;
@@ -354,7 +355,7 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
             break;
         }
         case eui::InputKey::Comma:
-            state.settingsOpen = !state.settingsOpen;
+            neo::popup_presentation::setSettingsOpen(state, !state.settingsOpen);
             requestUpdate();
             break;
         case eui::InputKey::F:
@@ -669,7 +670,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
         if (!forwardedPath.empty()) {
             // 转发打开 = 用户明确要这篇文档：设置页开着也让位回到编辑区
             // （拖拽进设置页仍走上面的拒绝+提示，行为不同是有意的）。
-            if (state.settingsOpen) { state.settingsOpen = false; app::requestUpdate(); }
+            if (state.settingsOpen) { neo::popup_presentation::setSettingsOpen(state, false); app::requestUpdate(); }
             neo::requestOpenPath(state, forwardedPath);
         }
     }
@@ -692,11 +693,8 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
         // 刚换过文档，上一条编辑命令已经没意义了。
         state.pendingEditorCommand = neo::EditorCommand::None;
         state.pendingTaskByte = -1;
-        // 预览的那张图可能属于上一篇文档，一并收掉。
-        state.imagePreviewPath.clear();
-        state.imagePreviewWidth = 0.0f;
-        state.imagePreviewHeight = 0.0f;
-        state.imageViewport = neo::ImageViewport{};
+        // Image viewing does not replace this document. In particular a startup
+        // image must survive initialization of the underlying empty editor.
         // 思维导图预览同理：正文被替换即关闭，页面自有的导图缓存一并释放
         // （键虽然按 revision 失效，但旧文档的缓存驻留没有保留价值）。
         state.mindmapPreviewPending = false;
@@ -744,7 +742,8 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     // Reserve the TXT capsule's remaining overlap inside the text content;
     // the input itself spans the editor so its scrollbar stays at the edge.
     const float capsuleRail = neo::writingCapsuleRailWidth(state, editorWidth - outlineWidth, metrics);
-    const float textWidth = std::max(0.0f, editorWidth - outlineWidth - neo::platform::chrome::resizeInset());
+    const float textWidth = std::max(0.0f, editorWidth - outlineWidth -
+        neo::platform::chrome::resizeInset(colors.tokens.metrics.control.scrollbar));
     const float contentWidth = std::max(0.0f, textWidth - capsuleRail);
 
     ui.stack("root")
@@ -756,15 +755,17 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                 .color(colors.window)
                 .build();
 
+            neo::settingsTransitionView(ui, screen, state.settingsOpen && !neo::themeWorkbenchOpen(),
+                neo::animationsEnabled(state), [&] {
+                    neo::settingsPanelOverlay(ui, state, screen);
+                    neo::toastOverlay(ui, state, screen);
+                });
             if (neo::themeWorkbenchOpen()) {
                 neo::themeWorkbenchOverlay(ui, state, screen);
                 neo::toastOverlay(ui, state, screen);
-            } else if (state.settingsOpen) {
-                // 设置是同一主窗口内的完整页面。跳过编辑器树，避免背后编辑区可命中；
-                // editor.input 的 retained UI state 仍留在 Ui::StateStore 中。
-                neo::settingsPanelOverlay(ui, state, screen);
-                neo::toastOverlay(ui, state, screen);
-            } else {
+            }
+            neo::editorTransitionView(ui, screen, !state.settingsOpen && !neo::themeWorkbenchOpen(),
+                neo::animationsEnabled(state), [&] {
                 state.settingsOpenLast = false;
                 ui.column("page")
                     .size(screen.width, screen.height)
@@ -791,9 +792,10 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                                     ? std::min(neo::findPanelHeight(state) + 24.0f,
                                                std::max(0.0f, bodyHeight - 80.0f)) : 0.0f;
                                 ui.column("editor.region").size(editorWidth, bodyHeight).content([&] {
-                                    if (capsuleRail > 0.0f)
-                                        ui.rect("editor.region.background").size(editorWidth, bodyHeight)
-                                            .ignoreLayout().color(colors.editor).build();
+                                    // Paint through the native resize allowance as well, so it
+                                    // remains part of the editor surface rather than a window-color seam.
+                                    ui.rect("editor.region.background").size(editorWidth, bodyHeight)
+                                        .ignoreLayout().color(colors.editor).build();
                                     neo::markdownToolbarView(ui, state, editorWidth);
                                     if (findClearance > 0.0f)
                                         ui.rect("editor.find.clearance").size(editorWidth, findClearance)
@@ -887,7 +889,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                 // 只读思维导图预览（2026-10-11 计划阶段 C/D）：同范式模态层。
                 if (!state.mindmapPreview.inlineMode) neo::mindmapPreviewOverlay(ui, state, screen);
                 neo::languageOverlay(ui,state,screen);
-            }
+            });
             neo::windowChromeView(ui,screen,chromeHeight);
         })
         .build();

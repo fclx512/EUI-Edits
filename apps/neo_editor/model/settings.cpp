@@ -256,6 +256,8 @@ Data& current() {
                     loaded.codeFontFile = value;
                 } else if (key == "theme") {
                     loaded.theme = value == "1" ? 1 : value == "2" ? 2 : 0;
+                } else if (key == "ui_style") {
+                    loaded.uiStyle = value == "1" ? 1 : 0;
                 } else if (key == "last_theme_file") {
                     loaded.lastThemeFile = value;
                 } else if (key == "line_numbers") {
@@ -305,6 +307,7 @@ bool flush() {
     output << "animations=" << (data.animations ? 1 : 0) << '\n';
     output << "attachment_mode=" << data.attachmentMode << '\n';
     output << "theme=" << data.theme << '\n';
+    output << "ui_style=" << data.uiStyle << '\n';
     std::ostringstream scale;
     scale << data.uiScale;
     output << "ui_scale=" << scale.str() << '\n';

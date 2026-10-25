@@ -62,6 +62,10 @@ struct RadiusTokens {
     float full = 999.0f;
 };
 
+// 界面几何风格：与配色无关的一条轴。Rounded 是现行 Win11 观感，Square 是
+// Win10 直角观感。只影响界面控件的转角；胶囊/圆点（full 及 height*0.5）不变。
+enum class CornerStyle { Rounded = 0, Square = 1 };
+
 struct ControlSizeTokens {
     float progress = 14.0f;
     float indicator = 22.0f;
@@ -83,7 +87,32 @@ struct ThemeMetricTokens {
     SpacingTokens spacing;
     RadiusTokens radius;
     ControlSizeTokens control;
+    CornerStyle corners = CornerStyle::Rounded;
 };
+
+// 直角模式只压矩形外框使用的令牌。full（滚动条/胶囊）和控件里按高度一半
+// 计算的圆形轨道保持原样，否则开关、单选框会被压扁。
+inline void applyCornerStyle(ThemeMetricTokens& metrics, CornerStyle style) {
+    metrics.corners = style;
+    if (style != CornerStyle::Square) return;
+    metrics.radius.micro = 0.0f;
+    metrics.radius.tiny = 0.0f;
+    metrics.radius.small = 0.0f;
+    metrics.radius.control = 0.0f;
+    metrics.radius.tooltip = 0.0f;
+    metrics.radius.popup = 0.0f;
+    metrics.radius.card = 0.0f;
+    metrics.radius.elevated = 0.0f;
+    metrics.radius.overlay = 0.0f;
+    metrics.radius.section = 0.0f;
+    metrics.radius.feature = 0.0f;
+}
+
+// 把“圆角值”按当前风格折成实际半径。硬编码半径的调用点走这里，直角模式下
+// 统一归零，圆角模式保持原值。
+inline float cornerRadius(const ThemeMetricTokens& metrics, float rounded) {
+    return metrics.corners == CornerStyle::Square ? 0.0f : rounded;
+}
 
 struct ThemeColorTokens {
     core::Color background;

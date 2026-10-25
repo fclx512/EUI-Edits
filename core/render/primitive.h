@@ -24,6 +24,8 @@ public:
     void setBounds(float x, float y, float width, float height);
     void setColor(const Color& color);
     void setGradient(const Gradient& gradient);
+    void setReveal(const RevealEffect& reveal);
+    void setFrozenBackdrop(const FrozenBackdrop& material);
     void setCornerRadius(float radius);
     void setOpacity(float opacity);
     void setBorder(const Border& border);
@@ -39,6 +41,7 @@ public:
     const Rect& bounds() const;
     const Color& color() const;
     const Gradient& gradient() const;
+    const RevealEffect& reveal() const;
     const Border& border() const;
     const Shadow& shadow() const;
     float blur() const;

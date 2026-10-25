@@ -150,6 +150,21 @@ void cancelIme(HWND hwnd, State& s) {
     core::queueTextEditing(hwnd, {});
     s.cancellingIme = false;
 }
+// A custom caption is non-client for native drag/resize, but its pixels still
+// belong to this window's visual lighting field. This never queues UI input.
+void updateVisualPointerAtScreen(HWND hwnd, POINT screen, bool focusLost) {
+    const HWND atPoint = WindowFromPoint(screen);
+    POINT client = screen;
+    RECT bounds{};
+    if (focusLost || !atPoint || GetAncestor(atPoint, GA_ROOT) != hwnd ||
+        !ScreenToClient(hwnd, &client) || !GetClientRect(hwnd, &bounds) ||
+        !PtInRect(&bounds, client)) {
+        core::queueVisualPointerPresence(hwnd, false);
+        return;
+    }
+    core::queueVisualPointerMotion(hwnd, client.x, client.y);
+}
+
 LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
     State* s = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -241,15 +256,18 @@ LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
         // Deactivation precedes the default focus/context transfer on this HWND.
         // Cancel here, before an IME can finalize raw preedit during that transfer.
         s->focusLost = LOWORD(w) == WA_INACTIVE || HIWORD(w) != 0;
+        if (s->focusLost) core::queueVisualPointerPresence(hwnd, false);
         if (s->focusLost) cancelIme(hwnd, *s);
         break;
     case WM_ACTIVATEAPP:
         s->focusLost = !w;
+        if (s->focusLost) core::queueVisualPointerPresence(hwnd, false);
         if (s->focusLost) cancelIme(hwnd, *s);
         break;
     case WM_SETFOCUS: s->focusLost = false; if (s->focus) s->focus(hwnd,1); break;
     case WM_KILLFOCUS:
         s->focusLost = true;
+        core::queueVisualPointerPresence(hwnd, false);
         cancelIme(hwnd, *s);
         if (s->input) core::cancelInput(hwnd);
         if (s->focus) s->focus(hwnd,0); break;
@@ -267,9 +285,29 @@ LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
     case WM_MOUSEMOVE: {
         TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd, 0}; TrackMouseEvent(&tracking);
         core::queuePointerPresence(hwnd, true);
-        core::queuePointerMotion(hwnd, GET_X_LPARAM(l), GET_Y_LPARAM(l), core::detail::pointerState(hwnd).buttons, modifiers()); return 0;
+        core::queuePointerMotion(hwnd, GET_X_LPARAM(l), GET_Y_LPARAM(l), core::detail::pointerState(hwnd).buttons, modifiers());
+        if (s->focusLost) core::queueVisualPointerPresence(hwnd, false);
+        return 0;
     }
-    case WM_MOUSELEAVE: core::queuePointerPresence(hwnd,false); return 0;
+    case WM_MOUSELEAVE: {
+        core::queuePointerPresence(hwnd, false);
+        POINT screen{};
+        if (GetCursorPos(&screen)) updateVisualPointerAtScreen(hwnd, screen, s->focusLost);
+        return 0;
+    }
+    case WM_NCMOUSEMOVE: {
+        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE | TME_NONCLIENT, hwnd, 0};
+        TrackMouseEvent(&tracking);
+        const POINT screen{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+        updateVisualPointerAtScreen(hwnd, screen, s->focusLost);
+        break;
+    }
+    case WM_NCMOUSELEAVE: {
+        POINT screen{};
+        if (GetCursorPos(&screen)) updateVisualPointerAtScreen(hwnd, screen, s->focusLost);
+        else core::queueVisualPointerPresence(hwnd, false);
+        break;
+    }
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_RBUTTONDOWN: case WM_RBUTTONUP:
     case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_XBUTTONDOWN: case WM_XBUTTONUP: {
         const bool down = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN || message == WM_MBUTTONDOWN || message == WM_XBUTTONDOWN;

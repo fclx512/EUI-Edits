@@ -1,6 +1,7 @@
 #pragma once
 
 #include "components/theme.h"
+#include "components/text_alignment.h"
 #include "core/dsl.h"
 #include "eui/signal.h"
 
@@ -301,12 +302,14 @@ private:
 
         ui_.text(id_ + ".title")
             .x(24.0f)
-            .y(metrics_.typography.control)
+            .y(metrics_.typography.control + text_alignment::singleLineTop(
+                metrics_.spacing.header, metrics_.typography.heading))
             .size(std::max(0.0f, width - metrics_.spacing.overlay * 2.0f - metrics_.control.compact),
                   metrics_.spacing.header)
             .text("Date")
             .fontSize(metrics_.typography.heading)
             .lineHeight(metrics_.typography.heading + metrics_.typography.lineGapRelaxed)
+            .verticalAlign(core::VerticalAlign::Top)
             .color(style_.text)
             .build();
 
@@ -317,7 +320,7 @@ private:
             .states(style_.accent,
                     core::mixColor(style_.accent, theme::color(1.0f, 1.0f, 1.0f), 0.12f),
                     core::mixColor(style_.accent, theme::color(0.0f, 0.0f, 0.0f), 0.14f))
-            .radius(metrics_.spacing.header * 0.5f)
+            .radius(theme::cornerRadius(metrics_, metrics_.spacing.header * 0.5f))
             .disabled(!open_)
             .onClick([draft, committedYear, committedMonth, committedDay, onChange, onOpenChange] {
                 if (draft != nullptr && onChange &&

@@ -65,6 +65,27 @@ int main() {
           "NaN zoom cap leaves viewport state unchanged");
     check(invalidCapLeavesState(0.05f), "zoom cap below minimum leaves viewport state unchanged");
 
+    // The photo viewer is centered per axis and cannot expose blank space by
+    // panning beyond an enlarged image's edges. Canvas behavior above stays free.
+    neo::ImageViewport photo;
+    using Bounds=neo::ImageViewport::PanBounds;
+    photo.panX=150;photo.panY=-75;
+    photo.constrain(800,400,1000,800,Bounds::Window);
+    check(near(photo.panX,0) && near(photo.panY,0),"fitted photo cannot be displaced by dragging");
+    photo.pointerKnown=true;photo.pointerX=900;photo.pointerY=100;
+    photo.wheel(1,800,400,1000,800,16,Bounds::Window);
+    check(near(photo.panX,0) && near(photo.panY,0),"photo zoom keeps the window center regardless of pointer");
+    photo.panX=500;photo.panY=500;
+    photo.constrain(800,400,1000,800,Bounds::Window);
+    check(near(photo.panX,52) && near(photo.panY,0),"only overflowing horizontal viewport can pan to its edge");
+    photo.wheel(-1,800,400,1000,800,16,Bounds::Window);
+    check(near(photo.zoom,1) && near(photo.panX,0) && near(photo.panY,0),"zooming back to fit recenters the photo");
+    photo.zoom=2;photo.panX=500;photo.panY=-500;
+    photo.constrain(400,800,1000,800,Bounds::Window);
+    check(near(photo.panX,0) && near(photo.panY,-336),"portrait photo pans only in its overflowing vertical viewport");
+    photo.constrain(400,800,400,2000,Bounds::Window);
+    check(near(photo.panX,0) && near(photo.panY,0),"changed window aspect recenters the axis that now fits");
+
     view = neo::ImageViewport{};
     check(view.zoom == 1 && view.panX == 0 && view.panY == 0 && !view.pointerKnown && view.focusPending, "reopen resets view and acquires focus");
     std::printf("image viewport: %s\n", failures ? "FAILED" : "passed");

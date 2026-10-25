@@ -12,6 +12,7 @@
 #include "ui/metrics.h"
 #include "ui/widgets.h"
 #include "ui/icons.h"
+#include "ui/popup_presentation.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -461,7 +462,7 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
     inputStyle.focusBorder = colors.accent;
     inputStyle.text = colors.text;
     inputStyle.cursor = colors.accent;
-    inputStyle.radius = 5.0f;
+    inputStyle.radius = neo::corner(colors, 5.0f);
     inputStyle.shadow = eui::Shadow{};
     const auto centerFieldText = [&](const char* id) {
         if (auto* viewport = ui.find(std::string(id) + ".textViewport")) {
@@ -478,7 +479,7 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
     };
     const auto button = [&](const char* id, const char* label, float bx, float bw, FindAction action) {
         components::button(ui, id).position(bx, replacementTop).size(bw, fieldHeight)
-            .text(label).fontSize(fontSize).radius(5.0f)
+            .text(label).fontSize(fontSize).radius(neo::corner(colors, 5.0f))
             .colors(colors.editor, colors.rowHover, colors.pressed)
             .textColor(colors.text).border(1, colors.border)
             .shadow(0, 0, 0, transparentColor()).preserveFocusOnPress()
@@ -486,7 +487,7 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
             .onClick([&state, action] { queueFindAction(state, action); }).build();
     };
     ui.stack("find.bar").position(x, y).size(width, height).zIndex(20).content([&] {
-        ui.rect("find.background").fill().radius(9).color(colors.toolbar)
+        ui.rect("find.background").fill().radius(neo::corner(colors, 9.0f)).color(colors.toolbar)
             .border(1, colors.border)
             .shadow(14, 0, 4, rgba(0, 0, 0, state.theme == ThemeMode::Light ? .12f : .24f))
             .onClick([] {}).build();
@@ -537,7 +538,11 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
         iconButton(ui, "find.previous", UiIcon::Previous, navX + fieldHeight, top, fieldHeight, hasMatches,
                    [&state] { queueFindAction(state, FindAction::Previous); });
         iconButton(ui, "find.options", UiIcon::Sliders, navX + fieldHeight*2, top, fieldHeight, true,
-                   [&state] { state.findOptionsOpen = !state.findOptionsOpen; app::requestUpdate(); });
+                   [&state] {
+                       if (state.findOptionsOpen) state.findOptionsOpen = false;
+                       else popup_presentation::activate(state, popup_presentation::Owner::FindOptions);
+                       app::requestUpdate();
+                   });
         iconButton(ui, "find.close", UiIcon::Close, navX + fieldHeight*3, top, fieldHeight, true,
                    [&state] { closeFindBar(state); });
         if (state.findReplaceOpen) {
@@ -566,7 +571,7 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
     using Item = components::ContextMenuItem;
     auto menuTokens = colors.tokens;
     menuTokens.metrics.typography.option = fontSize;
-    components::contextMenu(ui, "find.options.menu").open(state.findOptionsOpen)
+    auto optionsMenu = components::contextMenu(ui, "find.options.menu").open(state.findOptionsOpen)
         .theme(menuTokens).screen(screen.width, screen.height)
         .position(x+navX+fieldHeight*2-168, y+top+fieldHeight+6)
         .size(std::max(210.0f, fontSize*12+40), fontSize+18)
@@ -574,8 +579,10 @@ inline void findBarView(eui::Ui& ui, AppState& state, float width, float x, floa
                                 Item(i18n::tr("find.whole_word")).withChecked(state.findWholeWord),
                                 Item(i18n::tr("find.wrap")).withChecked(state.findWrap),
                                 Item(i18n::tr("find.document_scope")).withChecked(!state.findSelectionOnly),
-                                Item(i18n::tr("find.selection_scope")).withChecked(state.findSelectionOnly)})
-        .zIndex(1050).onSelectPath([&state](const std::vector<int>& path) {
+                                Item(i18n::tr("find.selection_scope")).withChecked(state.findSelectionOnly)});
+    popup_presentation::apply(optionsMenu, state,
+                          menuTokens, state.findOptionsOpen);
+    optionsMenu.zIndex(1050).onSelectPath([&state](const std::vector<int>& path) {
             if (path.empty()) return;
             if (path[0] == 0) state.findMatchCase = !state.findMatchCase;
             if (path[0] == 1) state.findWholeWord = !state.findWholeWord;

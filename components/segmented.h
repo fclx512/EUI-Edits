@@ -61,7 +61,10 @@ public:
 
     void build() {
         const float fontSize = fontSize_ > 0.0f ? fontSize_ : metrics_.typography.body;
-        const float radius = radius_ > 0.0f ? radius_ : metrics_.radius.control + metrics_.spacing.hairline;
+        const float radius = radius_ > 0.0f ? radius_
+            : (metrics_.corners == theme::CornerStyle::Square
+                   ? 0.0f
+                   : metrics_.radius.control + metrics_.spacing.hairline);
         const int count = static_cast<int>(items_.size());
         const int selected = count > 0 ? std::clamp(selected_, 0, count - 1) : 0;
         const float segmentWidth = count > 0 ? width_ / static_cast<float>(count) : width_;

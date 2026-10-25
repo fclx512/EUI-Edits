@@ -1,13 +1,17 @@
 #pragma once
 
 #include "components/theme.h"
+#include "components/text_alignment.h"
 #include "components/vector_icon.h"
 #include "core/dsl.h"
 #include "eui/signal.h"
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <initializer_list>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,6 +42,15 @@ struct ContextMenuStyle {
     core::Color border;
     core::Shadow shadow;
     float radius = 12.0f;
+};
+
+// Optional application motion policy. Unlike transition(), it keeps glyphs at
+// their final scale and gives entering, exiting and row feedback separate timing.
+struct ContextMenuMotion {
+    core::Transition enter;
+    core::Transition exit;
+    core::Transition highlight;
+    float offsetY = -4.0f;
 };
 
 struct ContextMenuItem {
@@ -83,6 +96,37 @@ struct ContextMenuItem {
 };
 
 namespace context_menu_detail {
+
+struct FrozenBackdropLifecycle {
+    bool wasOpen = false;
+    bool wasEnabled = false;
+    std::uint64_t session = 0;
+};
+
+inline std::uint64_t nextFrozenBackdropSession() {
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+inline std::uint64_t frozenBackdropPanelKey(const std::string& menuId, int depth,
+                                            const std::vector<int>& prefix) {
+    std::uint64_t hash = 14695981039346656037ull;
+    const auto append = [&hash](std::uint32_t value) {
+        for (int shift = 0; shift < 32; shift += 8) {
+            hash ^= static_cast<std::uint8_t>((value >> shift) & 0xffu);
+            hash *= 1099511628211ull;
+        }
+    };
+    append(static_cast<std::uint32_t>(menuId.size()));
+    for (unsigned char value : menuId) {
+        hash ^= value;
+        hash *= 1099511628211ull;
+    }
+    append(static_cast<std::uint32_t>(depth));
+    append(static_cast<std::uint32_t>(prefix.size()));
+    for (int index : prefix) append(static_cast<std::uint32_t>(index));
+    return hash == 0 ? 1 : hash;
+}
 
 struct MenuItemSlots {
     float leading = 0.0f;
@@ -215,12 +259,31 @@ public:
     }
     ContextMenuBuilder& items(std::vector<ContextMenuItem> value) { items_ = std::move(value); return *this; }
     ContextMenuBuilder& style(const ContextMenuStyle& value) { style_ = value; return *this; }
+    // Explicit app opt-in. `enabled=false` still observes open/close edges so
+    // enabling the material while a menu is open starts a fresh frozen session.
+    ContextMenuBuilder& frozenBackdrop(float sigma = 8.0f, float tintOpacity = 0.78f,
+                                       bool enabled = true) {
+        frozenBackdropTracked_ = true;
+        frozenBackdropEnabled_ = enabled;
+        frozenBackdropSigma_ = std::max(0.0f, sigma);
+        frozenBackdropTintOpacity_ = std::clamp(tintOpacity, 0.0f, 1.0f);
+        return *this;
+    }
+    // Optional, synchronous decoration between the panel and its hit/row layers.
+    // It must preserve layout and avoid interactive descendants; hidden levels
+    // do not invoke it. The default leaves existing menus unchanged.
+    ContextMenuBuilder& backgroundDecoration(
+        std::function<void(core::dsl::Ui&, const std::string&, float, float)> callback) {
+        backgroundDecoration_ = std::move(callback);
+        return *this;
+    }
     ContextMenuBuilder& theme(const theme::ThemeColorTokens& tokens) {
         style_ = ContextMenuStyle(tokens);
         metrics_ = tokens.metrics;
         return *this;
     }
     ContextMenuBuilder& transition(const core::Transition& value) { transition_ = value; return *this; }
+    ContextMenuBuilder& motion(const ContextMenuMotion& value) { motion_ = value; return *this; }
     ContextMenuBuilder& zIndex(int value) { zIndex_ = value; return *this; }
     ContextMenuBuilder& onSelect(std::function<void(int)> callback) { onSelect_ = std::move(callback); return *this; }
     ContextMenuBuilder& onSelectPath(std::function<void(const std::vector<int>&)> callback) { onSelectPath_ = std::move(callback); return *this; }
@@ -233,6 +296,18 @@ public:
     }
 
     void build() {
+        std::uint64_t backdropSession = 0;
+        if (frozenBackdropTracked_) {
+            auto& lifecycle = ui_.state<context_menu_detail::FrozenBackdropLifecycle>(
+                id_ + ".frozenBackdrop.lifecycle");
+            if (open_ && frozenBackdropEnabled_ &&
+                (!lifecycle.wasOpen || !lifecycle.wasEnabled)) {
+                lifecycle.session = context_menu_detail::nextFrozenBackdropSession();
+            }
+            lifecycle.wasOpen = open_;
+            lifecycle.wasEnabled = frozenBackdropEnabled_;
+            backdropSession = lifecycle.session;
+        }
         if (items_.empty()) {
             return;
         }
@@ -250,12 +325,19 @@ public:
         const std::function<void(const std::vector<int>&)> onSelectPath = onSelectPath_;
         const std::function<void(float, float)> onOutsideContextMenu = onOutsideContextMenu_;
         CascadeState* cascade = &ui_.state<CascadeState>(id_ + ".cascade");
-        if (!open_) {
+        if (motion_ && open_ && !cascade->wasOpen) {
             cascade->openPath.clear();
             cascade->renderedPath.clear();
             cascade->hoveredPath.clear();
             cascade->pressedPath.clear();
-            if (skipClosedContent_ && !transition_.enabled) {
+        }
+        cascade->wasOpen = open_;
+        if (!open_) {
+            cascade->openPath.clear();
+            if (!retainExitLevels()) cascade->renderedPath.clear();
+            cascade->hoveredPath.clear();
+            cascade->pressedPath.clear();
+            if (skipClosedContent_ && !hasLevelTransitions()) {
                 // renderLevel normally resets the root offset while closed.
                 ui_.state<float>(id_ + ".level.0.offset") = 0.0f;
                 return;
@@ -265,6 +347,9 @@ public:
         ui_.stack(id_)
             .size(screenWidth_, screenHeight_)
             .zIndex(zIndex_)
+            // A tracked popup remains transient while closing or falling back.
+            // Its exit animation must not enter another popup's clean source.
+            .excludeFromBackdropSnapshot(frozenBackdropTracked_)
             .content([&] {
                 if (open_) {
                     ui_.rect(id_ + ".dismiss")
@@ -287,7 +372,8 @@ public:
                 ui_.stack(id_ + ".menu")
                     .size(screenWidth_, screenHeight_)
                     .content([&] {
-                        renderMenus(x, y, width, inset, *cascade, onSelect, onSelectPath, requestDismiss);
+                        renderMenus(x, y, width, inset, *cascade, onSelect, onSelectPath,
+                                    requestDismiss, backdropSession);
                     })
                     .build();
             })
@@ -295,6 +381,14 @@ public:
     }
 
 private:
+    core::Transition levelTransition(bool visible) const {
+        return motion_ ? (visible ? motion_->enter : motion_->exit) : transition_;
+    }
+    bool hasLevelTransitions() const {
+        return motion_ ? motion_->enter.enabled || motion_->exit.enabled : transition_.enabled;
+    }
+    bool retainExitLevels() const { return motion_ && motion_->exit.enabled; }
+
     float visibleMenuHeight(float height) const {
         return std::min(height, std::max(1.0f, screenHeight_ - std::max(8.0f, dismissTopInset_) - 8.0f));
     }
@@ -303,6 +397,7 @@ private:
             desiredY, visibleMenuHeight(height), screenHeight_));
     }
     struct CascadeState {
+        bool wasOpen = false;
         std::vector<int> openPath;
         std::vector<int> renderedPath;
         std::vector<int> hoveredPath;
@@ -332,7 +427,8 @@ private:
     void renderMenus(float rootX, float rootY, float width, float inset, CascadeState& cascade,
                      const std::function<void(int)>& onSelect,
                      const std::function<void(const std::vector<int>&)>& onSelectPath,
-                     const std::function<void()>& requestDismiss) {
+                     const std::function<void()>& requestDismiss,
+                     std::uint64_t backdropSession) {
         const std::vector<ContextMenuItem>* levelItems = &items_;
         std::vector<int> prefix;
         float menuX = rootX;
@@ -378,7 +474,8 @@ private:
             const bool visible = open_ && (depth == 0 || depth <= static_cast<int>(cascade.openPath.size()));
             ui_.state<float>(id_ + ".level." + std::to_string(depth) + ".resolvedWidth") = levelWidth;
             renderLevel(*levelItems, prefix, depth, menuX, menuY, levelWidth, levelInset, levelPresentation,
-                        visible, cascade, separatorGap, onSelect, onSelectPath, requestDismiss);
+                        visible, cascade, separatorGap, onSelect, onSelectPath, requestDismiss,
+                        backdropSession);
             renderedLevels = depth + 1;
         }
 
@@ -396,7 +493,8 @@ private:
                      float separatorGap,
                      const std::function<void(int)>& onSelect,
                      const std::function<void(const std::vector<int>&)>& onSelectPath,
-                     const std::function<void()>& requestDismiss) {
+                     const std::function<void()>& requestDismiss,
+                     std::uint64_t backdropSession) {
         const std::string levelId = id_ + ".level." + std::to_string(depth);
         const float itemHeight = resolvedItemHeight();
         const float height = context_menu_detail::menuHeight(levelItems, itemHeight, inset, separatorGap);
@@ -404,17 +502,21 @@ private:
         const float maxOffset = std::max(0.0f, height - viewportHeight);
         float& offset = ui_.state<float>(levelId + ".offset");
         auto& previousPrefix = ui_.state<std::vector<int>>(levelId + ".scrollPrefix");
-        if (!visible || previousPrefix != prefix) offset = 0.0f;
+        bool& wasVisible = ui_.state<bool>(levelId + ".motion.visible");
+        if (previousPrefix != prefix || (motion_ ? visible && !wasVisible : !visible)) offset = 0.0f;
         previousPrefix = prefix;
+        wasVisible = visible;
         offset = std::clamp(offset, 0.0f, maxOffset);
         // Runtime scroll ownership is identified by the element's own ID.
         const std::string scrollId = levelId + ".viewport";
         const float opacity = visible ? 1.0f : 0.0f;
-        const float scale = visible ? 1.0f : 0.94f;
-        const float offsetY = visible ? 0.0f : -4.0f;
+        const float scale = visible || motion_ ? 1.0f : 0.94f;
+        const float offsetY = visible ? 0.0f : motion_ ? motion_->offsetY : -4.0f;
         const bool hasCheckColumn = std::any_of(levelItems.begin(), levelItems.end(),
             [](const ContextMenuItem& item) { return item.checkable || item.checked; });
         const float checkColumnWidth = presentation.compactCheckColumn ? 24.0f : 26.0f;
+        const float labelTop = text_alignment::singleLineTop(itemHeight, metrics_.typography.option);
+        const float shortcutTop = text_alignment::singleLineTop(itemHeight, metrics_.typography.micro);
 
         auto level = ui_.stack(levelId);
         level.x(x).y(y).size(width, viewportHeight)
@@ -423,13 +525,39 @@ private:
             .translateY(offsetY)
             .scale(scale)
             .transformOrigin(0.0f, 0.0f);
-        if (transition_.enabled) {
-            level.transition(transition_)
+        const auto transition = levelTransition(visible);
+        if (transition.enabled) {
+            level.transition(transition)
                 .animate(core::AnimProperty::Opacity | core::AnimProperty::Transform);
         }
+        if (depth > 0 && !visible && retainExitLevels()) {
+            // Keep rows only for their exit. A bounded timer prunes the hidden
+            // child tree after the final decoration sample; it is then removed.
+            const auto exit = core::scaledTransition(motion_->exit);
+            const float delay = exit.delaySeconds + exit.durationSeconds + 1.0f / 60.0f;
+            level.onTimer(delay, [cascadePtr = &cascade, depth, prefix] {
+                if (static_cast<int>(cascadePtr->openPath.size()) >= depth ||
+                    cascadePtr->renderedPath.size() < prefix.size() ||
+                    !std::equal(prefix.begin(), prefix.end(), cascadePtr->renderedPath.begin())) return;
+                cascadePtr->renderedPath.resize(std::min(cascadePtr->renderedPath.size(),
+                                                        static_cast<std::size_t>(depth - 1)));
+            });
+        }
         level.content([&] {
-                ui_.rect(levelId + ".bg").size(width, viewportHeight).color(style_.background)
-                    .radius(style_.radius).border(metrics_.spacing.hairline, style_.border).shadow(style_.shadow).build();
+                auto background = ui_.rect(levelId + ".bg").size(width, viewportHeight).color(style_.background)
+                    .radius(style_.radius).border(metrics_.spacing.hairline, style_.border).shadow(style_.shadow);
+                if (visible && frozenBackdropEnabled_ && backdropSession != 0) {
+                    core::FrozenBackdrop material;
+                    material.session = backdropSession;
+                    material.panel = context_menu_detail::frozenBackdropPanelKey(id_, depth, prefix);
+                    material.sigma = frozenBackdropSigma_;
+                    material.tintOpacity = frozenBackdropTintOpacity_;
+                    background.frozenBackdrop(material);
+                }
+                background.build();
+                if (visible && backgroundDecoration_) {
+                    backgroundDecoration_(ui_, levelId, width, viewportHeight);
+                }
                 ui_.rect(levelId + ".hit").size(width, viewportHeight)
                     .states(theme::color(0, 0, 0, 0), theme::color(0, 0, 0, 0), theme::color(0, 0, 0, 0))
                     .disabled(!visible).blockPointer().build();
@@ -467,15 +595,35 @@ private:
                         highlightedIndex = index;
                     }
                 }
-                if (highlightedIndex >= 0) {
-                    const float highlightedY = context_menu_detail::menuItemTop(
-                        levelItems, static_cast<std::size_t>(highlightedIndex), itemHeight, inset, separatorGap);
-                    ui_.rect(levelId + ".highlight")
+                if (!visible) highlightedIndex = -1;
+                if (motion_ || highlightedIndex >= 0) {
+                    struct HighlightState {
+                        int index = -1;
+                        float y = 0.0f, width = 0.0f, offset = 0.0f;
+                        std::vector<int> prefix;
+                        bool follow = false;
+                    };
+                    auto& previous = ui_.state<HighlightState>(levelId + ".motion.highlight");
+                    const float highlightedY = highlightedIndex >= 0 ? context_menu_detail::menuItemTop(
+                        levelItems, static_cast<std::size_t>(highlightedIndex), itemHeight, inset, separatorGap)
+                        : previous.y;
+                    const bool follow = visible && highlightedIndex >= 0 && previous.index >= 0 &&
+                        (std::abs(highlightedIndex - previous.index) == 1 ||
+                         (highlightedIndex == previous.index && previous.follow)) && previous.prefix == prefix &&
+                        core::closeEnough(previous.width, width) && core::closeEnough(previous.offset, offset);
+                    auto highlight = ui_.rect(levelId + ".highlight")
                         .x(inset).y(highlightedY)
                         .size(std::max(0.0f, width - inset * 2.0f), itemHeight)
+                        .opacity(highlightedIndex >= 0 ? 1.0f : 0.0f)
                         .color(highlightedPressed ? style_.pressed : style_.hover)
                         .radius(std::max(metrics_.radius.tiny, style_.radius - metrics_.radius.tiny))
-                        .build();
+                        .hitTestMode(core::dsl::HitTestMode::None);
+                    if (motion_ && highlightedIndex >= 0 && motion_->highlight.enabled) {
+                        highlight.transition(motion_->highlight).animate(core::AnimProperty::Color |
+                            (follow ? core::AnimProperty::Frame : core::AnimProperty::None));
+                    }
+                    highlight.build();
+                    previous = {highlightedIndex, highlightedY, width, offset, prefix, follow};
                 }
 
                 for (int index = 0; index < static_cast<int>(levelItems.size()); ++index) {
@@ -513,7 +661,7 @@ private:
                         .cursor(item.enabled ? core::CursorShape::Hand : core::CursorShape::Arrow)
                         .disabled(!visible)
                         .onHover([cascadePtr = &cascade, path, prefix, hasChildren = item.hasChildren(),
-                                  enabled = item.enabled](bool isHovered) {
+                                  enabled = item.enabled, retainExit = retainExitLevels()](bool isHovered) {
                             if (!isHovered) {
                                 if (cascadePtr->hoveredPath == path) cascadePtr->hoveredPath.clear();
                                 if (cascadePtr->pressedPath == path) cascadePtr->pressedPath.clear();
@@ -522,7 +670,7 @@ private:
                             if (!enabled) {
                                 cascadePtr->hoveredPath.clear();
                                 cascadePtr->openPath = prefix;
-                                cascadePtr->renderedPath = prefix;
+                                if (!retainExit) cascadePtr->renderedPath = prefix;
                                 return;
                             }
                             cascadePtr->hoveredPath = path;
@@ -531,7 +679,7 @@ private:
                                 cascadePtr->renderedPath = path;
                             } else {
                                 cascadePtr->openPath.pop_back();
-                                cascadePtr->renderedPath = prefix;
+                                if (!retainExit) cascadePtr->renderedPath = prefix;
                             }
                         })
                         .onPress([cascadePtr = &cascade, path, enabled = item.enabled](const core::PointerEvent&,
@@ -558,7 +706,7 @@ private:
                         .build();
                     ui_.text(levelId + ".label." + std::to_string(index))
                         .x(inset + slots.leading)
-                        .y(itemY + std::max(0.0f, (itemHeight - labelHeight) * 0.5f))
+                        .y(itemY + labelTop)
                         .size(std::max(0.0f, width - inset * 2.0f - slots.leading -
                                       slots.trailing - slots.shortcut - slots.shortcutGap),
                               labelHeight)
@@ -567,6 +715,7 @@ private:
                         .lineHeight(metrics_.typography.option + metrics_.typography.lineGapTight)
                         .horizontalAlign(presentation.centerLabels ? core::HorizontalAlign::Center
                                                                   : core::HorizontalAlign::Left)
+                        .verticalAlign(core::VerticalAlign::Top)
                         .color(item.enabled ? style_.text : style_.mutedText).build();
                     if (item.checked) {
                         const float markSize = 16.0f;
@@ -581,12 +730,12 @@ private:
                         const float shortcutX = width - inset - slots.trailing - slots.shortcut;
                         ui_.text(levelId + ".shortcut." + std::to_string(index))
                             .x(shortcutX)
-                            .y(itemY).size(slots.shortcut, itemHeight)
+                            .y(itemY + shortcutTop).size(slots.shortcut, metrics_.typography.micro * 1.2f)
                             .text(item.shortcut)
                             .fontSize(metrics_.typography.micro)
                             .color(style_.mutedText)
                             .horizontalAlign(core::HorizontalAlign::Right)
-                            .verticalAlign(core::VerticalAlign::Center)
+                            .verticalAlign(core::VerticalAlign::Top)
                             .build();
                     }
                     if (item.hasChildren()) {
@@ -609,12 +758,14 @@ private:
     void renderHiddenLevel(int depth, float width) {
         auto level = ui_.stack(id_ + ".level." + std::to_string(depth));
         level.size(width, 0.0f)
+            .disabled()
             .opacity(0.0f)
-            .translateY(-4.0f)
-            .scale(0.94f)
+            .translateY(motion_ ? motion_->offsetY : -4.0f)
+            .scale(motion_ ? 1.0f : 0.94f)
             .transformOrigin(0.0f, 0.0f);
-        if (transition_.enabled) {
-            level.transition(transition_)
+        const auto transition = levelTransition(false);
+        if (transition.enabled) {
+            level.transition(transition)
                 .animate(core::AnimProperty::Opacity | core::AnimProperty::Transform);
         }
         level.build();
@@ -633,8 +784,14 @@ private:
     std::string id_;
     std::vector<ContextMenuItem> items_;
     ContextMenuStyle style_;
+    std::function<void(core::dsl::Ui&, const std::string&, float, float)> backgroundDecoration_;
+    bool frozenBackdropTracked_ = false;
+    bool frozenBackdropEnabled_ = false;
+    float frozenBackdropSigma_ = 8.0f;
+    float frozenBackdropTintOpacity_ = 0.78f;
     theme::ThemeMetricTokens metrics_;
     core::Transition transition_ = core::Transition::none();
+    std::optional<ContextMenuMotion> motion_;
     std::function<void(int)> onSelect_;
     std::function<void(const std::vector<int>&)> onSelectPath_;
     std::function<void(bool)> onOpenChange_;

@@ -79,12 +79,36 @@ int main() {
     ui.end();
     ui.layout(screen.width, screen.height);
     const auto* imageHit = ui.find("imagePreview.hit");
+    const auto* image = ui.find("imagePreview.img");
+    const auto* imageClose = ui.find("imagePreview.close.hit");
     check(imageHit && imageHit->zIndex > 2600 && imageHit->zIndex < 3000,
           "Image preview must receive input above menus and tab popovers, below window controls");
-    if (imageHit) {
+    check(image && std::abs(image->frame.x + image->frame.width*.5f-screen.width*.5f)<.01f &&
+          std::abs(image->frame.y + image->frame.height*.5f-screen.height*.5f)<.01f,
+          "New image is centered without a pointer-dependent offset");
+    if (imageHit && imageClose) {
         click.x = 500; click.y = 15;
         imageHit->onPress(click, core::Rect{0, 0, screen.width, screen.height});
-        check(state.imagePreviewPath.empty(), "Caption-area preview click closes without editing the document");
+        check(!state.imagePreviewPath.empty(), "Left press must not dismiss the image");
+        core::dsl::DragEvent drag;
+        drag.button=core::PointerButton::Left;drag.deltaX=48;drag.deltaY=-24;
+        imageHit->onDrag(drag);
+        check(state.imageViewport.panX==0 && state.imageViewport.panY==0,
+              "A fitted image remains centered when dragged");
+        state.imageViewport.zoom=2;
+        imageHit->onDrag(drag);
+        check(state.imageViewport.panX==48 && state.imageViewport.panY==-24 && !state.dirty(),
+              "Left drag moves only an enlarged image viewport without editing the document");
+        check(imageClose->frame.x>screen.width-60 && imageClose->frame.y<100,
+              "Image has an explicit upper-right close control");
+        imageClose->onClick();
+        check(state.imagePreviewPath.empty() && state.imageViewport.panX==0 && state.imageViewport.panY==0 &&
+              state.findEditorFocusPending,"Close button resets the view and restores editor focus");
+        state.imagePreviewPath="fixture.png";state.imagePreviewWidth=800;state.imagePreviewHeight=600;
+        ui.begin("image.ui.test");neo::imagePreviewOverlay(ui,state,screen);ui.end();ui.layout(screen.width,screen.height);
+        core::KeyEvent escape;escape.key=core::InputKey::Escape;
+        ui.find("imagePreview.hit")->onKeyEvent(escape);
+        check(state.imagePreviewPath.empty(),"Escape closes the image without a click");
     }
     return failures ? 1 : 0;
 }

@@ -7,6 +7,7 @@
 #include "ui/tab_bar.h"
 #include "ui/widgets.h"
 #include "ui/ui_language.h"
+#include "ui/popup_presentation.h"
 #include "platform/window_chrome.h"
 
 #include <algorithm>
@@ -166,7 +167,7 @@ inline void dispatchCommand(AppState& state, int id) {
         case Command::Copy: state.pendingEditorCommand=EditorCommand::Copy; break;
         case Command::SelectAll: state.pendingEditorCommand=EditorCommand::SelectAll; break;
         case Command::Find: openFindBar(state); break;
-        case Command::Syntax: state.languageMenuOpen=true; break;
+        case Command::Syntax: popup_presentation::activate(state, popup_presentation::Owner::Language); break;
         case Command::Mindmap:
             // 事件阶段拿不到输入组件光标：排队，compose 在编辑区计划就绪后消费。
             if (state.imagePreviewPath.empty()) state.mindmapPreviewPending = true;
@@ -186,7 +187,7 @@ inline void dispatchCommand(AppState& state, int id) {
         case Command::LanguageSystem: applyUiLanguage(state,"system"); break;
         case Command::LanguageChinese: applyUiLanguage(state,"zh-CN"); break;
         case Command::LanguageEnglish: applyUiLanguage(state,"en"); break;
-        case Command::Settings: state.settingsOpen=true; break;
+        case Command::Settings: popup_presentation::setSettingsOpen(state, true); break;
         default: break;
     }
     app::requestUpdate();
@@ -279,7 +280,7 @@ inline void menuTitleView(eui::Ui& ui,
         .x(x)
         .y(0.0f)
         .size(width, height)
-        .radius(6.0f)
+        .radius(neo::corner(colors, 6.0f))
         .states(active ? rgba(colors.accent.r, colors.accent.g, colors.accent.b, 0.16f)
                        : transparentColor(),
                 colors.rowHover,
@@ -358,7 +359,7 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
                            std::vector<components::ContextMenuItem> items,
                            std::function<void(const std::vector<int>&)> onSelect,
                            float popupWidth = 0.0f) {
-        components::contextMenu(ui, id)
+        auto menu = components::contextMenu(ui, id)
             .open(state.openMenu == kind)
             .screen(screen.width, screen.height)
             .position(x, metrics.menuBarHeight)
@@ -367,9 +368,10 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
                   std::max(metrics.menuWidth, i18n::language()=="en"?300.0f:metrics.menuWidth),
                   metrics.menuItemHeight)
             .items(std::move(items))
-            .theme(menuTokens)
-            .transition(animationsEnabled(state) ? quickTransition() : core::Transition::none())
-            .skipClosedContent()
+            .theme(menuTokens);
+        popup_presentation::apply(menu, state,
+                              menuTokens, state.openMenu == kind);
+        menu.skipClosedContent()
             .zIndex(900)
             .onSelectPath(std::move(onSelect))
             .onOpenChange([&state, kind](bool open) {
@@ -428,13 +430,13 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
 
     ui.stack("menubar")
         .size(screen.width, metrics.menuBarHeight)
+        .excludeFromBackdropSnapshot()
         .zIndex(2000)
         .content([&] {
-            ui.rect("menubar.bg")
-                .fill()
-                .color(colors.toolbar)
-                .build();
+            ui.rect("menubar.bg").fill().color(popup_presentation::opaque(colors.toolbar)).build();
             const auto openMenu = [&state, &ui](MenuKind kind) {
+                if (state.openMenu != kind)
+                    popup_presentation::activate(state, popup_presentation::Owner::MainMenu);
                 state.tabListOpen = false;
                 ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
                 ui.requestFocus(editorInputId(state.tabId) + ".hit");
@@ -469,7 +471,7 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
                         ui.state<std::uint64_t>("menubar.tabs.hovered") = 0;
                         ui.requestFocus(editorInputId(state.tabId) + ".hit");
                         state.openMenu = MenuKind::None;
-                        state.settingsOpen = true;
+                        popup_presentation::setSettingsOpen(state, true);
                         app::requestUpdate();
                     });
             }

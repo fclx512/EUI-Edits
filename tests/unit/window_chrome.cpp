@@ -103,10 +103,16 @@ void settingsHeader() {
                       "window buttons exclude only their actual row");
                 check(!caption(300, header->frame.height) && !caption(300, header->frame.height + 40),
                       "settings content never moves the window");
+                state.openMenu = neo::MenuKind::View;
+                state.contextMenuOpen = state.vaultContextMenuOpen = state.findOptionsOpen = true;
+                state.markdownHeadingMenuOpen = state.languageMenuOpen = state.tabListOpen = true;
                 back->onClick();
                 check(!state.settingsOpen && !state.themeListOpen &&
                       state.fontPicker == neo::FontPickerTarget::None,
                       "return button closes all settings subpages");
+                check(neo::popup_presentation::activeOwner(state) == neo::popup_presentation::Owner::None &&
+                      !state.tabListOpen && state.findEditorFocusPending,
+                      "return button clears all transient menus and restores editor focus");
             }
         }
     }
@@ -227,6 +233,19 @@ void nativeChrome() {
         check(rail > 0 && hit(scrollbarCenter, 200) == HTCLIENT &&
               hit(client.right - 1, 200) == HTRIGHT,
               "reserved rail keeps an 8-DIP scrollbar center interactive without losing native resize");
+        for (const float scrollbarWidth : {4.0f, 8.0f, 12.0f}) {
+            const float compactRail = chrome::resizeInset(scrollbarWidth);
+            const int compactCenter = static_cast<int>(client.right -
+                (compactRail + scrollbarWidth * 0.5f) * scale);
+            check(compactRail >= 0.0f && compactRail <= rail &&
+                  hit(compactCenter, 200) == HTCLIENT &&
+                  hit(client.right - 1, 200) == HTRIGHT,
+                  "scrollbar width contributes to sizing allowance while its center remains interactive");
+            check(compactRail == 0.0f || compactCenter > scrollbarCenter,
+                  "a visible scrollbar no longer reserves a second full native sizing strip");
+        }
+        check(chrome::resizeInset(-8.0f) == rail,
+              "negative scrollbar width does not reduce the safe native sizing allowance");
     }
     chrome::beginFrame(static_cast<float>(client.right), 72);
     neo::AppState modal;

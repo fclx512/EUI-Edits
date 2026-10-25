@@ -1,5 +1,6 @@
 #include "state/app_actions.h"
 #include "core/platform/platform.h"
+#include "core/render/image_source.h"
 #include "model/attachment.h"
 #include "model/heading_anchor.h"
 #include "model/session_storage.h"
@@ -9,6 +10,7 @@
 #include "platform/file_assoc.h"
 #include "platform/file_operations.h"
 #include "platform/vault_rename.h"
+#include "platform/window_chrome.h"
 #include "platform/clipboard_image.h"
 #include "platform/native_dialogs.h"
 #include "platform/font_safety.h"
@@ -152,7 +154,36 @@ void newDocument(AppState& state) {
     persistDocumentSession(state);
 }
 
+bool openImagePreview(AppState& state, const std::string& path) {
+    std::error_code error;
+    const auto absolute = std::filesystem::absolute(textfile::pathFromUtf8(path), error).lexically_normal();
+    const auto resolved = error ? path : textfile::pathToUtf8(absolute);
+    const auto decoded = core::render::image::loadStaticImageFromPath(resolved, false);
+    if (!decoded || !decoded->pixels || decoded->width <= 0 || decoded->height <= 0) {
+        showToast(state, i18n::tr("image.open_failed"),
+                  i18n::format("image.open_failed_hint", {{"path", path}}));
+        return false;
+    }
+    state.openMenu = MenuKind::None;
+    state.contextMenuOpen = state.vaultContextMenuOpen = state.findOptionsOpen = false;
+    state.markdownHeadingMenuOpen = state.languageMenuOpen = state.tabListOpen = false;
+    state.settingsOpen = false;
+    state.fontPicker = FontPickerTarget::None;
+    state.themeListOpen = false;
+    state.imagePreviewPath = resolved;
+    state.imagePreviewWidth = static_cast<float>(decoded->width);
+    state.imagePreviewHeight = static_cast<float>(decoded->height);
+    state.imageViewport = ImageViewport{};
+    app::requestUpdate();
+    return true;
+}
+
 bool loadDocument(AppState& state, const std::string& path) {
+    if (filetypes::image(path)) {
+        if (!openImagePreview(state, path)) return false;
+        recordRecentFile(path);
+        return true;
+    }
     clearTabCloseAnchor(state);
     for (const auto id : state.tabOrder) {
         const auto* document = documentTab(state, id);
@@ -292,7 +323,7 @@ void restoreStartupDocument(AppState& state, const std::string& commandLinePath)
 void openFileFromDialog(AppState& state) {
     eui::platform::FileDialogOptions options;
     options.prompt = i18n::tr("safety.open_text");
-    options.allowedExtensions = filetypes::extensions();
+    options.allowedExtensions = filetypes::openExtensions();
     options.filterName = i18n::tr("safety.text_filter");
     options.initialDirectory = vaultInitialDirectory(state);
 
@@ -441,7 +472,12 @@ bool convertDocumentToUtf8(AppState& state) {
 bool requestCloseDocument(AppState& state) {
     if (state.closeApproved) return true;
     if (state.sessionClosePending) return false; // repeated WM_CLOSE must not reopen the editable tree
-    if (documentModalOpen(state)) return false;
+    if (documentModalOpen(state, /*includeImagePreview=*/false)) return false;
+    // A read-only viewer must not veto the window's close button or Alt+F4.
+    // Remove it before the ordinary dirty-document/save/exit chain takes over.
+    state.imagePreviewPath.clear();
+    state.imagePreviewWidth = state.imagePreviewHeight = 0.0f;
+    state.imageViewport = ImageViewport{};
     state.settingsOpen = false;
     state.exitClosing = true;
     for (const auto id : state.tabOrder) {
@@ -1576,6 +1612,7 @@ void persistSettings(const AppState& state) {
     data.uiFontFile = state.uiFontFile;
     data.codeFontFile = state.codeFontFile;
     data.theme = state.themeFollowSystem ? 2 : static_cast<int>(state.theme);
+    data.uiStyle = static_cast<int>(state.uiStyle);
     data.lastThemeFile = state.themeFile;
     settings::flush();
 }
@@ -1639,6 +1676,17 @@ void refreshSystemTheme(AppState& state) {
     if (!state.themeFollowSystem) return;
     const auto mode = settings::systemThemePrefersLight() ? ThemeMode::Light : ThemeMode::Dark;
     if (state.theme != mode) applyThemePreference(state, /*followSystem=*/true, mode);
+}
+
+void applyUiStyle(AppState& state, UiStyle style) {
+    state.uiStyle = style;
+    // 先推进风格版本号，下一次 editorColors() 才会按新几何重建两套配色。
+    setUiStyle(style);
+    platform::chrome::setSquareCorners(style == UiStyle::Square);
+    persistSettings(state);
+    // 圆角在 compose 时烘进图元，保留层不会因为一次 requestUpdate 自己重画。
+    app::requestUpdate();
+    app::detail::requestFullPaint();
 }
 
 void applyUiFontSize(AppState& state, float fontSize) {

@@ -12,6 +12,8 @@ class RuntimeRenderer {
 public:
     RuntimeRenderer(Ui& ui, runtime::InstanceStore& instances)
         : ui_(ui), instances_(instances) {}
+    std::uint64_t frozenSceneSignature() const;
+    void setFrozenSceneOnly(bool enabled) { frozenSceneOnly_ = enabled; }
 
     void renderDirect(core::render::RenderBackend& renderBackend,
                       int windowWidth,
@@ -91,7 +93,7 @@ private:
                                               float dpiScale) const;
 
     std::uint64_t retainedElementPaintSignature(const Element& element,
-                                                std::uint64_t seed) const;
+                                                std::uint64_t seed, bool includeDirtyKey = true) const;
 
     bool renderRetainedLayer(core::render::RenderBackend& renderBackend,
                              const Element& element,
@@ -157,6 +159,7 @@ private:
     Ui& ui_;
     runtime::InstanceStore& instances_;
     bool retainedLayerRenderDisabled_ = false;
+    bool frozenSceneOnly_ = false;
 };
 
 inline void applyOptionalScissor(core::render::RenderBackend& renderBackend,
@@ -197,6 +200,8 @@ inline void RuntimeRenderer::prepareTextElement(
     const Rect* dirtyRect,
     bool hasScissor,
     const Rect& scissorRect) {
+    if (frozenSceneOnly_ && (element.excludeFromBackdropSnapshot ||
+                            !element.hoverOpacitySourceId.empty())) return;
     if (dirtyRect != nullptr || hasScissor) {
         const auto cached = instances_.paintBounds.find(element.id);
         if (cached != instances_.paintBounds.end()) {
@@ -263,6 +268,8 @@ inline void RuntimeRenderer::renderElement(
     const Rect* dirtyRect,
     bool hasScissor,
     const Rect& scissorRect) {
+    if (frozenSceneOnly_ && (element.excludeFromBackdropSnapshot ||
+                            !element.hoverOpacitySourceId.empty())) return;
     if (dirtyRect != nullptr || hasScissor) {
         const auto cached = instances_.paintBounds.find(element.id);
         if (cached != instances_.paintBounds.end()) {
@@ -670,7 +677,7 @@ inline std::uint64_t RuntimeRenderer::retainedSiblingRunSignature(
     return seed;
 }
 
-inline std::uint64_t RuntimeRenderer::retainedElementPaintSignature(const Element& element, std::uint64_t seed) const {
+inline std::uint64_t RuntimeRenderer::retainedElementPaintSignature(const Element& element, std::uint64_t seed, bool includeDirtyKey) const {
     auto mix = [](std::uint64_t current, std::uint64_t value) {
         current ^= value + 0x9e3779b97f4a7c15ull + (current << 6) + (current >> 2);
         return current;
@@ -752,8 +759,44 @@ inline std::uint64_t RuntimeRenderer::retainedElementPaintSignature(const Elemen
             seed = mix(seed, image->second.primitive->contentVersion());
         }
     }
-    mixString(element.dirtyKey);
+    if (includeDirtyKey) mixString(element.dirtyKey);
     return seed;
+}
+
+inline std::uint64_t RuntimeRenderer::frozenSceneSignature() const {
+    // Declarative scene identity, not sampled hover/press/Reveal animation state.
+    // A changed scene invalidates the opening; it never triggers live filtering.
+    const auto mix = [](std::uint64_t a, std::uint64_t b) {
+        return a ^ (b + 0x9e3779b97f4a7c15ull + (a << 6) + (a >> 2));
+    };
+    const auto visit = [&](auto&& self, const Element& element, std::uint64_t seed) -> std::uint64_t {
+        if (element.excludeFromBackdropSnapshot || !element.hoverOpacitySourceId.empty()) return seed;
+        seed = mix(seed, std::hash<std::string>{}(element.id));
+        seed = mix(seed, static_cast<std::uint64_t>(element.kind));
+        seed = mix(seed, static_cast<std::uint64_t>(element.zIndex));
+        seed = mix(seed, element.clip);
+        seed = mix(seed, element.disabled);
+        seed = mix(seed, element.gpuImageRevision);
+        for (const auto& point : element.polygonPoints) {
+            seed = mix(seed, std::hash<float>{}(point.x));
+            seed = mix(seed, std::hash<float>{}(point.y));
+        }
+        // Container dirty keys can include focus/caret bookkeeping with no
+        // pixels of their own. Descendant paint properties are visited below.
+        const bool paints = element.kind != ElementKind::Row && element.kind != ElementKind::Column &&
+                            element.kind != ElementKind::Stack && element.kind != ElementKind::Flow;
+        seed = retainedElementPaintSignature(element, seed, paints);
+        if (!element.scrollStateId.empty()) {
+            const auto scroll = instances_.scrollStates.find(element.scrollStateId);
+            if (scroll != instances_.scrollStates.end())
+                seed = mix(seed, static_cast<std::uint64_t>(std::llround(scroll->second.offset * 4096.0f)));
+        }
+        for (const auto* child : element.orderedChildren) seed = self(self, *child, seed);
+        return seed;
+    };
+    std::uint64_t signature = 0xcbf29ce484222325ull;
+    for (const auto* root : ui_.orderedRoots()) signature = visit(visit, *root, signature);
+    return signature;
 }
 
 inline bool RuntimeRenderer::renderRetainedLayer(core::render::RenderBackend& renderBackend,
@@ -944,12 +987,29 @@ inline void RuntimeRenderer::renderRect(
     }
 
     const Rect frame = toPixelRect(instance.frame.value(), dpiScale);
-    const Color currentColor = instance.color.value();
+    const Color currentColor = frozenSceneOnly_ ? element.color : instance.color.value();
     Transform transform = scaleTransform(instance.transform.value(), dpiScale);
 
     instance.primitive->setBounds(frame.x, frame.y, frame.width, frame.height);
     instance.primitive->setColor(currentColor);
     instance.primitive->setGradient(element.gradient);
+    FrozenBackdrop frozen = element.frozenBackdrop ? *element.frozenBackdrop : FrozenBackdrop{};
+    frozen.sourceBounds = toPixelRect(element.frame, dpiScale);
+    if (frozen.cachedStrip) {
+        frozen.sourceBounds.x += frozen.sourceOffset.x * dpiScale;
+        frozen.sourceBounds.y += frozen.sourceOffset.y * dpiScale;
+    }
+    frozen.sigma *= dpiScale;
+    instance.primitive->setFrozenBackdrop(frozen);
+    RevealEffect reveal = !frozenSceneOnly_ && instance.reveal ? instance.reveal->effect() : RevealEffect{};
+    reveal.center.x *= dpiScale;
+    reveal.center.y *= dpiScale;
+    reveal.pressCenter.x *= dpiScale;
+    reveal.pressCenter.y *= dpiScale;
+    reveal.radius *= dpiScale;
+    reveal.pressRadius *= dpiScale;
+    reveal.borderWidth *= dpiScale;
+    instance.primitive->setReveal(reveal);
     instance.primitive->setBorder(scaleBorder(instance.border.value(), dpiScale));
     instance.primitive->setShadow(scaleShadow(instance.shadow.value(), dpiScale));
     instance.primitive->setCornerRadius(toPixels(instance.radius.value(), dpiScale));

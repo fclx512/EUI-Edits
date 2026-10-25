@@ -25,10 +25,10 @@ git -c core.whitespace=cr-at-eol diff --check
 
 ## 独立正式包
 
-确定版本与变更范围后，使用新构建/输出目录；下例0.1.4与当前源码默认版本一致，但不要求发布同版本或移动已有标签。
+确定版本与变更范围后，使用新构建/输出目录；下例0.2.2与当前源码默认版本一致，但不要求发布同版本或移动已有标签。
 
 ```powershell
-./scripts/package-neoeditor.ps1 -Version 0.1.4 `
+./scripts/package-neoeditor.ps1 -Version 0.2.2 `
   -BuildDirectory ./out/package-next-unique/build `
   -OutputDirectory ./out/package-next-unique/artifacts `
   -CMake $EuiBuildCMake -Parallel 2

@@ -83,7 +83,7 @@ inline void paletteLayer(eui::Ui& ui,AppState& state,float w,const EditorColors&
         if(hasImportedColors()){toggle(ui,"themeWorkbench.palette.missing",pad,y,inner,d.row,c,d.hint,tr("theme_wb.keep_imported"),s.missingOnly,[](bool value){session().missingOnly=value;app::requestUpdate();});y+=d.row+d.gap;}
         for(int i=0;i<static_cast<int>(s.candidates.size());++i){
             const auto colors=themeworkbench::colors(candidateDraft(i),s.light);const std::string id="themeWorkbench.candidate."+std::to_string(i);
-            ui.rect(id+".bg").position(pad,y).size(inner,d.row+10).radius(6).states(c.editor,c.rowHover,c.pressed)
+            ui.rect(id+".bg").position(pad,y).size(inner,d.row+10).radius(neo::corner(c, 6.0f)).states(c.editor,c.rowHover,c.pressed)
                 .border(s.trial==i?2.0f:1.0f,s.trial==i?c.accent:c.border).cursor(eui::CursorShape::Hand).preserveFocusOnPress()
                 .onHover([i](bool inside){if(!session().compare){if(inside)session().trial=i;else if(session().trial==i)session().trial=-1;app::requestUpdate();}})
                 .onClick([i]{if(!session().compare){themeworkbench::adoptGenerated(draft(),session().candidates[i],recipe(i),session().missingOnly);session().trial=-1;session().message=tr("theme_wb.adopted");syncInputs();app::requestUpdate();}}).build();
