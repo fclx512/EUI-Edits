@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -306,4 +307,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows CI redirects output under an English code page. Keep Chinese
+    # diagnostics and JSON intact regardless of the runner's locale.
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     raise SystemExit(main())

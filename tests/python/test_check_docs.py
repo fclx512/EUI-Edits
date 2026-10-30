@@ -258,6 +258,34 @@ class DocumentationChecks(unittest.TestCase):
         self.assertEqual(reviewed.returncode, 0, reviewed.stdout)
 
 
+    def test_cli_utf8_output_under_english_windows_encoding(self):
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "add", "."], check=True)
+        base = checker.git(self.root, "write-tree").strip()
+        self.write("components/input.h", "// pending source")
+        env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+        command = [sys.executable, str(ROOT / "scripts/check-docs.py"),
+                   "--root", str(self.root), "--base", base]
+        for reviewed in (False, True):
+            if reviewed:
+                self.complete_review(["components/input.h"])
+            for json_output in (False, True):
+                with self.subTest(reviewed=reviewed, json_output=json_output):
+                    result = subprocess.run(command + (["--json"] if json_output else []),
+                                            capture_output=True, env=env)
+                    output = result.stdout.decode("utf-8")
+                    self.assertEqual(result.returncode, 0 if reviewed else 1,
+                                     result.stderr.decode("utf-8"))
+                    self.assertNotIn(b"UnicodeEncodeError", result.stderr)
+                    if json_output:
+                        self.assertEqual(json.loads(output)["ok"], reviewed)
+                    else:
+                        self.assertIn("文档检查：" + ("PASS" if reviewed else "FAIL"), output)
+                    if not reviewed:
+                        self.assertIn("DOC006", output)
+                        self.assertIn("核对", output)
+
+
 class RepositoryDocumentationMapping(unittest.TestCase):
     def test_ci_checks_source_only_pushes_with_full_history(self):
         workflow = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8-sig")

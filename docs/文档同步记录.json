@@ -2,11 +2,11 @@
   "schema": 1,
   "sources": {
     ".github/workflows/docs.yml": "f9c5bfc4c33aadd8d4ae0ac1a9c82a8a73c45f4f34829e2d29f35fb48d538d25",
-    "scripts/check-docs.py": "32bef600ecde044b1dbce1803237a505343f9139d77f69c5503c7bd8f65d7415",
+    "scripts/check-docs.py": "8991702edb07a1183018edf56440c1e15cd535c884460d47249dcdfb4e0212d7",
     "scripts/check-neoeditor.ps1": "b9bfda05b44a048df8fd6bca21cab1cb52c29a9a26e9857e3b62e24ecbac8857",
     "scripts/prepare-neoeditor-release.ps1": "720dc3f2e8e4ed4a82cdda85474be9c2a71d3dac31a2d786a6c5eaa4a32806c0",
     "scripts/write-handoff-summary.ps1": "31d15a0c912527bf19d3f46a65df9a0f48ac63b751c8efbc6543ba58279cb804",
-    "tests/python/test_check_docs.py": "2e1df7bd75ac60cf1a36e2ab0b7ff4564c82f832794a5340866036cf33b64417",
+    "tests/python/test_check_docs.py": "26e333cb3f3636760a4a0c424409d94f325a0f1a5ad9f5778cd9770b10104400",
     "tests/tools/test_release_scripts.ps1": "7b333c1b806fc8ca4a5ecd455fb02a3c9c3910ceb66e2e45bdd145cee86f4760",
     "scripts/check-neoeditor-preview.ps1": "d4cfe83f06b0ca3e13c773e7988ec715e180dcc91cecab9daa0c44764fb20664",
     "CMakeLists.txt": "656adee336a704ab35c91da5bdee324e2e93cabde314170e87aff76639533eea",
@@ -42,9 +42,9 @@
     "tests/unit/document_tabs.cpp": "0ea82b085119ee0e757de9ba0f64d96a988a77bf810e1e8e3a2a9d36ec39da8f"
   },
   "documents": {
-    "docs/开发流程与交接规范.md": "已核对：沿用既有文档门禁与正式检查目标，图片回归扩充在file_safety/document_tabs/mindmap_preview_ui/menu_commands内，无新目标/流程。 再核对：提交前仅删除文档导航生成器字符串后的一个行尾空格，输出、命令和检查语义均不变。",
-    "docs/NeoEditor-发布构建说明-2026-10-02.md": "已核对：0.2.3仍使用既有MSVC x64 Win32/D2D bundled统一准备入口；新增行为复用正式目标，版本需显式重新配置旧增量缓存，未增加新参数或依赖。 再核对：提交前仅删除文档导航生成器字符串后的一个行尾空格，输出、命令和检查语义均不变。",
-    "docs/发版流程.md": "已核对：按既有冻结、预检、全量检查、独立包、最终EXE GUI和审核提交顺序准备0.2.3；workflow默认版本与源同步，推送/标签/公开发布仍按明确授权。 再核对：提交前仅删除文档导航生成器字符串后的一个行尾空格，输出、命令和检查语义均不变。",
+    "docs/开发流程与交接规范.md": "已增加文档检查器命令行标准输出/错误输出的 UTF-8 契约；补充英文 cp1252 环境中普通文本和 JSON 的成功/失败回归，保持原有退出码与核对规则。",
+    "docs/NeoEditor-发布构建说明-2026-10-02.md": "已核对：仅文档工具输出显式 UTF-8，PowerShell 7 按现有 UTF-8 捕获，无新构建参数、产品源码或依赖变化。",
+    "docs/发版流程.md": "已核对：首轮 Windows runner 预检出现 cp1252 中文日志编码异常，工具修复后按新提交 SHA 重跑 Windows checks 再打 0.2.3 标签；发版顺序与产物验收规则不变。",
     "README.md": "已更新0.2.3摘要与图片独立标签、去重、切页、关闭/重排、独立视角及只读保护；保留此前已确认菜单行为和测试范围。历史0.2.2内存数据不改日期或身份。",
     "README_EN.md": "已同步中文版0.2.3摘要与图片标签/只读行为，历史0.2.2测量保持原范围。",
     "apps/neo_editor/README.md": "已同步随包中英文版本0.2.3及图片独立标签操作，保留缩放/适配与分风格菜单说明。",
