@@ -743,77 +743,123 @@ int main() {
               "consuming a resolved heading after tab or path identity changes cancels the entire request");
     }
 
-    // Images reuse the existing decoder and never enter the text tab/save path.
+    // Images use ordinary tab identity while staying outside text/save paths.
     {
         const auto picture=dir/fs::u8path("独立图片.PNG");
+        const auto picture2=dir/"second.png";
         unsigned char rgba[3*2*4];std::fill(std::begin(rgba),std::end(rgba),255);
         std::string pngBytes,pngError;
         check(neo::pngencode::encodeRgba(3,2,rgba,pngBytes,pngError),"encode image routing fixture");
-        put(picture,pngBytes);
+        put(picture,pngBytes);put(picture2,pngBytes);
         neo::AppState viewer;
         viewer.path=neo::textfile::pathToUtf8(file);viewer.doc.text="unsaved manuscript";
         viewer.revision=7;viewer.savedRevision=6;
+        using Model=components::input_detail::InputModel;
+        eui::Ui ui;
+        neo::syncDocumentTabInputs(ui,viewer);
+        auto& input=ui.state<Model::InputState>(neo::editorInputId(viewer));
+        Model::loadDocument(input,viewer.doc.text);input.cursor=3;
+        Model::insertAtCursor(input,"中😀");viewer.doc.text=input.text;
+        input.verticalScroll=45;input.compositionText="preedit";
         const auto original=viewer.doc.text;const auto tabId=viewer.tabId;
         check(neo::loadDocument(viewer,neo::textfile::pathToUtf8(picture)),"PNG opens through normal file dispatch");
-        check(viewer.imagePreviewWidth==3 && viewer.imagePreviewHeight==2 &&
-              viewer.imageViewport.panX==0 && viewer.imageViewport.panY==0 && viewer.imageViewport.zoom==1,
-              "decoded dimensions and centered initial viewport are used");
-        check(viewer.path==neo::textfile::pathToUtf8(file) && viewer.doc.text==original &&
-              viewer.revision==7 && viewer.savedRevision==6 && viewer.tabId==tabId && viewer.tabOrder.size()==1,
-              "viewing an image preserves dirty text and the entire tab identity");
-        neo::requestOpenPath(viewer,neo::textfile::pathToUtf8(createdPath));
-        check(viewer.doc.text==original,"image modal blocks accidental underlying document navigation");
-        viewer.imagePreviewPath.clear();viewer.imageViewport.panX=100;viewer.imageViewport.zoom=3;
-        check(neo::openImagePreview(viewer,neo::textfile::pathToUtf8(picture)) &&
-              viewer.imageViewport.panX==0 && viewer.imageViewport.zoom==1,"reopening resets image pan and zoom");
-        viewer.imagePreviewPath.clear();
+        neo::syncDocumentTabInputs(ui,viewer);
+        const auto firstImage=viewer.tabId;
+        check(firstImage!=tabId && viewer.tabOrder.size()==2 && viewer.imageDocument() &&
+              viewer.path==viewer.imagePreviewPath && viewer.doc.text.empty() && !viewer.dirty() &&
+              viewer.language()=="image" && viewer.imagePreviewWidth==3 && viewer.imagePreviewHeight==2,
+              "image receives its own clean, read-only tab with decoded dimensions");
+        check(viewer.inactiveTabs.at(tabId).doc.text==original && viewer.inactiveTabs.at(tabId).dirty() &&
+              viewer.inactiveTabs.at(tabId).editorMemory && viewer.inactiveTabs.at(tabId).editorMemory->undoStack.size()==1 &&
+              viewer.inactiveTabs.at(tabId).editorMemory->compositionText.empty() && viewer.displayedInputTabId==0,
+              "text tab keeps bytes/undo while image navigation clears only temporary preedit");
+        viewer.imageViewport.zoom=2;viewer.imageViewport.panX=19;
+        check(neo::loadDocument(viewer,neo::textfile::pathToUtf8(picture2)),"second image opens independently");
+        const auto secondImage=viewer.tabId;viewer.imageViewport.zoom=3;
+        check(viewer.tabOrder.size()==3 && secondImage!=firstImage &&
+              neo::activateDocumentTab(viewer,firstImage) && viewer.imageViewport.zoom==2 && viewer.imageViewport.panX==19,
+              "image tabs retain independent zoom/pan on switching");
+        check(neo::loadDocument(viewer,neo::textfile::pathToUtf8(picture.parent_path()/"."/picture.filename())) &&
+              viewer.tabId==firstImage && viewer.tabOrder.size()==3 && viewer.imageViewport.zoom==2,
+              "reopening the same image activates its existing tab without resetting view");
+        check(neo::moveDocumentTabToIndex(viewer,firstImage,0) && viewer.tabOrder.front()==firstImage,
+              "image tab uses ordinary reorder action");
+        nextSavePick={true,false,neo::textfile::pathToUtf8(dir/"must-not-save-image.txt"),{}};
+        check(!neo::saveDocument(viewer) && !neo::saveDocumentAs(viewer) &&
+              !neo::convertDocumentToUtf8(viewer) && !fs::exists(dir/"must-not-save-image.txt") && get(picture)==pngBytes,
+              "image save/encoding actions cannot write empty text over binary data");
+        nextSavePick={false,true,{},{}};
+        viewer.pendingEditorCommand=neo::EditorCommand::Cut;
+        neo::applyEditorCommand(ui,viewer);
+        check(viewer.pendingEditorCommand==neo::EditorCommand::None && viewer.doc.text.empty(),
+              "queued text commands cannot mutate an image tab");
+        neo::requestCloseTab(viewer,secondImage);
+        check(!neo::documentTab(viewer,secondImage) && neo::documentTab(viewer,firstImage) &&
+              viewer.pending==neo::PendingAction::None,"closing background image removes only that clean tab");
+        check(neo::activateDocumentTab(viewer,tabId),"return to dirty text tab");
+        neo::syncDocumentTabInputs(ui,viewer);
+        auto& restored=ui.state<Model::InputState>(neo::editorInputId(viewer));
+        check(viewer.doc.text==original && restored.text==original && restored.verticalScroll==45 &&
+              restored.undoStack.size()==1 && Model::undoEdit(restored),"text undo and scroll survive mixed image tabs");
         for(const char* name:{"broken.png","unsupported.webp","missing.avif"}) {
             const auto invalid=dir/name;
             if(std::string(name)!="missing.avif")put(invalid,"this is not a decodable image");
-            check(!neo::loadDocument(viewer,neo::textfile::pathToUtf8(invalid)) && viewer.imagePreviewPath.empty() &&
-                  viewer.doc.text==original && viewer.tabOrder.size()==1 && viewer.toastVisible,
-                  "unreadable images report an error without binary-to-text fallback");
+            const auto count=viewer.tabOrder.size();
+            check(!neo::loadDocument(viewer,neo::textfile::pathToUtf8(invalid)) && !viewer.imageDocument() &&
+                  viewer.tabId==tabId && viewer.tabOrder.size()==count && viewer.toastVisible,
+                  "unreadable image leaves tabs and text intact without binary fallback");
         }
         const auto vectorImage=dir/"vector.svg";
         put(vectorImage,"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"20\"><rect width=\"40\" height=\"20\" fill=\"red\"/></svg>");
-        check(neo::loadDocument(viewer,neo::textfile::pathToUtf8(vectorImage)) && !viewer.imagePreviewPath.empty(),
-              "SVG uses the same existing rasterizer as UI images");
+        check(neo::loadDocument(viewer,neo::textfile::pathToUtf8(vectorImage)) && viewer.imageDocument(),
+              "SVG uses the same image-tab route and rasterizer");
         const bool hadRecovery=recoveryAvailable;recoveryAvailable=false;
         neo::AppState startup;neo::restoreStartupDocument(startup,neo::textfile::pathToUtf8(picture));
         recoveryAvailable=hadRecovery;
-        check(!startup.imagePreviewPath.empty() && startup.path.empty() && startup.doc.text.empty() && !startup.dirty(),
-              "startup image preserves an empty underlying editor instead of creating a text tab");
-        const auto filters=neo::filetypes::openExtensions();
-        check(std::find(filters.begin(),filters.end(),"png")!=filters.end() &&
-              std::find(filters.begin(),filters.end(),"webp")!=filters.end() &&
-              neo::filetypes::image("C:/folder.png/中文.JPG") && !neo::filetypes::image("C:/folder.png/note.md"),
-              "open filter includes image candidates with case-insensitive filename routing");
+        check(startup.imageDocument() && startup.path==startup.imagePreviewPath && startup.tabOrder.size()==1 &&
+              startup.doc.text.empty() && !startup.dirty(),"startup image reuses the pristine blank tab");
+        viewer.vaultRoot=neo::textfile::pathToUtf8(dir);
+        check(neo::vaultRenameEntry(viewer,neo::textfile::fileName(neo::textfile::pathToUtf8(picture)),"renamed-picture.PNG"),
+              "library rename accepts a background image");
+        const auto renamed=dir/"renamed-picture.PNG";
+        check(neo::documentTab(viewer,firstImage)->path==neo::textfile::pathToUtf8(renamed) &&
+              neo::documentTab(viewer,firstImage)->imagePreviewPath==neo::textfile::pathToUtf8(renamed),
+              "image identity and decoded source path follow a library rename");
+        fs::remove(renamed); // Simulate an externally missing target; Shell test double cancels.
+        neo::vaultDeleteEntry(viewer,"renamed-picture.PNG",false);
+        check(neo::documentTab(viewer,firstImage)->unavailable && !neo::documentTab(viewer,firstImage)->dirty() &&
+              !neo::documentTab(viewer,firstImage)->path.empty(),"missing image remains a clean read-only error tab");
+        put(renamed,pngBytes);
+        neo::activateDocumentTab(viewer,firstImage);neo::retryUnavailableDocument(viewer);
+        check(!viewer.unavailable && viewer.imagePreviewWidth==3 && get(renamed)==pngBytes,
+              "retry reloads image bytes without a text save or new tab");
+        check(neo::activateDocumentTab(viewer,firstImage),"activate image before closing");
+        neo::closeImagePreview(viewer);
+        check(!neo::documentTab(viewer,firstImage) && neo::documentTab(viewer,tabId),
+              "image close control shares ordinary tab removal");
     }
-    // Window Close must dismiss read-only image viewing before normal save/exit
-    // checks, while retaining every other outstanding modal transaction.
+    // Image tabs must not block window close or bypass another tab's dirty prompt.
     {
         resetSessionWriterForCloseScenario();
-        neo::AppState cleanImage;
-        cleanImage.imagePreviewPath="fixture.png";
-        cleanImage.imagePreviewWidth=800;cleanImage.imagePreviewHeight=600;
+        neo::AppState cleanImage;cleanImage.path=cleanImage.imagePreviewPath="fixture.png";
         const auto priorCloseRequests=closeRequests;
-        check(neo::documentModalOpen(cleanImage) && neo::requestCloseDocument(cleanImage) &&
-              cleanImage.closeApproved && closeRequests>priorCloseRequests && cleanImage.imagePreviewPath.empty(),
-              "clean window closes through its normal exit chain while an image is open");
+        check(!neo::documentModalOpen(cleanImage) && neo::requestCloseDocument(cleanImage) &&
+              cleanImage.closeApproved && closeRequests>priorCloseRequests,
+              "clean image tab follows the normal window exit chain");
         resetSessionWriterForCloseScenario();
-        neo::AppState dirtyImage;
-        dirtyImage.doc.text="unsaved behind image";dirtyImage.revision=1;
-        dirtyImage.imagePreviewPath="fixture.png";
-        check(!neo::requestCloseDocument(dirtyImage) && dirtyImage.imagePreviewPath.empty() &&
-              dirtyImage.pending==neo::PendingAction::CloseWindow && dirtyImage.doc.text=="unsaved behind image",
-              "window close dismisses image and confirms the underlying dirty manuscript");
+        neo::AppState dirtyImage;dirtyImage.doc.text="unsaved beside image";dirtyImage.revision=1;
+        const auto textId=dirtyImage.tabId;
+        neo::createDocumentTab(dirtyImage);dirtyImage.path=dirtyImage.imagePreviewPath="fixture.png";
+        const auto imageId=dirtyImage.tabId;
+        check(!neo::requestCloseDocument(dirtyImage) && dirtyImage.tabId==textId &&
+              dirtyImage.pending==neo::PendingAction::CloseWindow && dirtyImage.doc.text=="unsaved beside image" &&
+              neo::documentTab(dirtyImage,imageId)->imageDocument(),"window close still confirms dirty text beside images");
         neo::resolveDocumentConfirmation(dirtyImage,neo::filesafety::UnsavedChoice::Cancel);
-        check(!dirtyImage.closeApproved && dirtyImage.dirty() && dirtyImage.pending==neo::PendingAction::None,
-              "canceling image-window close retains the underlying dirty document");
-        neo::AppState nestedImage;
-        nestedImage.imagePreviewPath="fixture.png";nestedImage.savePickerOpen=true;
-        check(!neo::requestCloseDocument(nestedImage) && !nestedImage.imagePreviewPath.empty() && nestedImage.savePickerOpen,
-              "a separate native picker still blocks window close without losing preview state");
+        check(!dirtyImage.closeApproved && dirtyImage.dirty() && neo::documentTab(dirtyImage,imageId),
+              "canceling window close retains both text and image tabs");
+        neo::AppState nestedImage;nestedImage.imagePreviewPath="fixture.png";nestedImage.savePickerOpen=true;
+        check(!neo::requestCloseDocument(nestedImage) && nestedImage.imageDocument() && nestedImage.savePickerOpen,
+              "native picker retains its modal close guard");
     }
     // Delete only this unique, verified temporary-directory child.
     fs::remove_all(dir);

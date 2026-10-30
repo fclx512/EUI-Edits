@@ -24,7 +24,7 @@ void modalCaption() {
     check(caption(), "normal top blank area is draggable");
     state.imagePreviewPath = "fixture.png";
     compose();
-    check(!caption(), "image preview receives input over the former caption");
+    check(caption(), "embedded image leaves the window caption draggable");
     state.imagePreviewPath.clear();
     state.mindmapPreview.open = true;
     state.mindmapPreview.inlineMode = false;
@@ -249,7 +249,7 @@ void nativeChrome() {
     }
     chrome::beginFrame(static_cast<float>(client.right), 72);
     neo::AppState modal;
-    modal.imagePreviewPath = "fixture.png";
+    modal.linkEditorOpen = true;
     neo::protectWindowOverlayChrome(modal, eui::Screen{static_cast<float>(client.right), 700});
     check(hit(300, 20) == HTCLIENT && hit(0, 200) == HTLEFT,
           "native modal input overrides caption while retaining edge resizing");

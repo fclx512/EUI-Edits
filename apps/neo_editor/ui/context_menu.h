@@ -25,42 +25,44 @@ namespace context_menu_detail {
 
 using MenuItem = components::ContextMenuItem;
 
-inline std::vector<MenuItem> editorContextMenuItems(bool onLink, bool hasSelection, int headingLevel) {
+inline std::vector<MenuItem> editorContextMenuItems(bool markdown, bool onLink, bool hasSelection, int headingLevel) {
     std::vector<MenuItem> items;
-    if (onLink) {
-        // 光标落在链接上（2026-09-26）：Obsidian 的链接右键菜单 —— 打开在前，
-        // 编辑紧随其后，其余通用项整体后移两位。
-        items.emplace_back(i18n::tr("context.open_link"));
-        items.emplace_back(i18n::tr("context.edit_link"));
+    if (markdown) {
+        if (onLink) {
+            // 光标落在链接上（2026-09-26）：Obsidian 的链接右键菜单 —— 打开在前，
+            // 编辑紧随其后，其余通用项整体后移两位。
+            items.emplace_back(i18n::tr("context.open_link"));
+            items.emplace_back(i18n::tr("context.edit_link"));
+        }
+        items.push_back(MenuItem(i18n::tr("context.new_link")).withSeparatorBefore(onLink));
+        items.push_back(MenuItem(i18n::tr("context.external_link")));
+        // Obsidian 的"文本格式"八项原样保留：加粗/倾斜/删除线/高亮/代码/数学/注释/清除格式。
+        items.push_back(MenuItem(i18n::tr("context.format"), {
+            MenuItem(i18n::tr("context.bold")),
+            MenuItem(i18n::tr("context.italic")),
+            MenuItem(i18n::tr("context.strike")),
+            MenuItem(i18n::tr("context.highlight")),
+            MenuItem(i18n::tr("context.code")),
+            MenuItem(i18n::tr("context.math")),
+            MenuItem(i18n::tr("context.comment")),
+            MenuItem(i18n::tr("context.clear_format")),
+        }));
+        items.push_back(MenuItem(i18n::tr("context.paragraph"), {
+            MenuItem(i18n::tr("context.body")).withChecked(headingLevel == 0),
+            MenuItem(i18n::tr("context.heading1")).withChecked(headingLevel == 1),
+            MenuItem(i18n::tr("context.heading2")).withChecked(headingLevel == 2),
+            MenuItem(i18n::tr("context.heading3")).withChecked(headingLevel == 3),
+        }));
+        items.push_back(MenuItem(i18n::tr("context.insert"), {
+            MenuItem(i18n::tr("context.code_block")),
+            MenuItem(i18n::tr("context.table")),
+            MenuItem(i18n::tr("context.quote")),
+            MenuItem(i18n::tr("context.divider")),
+            // 选择导入图片（2026-10-06）：系统文件对话框选图，绝对路径引用。
+            MenuItem(i18n::tr("context.image")),
+        }));
     }
-    items.push_back(MenuItem(i18n::tr("context.new_link")).withSeparatorBefore(onLink));
-    items.push_back(MenuItem(i18n::tr("context.external_link")));
-    // Obsidian 的"文本格式"八项原样保留：加粗/倾斜/删除线/高亮/代码/数学/注释/清除格式。
-    items.push_back(MenuItem(i18n::tr("context.format"), {
-        MenuItem(i18n::tr("context.bold")),
-        MenuItem(i18n::tr("context.italic")),
-        MenuItem(i18n::tr("context.strike")),
-        MenuItem(i18n::tr("context.highlight")),
-        MenuItem(i18n::tr("context.code")),
-        MenuItem(i18n::tr("context.math")),
-        MenuItem(i18n::tr("context.comment")),
-        MenuItem(i18n::tr("context.clear_format")),
-    }));
-    items.push_back(MenuItem(i18n::tr("context.paragraph"), {
-        MenuItem(i18n::tr("context.body")).withChecked(headingLevel == 0),
-        MenuItem(i18n::tr("context.heading1")).withChecked(headingLevel == 1),
-        MenuItem(i18n::tr("context.heading2")).withChecked(headingLevel == 2),
-        MenuItem(i18n::tr("context.heading3")).withChecked(headingLevel == 3),
-    }));
-    items.push_back(MenuItem(i18n::tr("context.insert"), {
-        MenuItem(i18n::tr("context.code_block")),
-        MenuItem(i18n::tr("context.table")),
-        MenuItem(i18n::tr("context.quote")),
-        MenuItem(i18n::tr("context.divider")),
-        // 选择导入图片（2026-10-06）：系统文件对话框选图，绝对路径引用。
-        MenuItem(i18n::tr("context.image")),
-    }));
-    items.push_back(MenuItem(i18n::tr("context.cut")).withSeparatorBefore().withEnabled(hasSelection).withShortcut("Ctrl+X"));
+    items.push_back(MenuItem(i18n::tr("context.cut")).withSeparatorBefore(markdown).withEnabled(hasSelection).withShortcut("Ctrl+X"));
     items.push_back(MenuItem(i18n::tr("context.copy")).withEnabled(hasSelection).withShortcut("Ctrl+C"));
     items.push_back(MenuItem(i18n::tr("context.paste")).withShortcut("Ctrl+V"));
     items.push_back(MenuItem(i18n::tr("context.select_all")).withShortcut("Ctrl+A"));
@@ -69,6 +71,7 @@ inline std::vector<MenuItem> editorContextMenuItems(bool onLink, bool hasSelecti
 
 // 右键实际命中的链接目标（菜单打开/分发时都按保存的命中字节重查）。
 inline LinkTarget linkTargetUnderCursor(const AppState& state, eui::Ui& ui) {
+    if (!state.markdownCapable()) return {};
     using InputModel = components::input_detail::InputModel;
     const InputModel::InputState& inputState = ui.state<InputModel::InputState>(editorInputId(state));
     if (inputState.contextLinkByte < 0) {
@@ -84,6 +87,7 @@ inline bool editorHasSelection(const AppState& state, eui::Ui& ui) {
 }
 
 inline int currentHeadingLevel(const AppState& state, eui::Ui& ui) {
+    if (!state.markdownCapable()) return 0;
     using InputModel = components::input_detail::InputModel;
     const InputModel::InputState& inputState = ui.state<InputModel::InputState>(editorInputId(state));
     const LpPlan& plan = lp::cachedPlan(state.doc.text);
@@ -99,18 +103,25 @@ inline int currentHeadingLevel(const AppState& state, eui::Ui& ui) {
 // A closed overlay must still call ContextMenuBuilder::build to clear cascades,
 // but it need not replace the editor's preedit LP cache with committed text.
 struct EditorMenuPresentation {
+    bool markdown = true;
     bool onLink = false;
     bool hasSelection = false;
     int headingLevel = 0;
 };
 
 inline void dispatchEditorContextItem(AppState& state, const std::vector<int>& path,
-                                      bool onLink, eui::Ui& ui) {
-    if (path.empty()) {
+                                      bool markdown, bool onLink, eui::Ui& ui) {
+    if (path.empty() || markdown != state.markdownCapable()) {
         return;
     }
     std::vector<int> shifted = path;
-    if (onLink) {
+    if (!markdown) {
+        // The compact menu contains only Cut/Copy/Paste/Select All. Reject
+        // stale cascades rather than interpreting their indices as formatting.
+        if (path.size() != 1 || path[0] < 0 || path[0] >= 4) return;
+        shifted[0] += 5;
+    }
+    if (markdown && onLink) {
         const LinkTarget link = linkTargetUnderCursor(state, ui);
         if (shifted[0] == 0) {
             if (link.valid) {
@@ -201,11 +212,13 @@ inline void editorContextMenuOverlay(eui::Ui& ui, AppState& state, const eui::Sc
     auto& presentation = ui.state<context_menu_detail::EditorMenuPresentation>(
         "editor.contextmenu.presentation");
     if (state.contextMenuOpen) {
-        presentation.onLink = context_menu_detail::linkTargetUnderCursor(state, ui).valid;
+        presentation.markdown = state.markdownCapable();
+        presentation.onLink = presentation.markdown && context_menu_detail::linkTargetUnderCursor(state, ui).valid;
         presentation.hasSelection = context_menu_detail::editorHasSelection(state, ui);
-        presentation.headingLevel = context_menu_detail::currentHeadingLevel(state, ui);
+        presentation.headingLevel = presentation.markdown ? context_menu_detail::currentHeadingLevel(state, ui) : 0;
     }
     const bool onLink = presentation.onLink;
+    const bool markdown = presentation.markdown;
 
     auto menu = components::contextMenu(ui, "editor.contextmenu")
         .open(state.contextMenuOpen)
@@ -213,14 +226,14 @@ inline void editorContextMenuOverlay(eui::Ui& ui, AppState& state, const eui::Sc
         .position(state.contextMenuX, state.contextMenuY)
         .size(metrics.menuWidth, metrics.menuItemHeight)
         .items(context_menu_detail::editorContextMenuItems(
-            onLink, presentation.hasSelection, presentation.headingLevel))
+            markdown, onLink, presentation.hasSelection, presentation.headingLevel))
         .theme(menuTokens);
     popup_presentation::apply(menu, state,
                           menuTokens, state.contextMenuOpen);
     menu.skipClosedContent()
         .zIndex(1100)
-        .onSelectPath([&state, onLink, &ui](const std::vector<int>& path) {
-            context_menu_detail::dispatchEditorContextItem(state, path, onLink, ui);
+        .onSelectPath([&state, markdown, onLink, &ui](const std::vector<int>& path) {
+            context_menu_detail::dispatchEditorContextItem(state, path, markdown, onLink, ui);
         })
         .onOutsideContextMenu([&state](float x, float y) {
             // 菜单开着时再次右键：刷新菜单位置（不关闭、不重置级联以外的状态）。

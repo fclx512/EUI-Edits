@@ -56,12 +56,12 @@ inline MenuItem action(Command command, const char* id) {
 inline MenuItem toggle(Command command, const char* id, bool value) {
     return action(command, id).withChecked(value);
 }
-inline std::vector<MenuItem> fileMenuItems() {
+inline std::vector<MenuItem> fileMenuItems(bool textActions = true) {
     std::vector<MenuItem> encodings;
     int index = 0;
     for (const ReopenEncodingOption& option : reopenEncodingOptions())
         encodings.push_back(MenuItem(option.label).withCommand(static_cast<int>(Command::EncodingBase) + index++));
-    return {
+    std::vector<MenuItem> items{
         MenuItem(i18n::tr("menu.new"), {action(Command::NewText, "menu.text"), action(Command::NewMarkdown, "menu.markdown")}),
         action(Command::Open, "menu.open").withShortcut("Ctrl+O"),
         action(Command::CloseTab, "menu.close_tab").withShortcut("Ctrl+W").withSeparatorBefore(),
@@ -72,9 +72,11 @@ inline std::vector<MenuItem> fileMenuItems() {
         MenuItem(i18n::tr("menu.reopen_encoding"), std::move(encodings)),
         action(Command::ConvertUtf8, "menu.convert_utf8"),
     };
+    if (!textActions) for (int index : {3,4,7,8}) items[index].enabled=false;
+    return items;
 }
-inline std::vector<MenuItem> editMenuItems() {
-    return {
+inline std::vector<MenuItem> editMenuItems(bool textActions = true) {
+    std::vector<MenuItem> items{
         action(Command::Undo, "menu.undo").withShortcut("Ctrl+Z"),
         action(Command::Redo, "menu.redo").withShortcut("Ctrl+Y"),
         action(Command::Cut, "menu.cut").withShortcut("Ctrl+X").withSeparatorBefore(),
@@ -83,6 +85,8 @@ inline std::vector<MenuItem> editMenuItems() {
         action(Command::Find, "menu.find").withShortcut("Ctrl+F").withSeparatorBefore(),
         action(Command::Syntax, "menu.syntax").withSeparatorBefore(),
     };
+    if (!textActions) for (auto& item : items) item.enabled=false;
+    return items;
 }
 inline std::vector<MenuItem> viewMenuItems(const AppState& state) {
     std::vector<MenuItem> sizes;
@@ -116,8 +120,8 @@ inline std::vector<MenuItem> viewMenuItems(const AppState& state) {
 inline std::vector<MenuItem> compactMenuItems(const AppState& state, float submenuWidth = 0.0f) {
     const MenuItem::ChildrenPresentation children{submenuWidth, false, false};
     return {
-        MenuItem(i18n::tr("menu.file"), fileMenuItems()).withChildrenPresentation(children),
-        MenuItem(i18n::tr("menu.edit"), editMenuItems()).withChildrenPresentation(children),
+        MenuItem(i18n::tr("menu.file"), fileMenuItems(!state.imageDocument())).withChildrenPresentation(children),
+        MenuItem(i18n::tr("menu.edit"), editMenuItems(!state.imageDocument())).withChildrenPresentation(children),
         MenuItem(i18n::tr("menu.view"), viewMenuItems(state)).withChildrenPresentation(children),
         action(Command::Settings, "menu.settings"),
     };
@@ -133,6 +137,13 @@ inline int commandAtPath(const std::vector<MenuItem>& items, const std::vector<i
     return item && !item->hasChildren() && item->enabled ? item->commandId : 0;
 }
 inline void dispatchCommand(AppState& state, int id) {
+    // Text-only commands cannot act on an image tab.
+    const auto command = static_cast<Command>(id);
+    if (state.imageDocument() && (id >= static_cast<int>(Command::EncodingBase) ||
+        command == Command::Undo || command == Command::Redo || command == Command::Cut ||
+        command == Command::Copy || command == Command::SelectAll || command == Command::Find ||
+        command == Command::Syntax || command == Command::ConvertUtf8))
+        return;
     if (id >= static_cast<int>(Command::EncodingBase)) {
         requestReloadWithEncoding(state, static_cast<std::size_t>(id-static_cast<int>(Command::EncodingBase)));
         return;
@@ -152,7 +163,8 @@ inline void dispatchCommand(AppState& state, int id) {
             openFileFromDialog(state);
             break;
         case Command::CloseTab:
-            requestCloseTab(state, state.tabId);
+            if (!state.imagePreviewPath.empty()) closeImagePreview(state);
+            else requestCloseTab(state, state.tabId);
             break;
         case Command::Exit:
             if (requestCloseDocument(state)) app::requestClose();
@@ -193,10 +205,10 @@ inline void dispatchCommand(AppState& state, int id) {
     app::requestUpdate();
 }
 inline void dispatchFileItem(AppState& state, const std::vector<int>& path) {
-    dispatchCommand(state,commandAtPath(fileMenuItems(),path));
+    dispatchCommand(state,commandAtPath(fileMenuItems(!state.imageDocument()),path));
 }
 inline void dispatchEditItem(AppState& state, const std::vector<int>& path) {
-    dispatchCommand(state,commandAtPath(editMenuItems(),path));
+    dispatchCommand(state,commandAtPath(editMenuItems(!state.imageDocument()),path));
 }
 inline void dispatchViewItem(AppState& state, const std::vector<int>& path) {
     dispatchCommand(state,commandAtPath(viewMenuItems(state),path));
@@ -394,14 +406,14 @@ inline void menuBarView(eui::Ui& ui, AppState& state, const eui::Screen& screen)
         popup(MenuKind::File,
               "menubar.menu.file",
               layout.titleX[0],
-              menu_detail::fileMenuItems(),
+              menu_detail::fileMenuItems(!state.imageDocument()),
               [&state](const std::vector<int>& path) {
                   menu_detail::dispatchFileItem(state, path);
               });
         popup(MenuKind::Edit,
               "menubar.menu.edit",
               layout.titleX[1],
-              menu_detail::editMenuItems(),
+              menu_detail::editMenuItems(!state.imageDocument()),
               [&state](const std::vector<int>& path) {
                   menu_detail::dispatchEditItem(state, path);
               });

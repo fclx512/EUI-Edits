@@ -113,6 +113,7 @@ try {
     $tools | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RunDirectory 'tools.json') -Encoding utf8
     Invoke-Stage 'diff-check' 'git' @('-C', $repo, '-c', 'core.whitespace=cr-at-eol', 'diff', '--check', 'HEAD')
     Invoke-Stage 'i18n-preflight' $tools.Python @((Join-Path $repo 'tests/tools/check_i18n.py'))
+    Invoke-Stage 'docs-preflight' $tools.Python @('-B', (Join-Path $repo 'scripts/check-docs.py'))
     Assert-SourceUnchanged 'preflight'
     if ($PreflightOnly) {
         $receipt.status = 'PREFLIGHT_PASS'

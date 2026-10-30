@@ -1139,6 +1139,35 @@ int main() {
         _putenv_s("NEO_TAB_CACHE_BUDGET_MIB", "");
     }
 
+    // Clean image records reuse v2 metadata; no binary or empty text body is
+    // written. Explicit startup requests restore the same typed tab identity.
+    {
+        neo::sessionwriter::resetForTest();neo::sessionwriter::setInlineForTest(true);
+        sessionConfigDirectory=path(dir/"image-session");
+        fs::create_directories(neo::textfile::pathFromUtf8(sessionConfigDirectory));
+        const auto picture=dir/"session-picture.svg";
+        const std::string svg="<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"20\"><rect width=\"40\" height=\"20\" fill=\"red\"/></svg>";
+        put(picture,svg);
+        neo::sessionstorage::WriteRecord record;record.id=91;record.path=path(picture);record.language="image";
+        check(neo::sessionstorage::write({record},91),"write clean image metadata without a document body");
+        neo::AppState imageStartup;neo::restoreStartupDocument(imageStartup,path(picture));
+        check(imageStartup.imageDocument() && imageStartup.tabId==91 && imageStartup.tabOrder.size()==1 &&
+              imageStartup.imagePreviewWidth>0 && imageStartup.imagePreviewHeight>0 && !imageStartup.unavailable && !imageStartup.dirty() &&
+              imageStartup.doc.text.empty(),"explicit image startup keeps restored identity and decodes outside text reader");
+        std::vector<neo::sessionstorage::ReadRecord> records;std::uint64_t active=0;
+        check(neo::sessionstorage::read(records,active) && records.size()==1 && records[0].language=="image" &&
+              !records[0].dirty && records[0].document.text.empty(),"image session contains metadata only");
+        fs::remove(picture);
+        neo::AppState missing;neo::restoreStartupDocument(missing,path(picture));
+        check(missing.imageDocument() && missing.unavailable && !missing.dirty() && missing.tabId==91,
+              "missing image restores a read-only retry placeholder rather than a text draft");
+        put(picture,svg);neo::retryUnavailableDocument(missing);
+        check(!missing.unavailable && missing.imageDocument() && missing.imagePreviewWidth>0,
+              "retry decodes the restored image in its existing tab");
+        check(neo::tab_bar_detail::tabIcon(path(picture),"image")==neo::UiIcon::ImageFile,
+              "image tabs use the internal image document icon");
+    }
+
     core::async::shutdown();
     sessionConfigDirectory.clear();
     fs::remove_all(dir);

@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "documents": [
+    {"path": "docs/开发流程与交接规范.md", "title": "开发与维护规范", "section": "开发与维护", "summary": "接手、开发、验证、产物、文档同步与交接的统一规则。"},
+    {"path": "docs/当前实现与验收路线.md", "title": "当前实现与验收路线", "section": "开发与维护", "summary": "能力地图、源码入口和下一步验收。"},
+    {"path": "docs/如何运行.md", "title": "如何运行", "section": "开发与维护", "summary": "正式包和开发预览的启动方式。"},
+    {"path": "docs/发版流程.md", "title": "发版流程", "section": "开发与维护", "summary": "候选冻结、版本文案、最终资产验收与发布顺序。"},
+    {"path": "docs/NeoEditor-发布构建说明-2026-10-02.md", "title": "构建参数与脚本", "section": "开发与维护", "summary": "工具定位、定向构建、正式检查与打包参数。"},
+    {"path": "docs/EUI-NEO-当前技术路线与复用指南.md", "title": "EUI-NEO 技术路线与复用", "section": "框架与排版", "summary": "消费工程接入、运行时与输入契约、后端能力。"},
+    {"path": "docs/渲染后端与CPU处理契约.md", "title": "渲染后端与 CPU 处理", "section": "框架与排版", "summary": "CPU/D2D 分工、资源恢复、装饰节拍与宽度重排。"},
+    {"path": "docs/NeoEditor-P1布局分层与切页缓存技术说明-2026-10-03.md", "title": "布局分层与切页缓存", "section": "框架与排版", "summary": "视口度量、装饰快照、标签缓存与失效。"},
+    {"path": "docs/块模型契约-2026-09-26.md", "title": "块模型契约", "section": "框架与排版", "summary": "行盒、块间距、标题几何与不变量。"},
+    {"path": "docs/文本控件垂直排版与裁剪.md", "title": "文本控件垂直排版与裁剪", "section": "框架与排版", "summary": "文字、光标、IME 坐标和祖先裁剪。"},
+    {"path": "docs/文本排版字体路径复用.md", "title": "字体路径复用", "section": "框架与排版", "summary": "单次排版中的字体解析作用域与失效。"},
+    {"path": "docs/文本排版样式投影复用.md", "title": "样式投影复用", "section": "框架与排版", "summary": "密集标记长行的索引、源字节锚点与度量。"},
+    {"path": "docs/NeoEditor-多文档会话与关闭恢复技术说明.md", "title": "多文档会话与关闭恢复", "section": "编辑与产品", "summary": "标签状态、保存事务、恢复格式与正文所有权。"},
+    {"path": "docs/NeoEditor-通用文本文件与设置确认说明-2026-10-02.md", "title": "文本文件与设置确认", "section": "编辑与产品", "summary": "编码、保存、标题链接、文件关联与设置。"},
+    {"path": "docs/查找替换与选区范围.md", "title": "查找替换与选区范围", "section": "编辑与产品", "summary": "查找范围、替换与撤销、范围失效处理。"},
+    {"path": "docs/思维导图只读预览.md", "title": "思维导图只读预览", "section": "编辑与产品", "summary": "mindmap 子集、查看操作、规模限制与源码回退。"},
+    {"path": "docs/NeoEditor主题导入.md", "title": "主题导入与界面风格", "section": "编辑与产品", "summary": "主题工作台、JSON/CSS 导入、配色与控件几何。"},
+    {"path": "docs/性能测试方法.md", "title": "性能测试方法", "section": "测量与参考", "summary": "闲置内存、目录扫描、宽度重排和真实窗口测量。"},
+    {"path": "docs/Obsidian基本编辑参考-源码映射与覆盖-2026-10-08.md", "title": "Obsidian 编辑参考与源码映射", "section": "测量与参考", "summary": "参考行为、实现位置与自动化覆盖索引。"}
+  ],
+  "sync_rules": [
+    {"topic": "产品入口、界面与交互", "sources": ["apps/neo_editor/*"], "docs": ["README.md", "README_EN.md", "apps/neo_editor/README.md", "docs/当前实现与验收路线.md"]},
+    {"topic": "保存、会话与文件操作", "sources": ["apps/neo_editor/state/*", "apps/neo_editor/model/text_file*", "apps/neo_editor/model/session*", "apps/neo_editor/model/vault*", "apps/neo_editor/model/settings*", "apps/neo_editor/model/atomic_write*", "apps/neo_editor/model/file_*", "apps/neo_editor/platform/file_*", "apps/neo_editor/platform/save_*", "apps/neo_editor/platform/vault_*", "apps/neo_editor/platform/single_instance*", "apps/neo_editor/platform/clipboard_image*", "apps/neo_editor/model/font_catalog*", "apps/neo_editor/model/heading_anchor*", "apps/neo_editor/model/tab_presentation*", "apps/neo_editor/platform/font_safety*", "apps/neo_editor/platform/native_dialogs*"], "docs": ["docs/NeoEditor-多文档会话与关闭恢复技术说明.md", "docs/NeoEditor-通用文本文件与设置确认说明-2026-10-02.md"]},
+    {"topic": "查找替换", "sources": ["apps/neo_editor/*/find*", "apps/neo_editor/model/unicode_search_data*", "tests/unit/find*", "tests/tools/generate_unicode_search_data.py"], "docs": ["docs/查找替换与选区范围.md"]},
+    {"topic": "主题、配色与界面风格", "sources": ["apps/neo_editor/ui/popup_presentation.h", "components/contextmenu.h", "tests/unit/menu_*", "apps/neo_editor/ui/theme*", "apps/neo_editor/ui/settings*", "apps/neo_editor/*/theme*", "apps/neo_editor/model/obsidian_theme*", "apps/neo_editor/model/style_schema*", "apps/neo_editor/model/settings*", "apps/neo_editor/platform/system_appearance*", "tests/unit/theme*"], "docs": ["docs/NeoEditor主题导入.md"]},
+    {"topic": "思维导图", "sources": ["apps/neo_editor/*/mindmap*", "tests/unit/mindmap*"], "docs": ["docs/思维导图只读预览.md"]},
+    {"topic": "输入、布局与绘制", "sources": ["components/*", "core/*", "include/*", "eui_neo.h", "apps/neo_editor/model/lp_*", "apps/neo_editor/model/source_decorations*", "apps/neo_editor/model/fold_state*", "apps/neo_editor/model/heading_anchor*", "apps/neo_editor/model/style_schema*", "tests/unit/input*", "tests/unit/text_*", "tests/unit/lp_*", "tests/unit/source_decorations*"], "docs": ["docs/渲染后端与CPU处理契约.md", "docs/NeoEditor-P1布局分层与切页缓存技术说明-2026-10-03.md", "docs/块模型契约-2026-09-26.md", "docs/文本控件垂直排版与裁剪.md", "docs/文本排版字体路径复用.md", "docs/文本排版样式投影复用.md", "docs/EUI-NEO-当前技术路线与复用指南.md", "docs/Obsidian基本编辑参考-源码映射与覆盖-2026-10-08.md"]},
+    {"topic": "构建、检查、打包与 CI", "sources": ["CMakeLists.txt", "cmake/*", "scripts/*", ".github/workflows/*", "tests/*", "**/CMakeLists.txt", "**/*.rc", "**/*.rc.in", "**/*.manifest"], "docs": ["docs/开发流程与交接规范.md", "docs/NeoEditor-发布构建说明-2026-10-02.md", "docs/发版流程.md"]},
+    {"topic": "产品版本与发布摘要", "sources": ["cmake/NeoEditorVersion.cmake"], "docs": ["README.md", "README_EN.md", "apps/neo_editor/README.md", "apps/neo_editor/RELEASE-NOTES.md"]},
+    {"topic": "性能探针与测量方法", "sources": ["tests/probes/*", "tests/*benchmark*", "tests/tools/measure*", "tests/tools/summarize*"], "docs": ["docs/性能测试方法.md"]},
+    {"topic": "依赖与资源", "sources": ["3rd/*", "assets/*"], "docs": ["README.md", "README_EN.md", "apps/neo_editor/THIRD-PARTY-NOTICES.md", "docs/NeoEditor-发布构建说明-2026-10-02.md", "docs/EUI-NEO-当前技术路线与复用指南.md"]}
+  ]
+}

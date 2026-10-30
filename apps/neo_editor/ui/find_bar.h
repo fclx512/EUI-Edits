@@ -30,6 +30,7 @@ inline float findPanelHeight(const AppState& state) {
 }
 
 inline void openFindBar(AppState& state, bool replace = false) {
+    if (state.imageDocument()) return;
     if (!state.findOpen) {
         state.findPrefillSelection = true;
     }

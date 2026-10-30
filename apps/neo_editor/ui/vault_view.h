@@ -497,7 +497,7 @@ inline void vaultPanelView(eui::Ui& ui, AppState& state, float width, float heig
                                             state.vaultSelectedPath = row.relative;
                                             if (row.isDir) {
                                                 toggleFolder(state, row.relative);
-                                            } else if (!active) {
+                                              } else if (!active) {
                                                 requestOpenPath(state, absolute);
                                             }
                                         })

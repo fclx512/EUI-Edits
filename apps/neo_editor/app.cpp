@@ -271,13 +271,11 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
     if (!event.modifiers.shortcut() && !event.modifiers.alt && !event.modifiers.shift) {
         switch (event.key) {
             case eui::InputKey::Escape:
-                // 全屏模态浮层最优先（编辑区聚焦时组件已把 Esc 放行到应用级）：
-                // 思维导图预览 → 图片预览，然后是设置面板、菜单；都没有打开时
+                // 全屏模态浮层最优先；嵌入式图片在设置、菜单和查找之后处理。
+                // 都没有打开时
                 // 什么都不做，免得把 Esc 从输入法取消预编辑的手里抢走。
                 if (state.mindmapPreview.open) {
                     neo::closeMindmapPreview(state);
-                } else if (!state.imagePreviewPath.empty()) {
-                    neo::closeImagePreview(state);
                 } else if (state.pending!=neo::PendingAction::None) {
                     state.pending=neo::PendingAction::None;state.pendingNewMarkdown=false;requestUpdate();
                 } else if (state.languageMenuOpen) {
@@ -292,11 +290,13 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
                     state.contextMenuOpen = false;
                     state.vaultContextMenuOpen = false;
                     requestUpdate();
-                } else if (state.findOpen) {
+                } else if (state.findOpen && state.imagePreviewPath.empty()) {
                     neo::dismissFindOnEscape(state);
                 } else if (state.openMenu != neo::MenuKind::None) {
                     state.openMenu = neo::MenuKind::None;
                     requestUpdate();
+                } else if (!state.imagePreviewPath.empty()) {
+                    neo::closeImagePreview(state);
                 } else if (state.vaultPromptKind != neo::VaultPromptKind::None || state.vaultDeletePending) {
                     // 文档库新建-重命名 / 删除确认。
                     state.vaultPromptKind = neo::VaultPromptKind::None;
@@ -333,7 +333,8 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
             if (!neo::documentModalOpen(state)) neo::newDocument(state);
             break;
         case eui::InputKey::W:
-            neo::requestCloseTab(state, state.tabId);
+            if (!state.imagePreviewPath.empty()) neo::closeImagePreview(state);
+            else neo::requestCloseTab(state, state.tabId);
             break;
         case eui::InputKey::Tab: {
             const auto it = std::find(state.tabOrder.begin(), state.tabOrder.end(), state.tabId);
@@ -364,7 +365,9 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
             }
             break;
         case eui::InputKey::H:
-            if (!state.settingsOpen) neo::openFindBar(state, true);
+            if (!state.settingsOpen) {
+                neo::openFindBar(state, true);
+            }
             break;
         case eui::InputKey::G:
             if (state.findOpen) {
@@ -681,7 +684,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     }
     // 新建/打开文件后，把内容同步进输入组件的内部状态：光标回文首、滚动归零、撤销栈清空。
     if (state.editorStateDirty) {
-        neo::resetEditorInputState(ui, state.doc.text);
+        if (!state.imageDocument()) neo::resetEditorInputState(ui, state.doc.text);
         state.editorStateDirty = false;
         state.outline.clear();
         state.outlinePlanVersion = static_cast<unsigned long long>(-1);
@@ -796,27 +799,31 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                                     // remains part of the editor surface rather than a window-color seam.
                                     ui.rect("editor.region.background").size(editorWidth, bodyHeight)
                                         .ignoreLayout().color(colors.editor).build();
-                                    neo::markdownToolbarView(ui, state, editorWidth);
-                                    if (findClearance > 0.0f)
-                                        ui.rect("editor.find.clearance").size(editorWidth, findClearance)
-                                            .color(colors.editor).build();
-                                    {
-                                        // editor-view 内包含 LP 计划/装饰快照（decorations）与
-                                        // 整篇 InputLayout::build（layout）——从 app 侧无法再细分，
-                                        // 探测时用暖/冷两轮之差把"重排整篇"从固定开销里分离出来。
-                                        neo::tracelog::Span editorSpan("editor-view");
-                                        const float textHeight = std::max(0.0f, bodyHeight - findClearance - writingHeight);
-                                        ui.row("editor.with.outline").size(editorWidth,textHeight).content([&] {
-                                            neo::editorView(ui,state,metrics,textWidth,textHeight,capsuleRail);
-                                            refreshOutlineFromEditor(state);
-                                            if(outlineWidth>0) neo::outlinePanelView(ui,state,outlineWidth,textHeight);
-                                        }).build();
+                                    if (!state.imagePreviewPath.empty()) {
+                                        neo::imagePreviewView(ui, state, editorWidth, bodyHeight);
+                                    } else {
+                                        neo::markdownToolbarView(ui, state, editorWidth);
+                                        if (findClearance > 0.0f)
+                                            ui.rect("editor.find.clearance").size(editorWidth, findClearance)
+                                                .color(colors.editor).build();
+                                        {
+                                            // editor-view 内包含 LP 计划/装饰快照（decorations）与
+                                            // 整篇 InputLayout::build（layout）——从 app 侧无法再细分，
+                                            // 探测时用暖/冷两轮之差把"重排整篇"从固定开销里分离出来。
+                                            neo::tracelog::Span editorSpan("editor-view");
+                                            const float textHeight = std::max(0.0f, bodyHeight - findClearance - writingHeight);
+                                            ui.row("editor.with.outline").size(editorWidth,textHeight).content([&] {
+                                                neo::editorView(ui,state,metrics,textWidth,textHeight,capsuleRail);
+                                                refreshOutlineFromEditor(state);
+                                                if(outlineWidth>0) neo::outlinePanelView(ui,state,outlineWidth,textHeight);
+                                            }).build();
+                                        }
                                     }
                                 }).build();
                                 if (state.findEditorFocusPending) {
                                     state.findEditorFocusPending = false;
-                                    ui.requestFocus(state.tabListOpen ? "menubar.tabs.list.keys"
-                                                                      : neo::editorInputId(state) + ".hit");
+                                    ui.requestFocus(state.tabListOpen ? "menubar.tabs.list.keys" :
+                                        !state.imagePreviewPath.empty() ? "imagePreview.hit" : neo::editorInputId(state) + ".hit");
                                 }
                                 {
                                     neo::tracelog::Span outlineSpan("outline");
@@ -849,12 +856,12 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                     })
                     .build();
 
-                if (state.findOpen) {
+                if (state.findOpen && state.imagePreviewPath.empty()) {
                     const float findWidth = std::min(550.0f, std::max(280.0f, contentWidth - 28.0f));
                     neo::findBarView(ui, state, findWidth, screen.width - outlineWidth - findWidth - 14.0f,
                                      menuHeight + writingHeight + 12.0f, screen);
                 }
-                if(state.markdownCapable() && state.markdownOutlineOpen && !state.compactWindow && !immersive && outlineWidth==0) {
+                if(state.imagePreviewPath.empty() && state.markdownCapable() && state.markdownOutlineOpen && !state.compactWindow && !immersive && outlineWidth==0) {
                     const float floatingWidth=std::min(280.0f,editorWidth-24);
                     ui.stack("outline.floating").position(screen.width-floatingWidth-8,menuHeight+writingHeight)
                         .size(floatingWidth,bodyHeight-writingHeight).zIndex(700).content([&]{
@@ -883,9 +890,6 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                     if (!immersive) neo::menuBarView(ui, state, screen);
                 });
 
-                // 全屏图片预览（S3f 批次 E）：一切之上的模态层 —— 打开时点哪儿都只
-                // 关预览，不会误碰编辑区或菜单。
-                neo::imagePreviewOverlay(ui, state, screen);
                 // 只读思维导图预览（2026-10-11 计划阶段 C/D）：同范式模态层。
                 if (!state.mindmapPreview.inlineMode) neo::mindmapPreviewOverlay(ui, state, screen);
                 neo::languageOverlay(ui,state,screen);

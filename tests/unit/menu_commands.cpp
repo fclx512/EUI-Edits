@@ -17,6 +17,132 @@ const std::vector<ReopenEncodingOption>& reopenEncodingOptions() {
 }
 }
 
+namespace {
+struct PopupRecorder final : core::render::RenderBackend {
+    float opacity = -1.0f;
+    bool initialize() override { return true; }
+    bool valid() const override { return true; }
+    void makeCurrent() override {}
+    void beginFrame(const core::render::RenderSurface&) override {}
+    void present() override {}
+    bool ensureRenderCache(int, int) override { return true; }
+    bool renderCacheWasRecreated() const override { return false; }
+    void releaseRenderCache() override {}
+    void beginRenderCacheFrame(int, int, const std::vector<core::Rect>&) override {}
+    void endRenderCacheFrame() override {}
+    void blitRenderCache(int, int, core::render::RenderCacheBlitMode, const std::vector<core::Rect>&) override {}
+    bool supportsRetainedLayers() const override { return false; }
+    void clear(const core::Color&) override {}
+    void setScissor(bool, const core::Rect&, int) override {}
+    void prepareBackdropBlur(const core::Rect&, float, int, int) override {}
+    void drawRoundedRect(const core::render::RoundedRectDrawCommand& command, int, int) override {
+        if (!command.shadowPass && core::closeEnough(command.fillColor, core::Color{.73f,.79f,.87f,1}))
+            opacity = command.opacity;
+    }
+    void drawPolygon(const core::render::PolygonDrawCommand&, int, int) override {}
+    void drawText(const core::render::TextDrawCommand&, int, int) override {}
+};
+
+bool applicationAnimationToggle(neo::UiStyle style) {
+    PopupRecorder backend;
+    core::render::ScopedRenderBackend scoped(backend);
+    core::dsl::Runtime runtime;
+    if (!runtime.initialize()) return false;
+    int tag = 0;
+    auto window = reinterpret_cast<core::window::Handle>(&tag);
+    neo::AppState state;
+    state.uiStyle = style;
+    state.animations = false;
+    auto tokens = components::theme::light();
+    tokens.surface = {.73f,.79f,.87f,1};
+    core::dsl::Ui* ui = nullptr;
+    const auto finish = [&](bool ok) {
+        runtime.shutdown();
+        core::releaseInputQueue(window);
+        return ok;
+    };
+    const auto step = [&](float delta) {
+        runtime.compose("application-menu-toggle", 640, 480,
+            [&](core::dsl::Ui& view, const core::dsl::Screen&) {
+                ui = &view;
+                const bool open = state.openMenu != neo::MenuKind::None;
+                using Item = components::ContextMenuItem;
+                auto menu = components::contextMenu(view, "toggle")
+                    .open(open).screen(640,480).position(30,40).size(210,32)
+                    .theme(tokens).items(std::vector<Item>{Item("Parent", {Item("Child")}), Item("Action")});
+                neo::popup_presentation::apply(menu, state, tokens, open);
+                menu.skipClosedContent().build();
+            });
+        const bool paint = runtime.update(window, delta, 1, 1);
+        runtime.requestFullPaint();
+        backend.opacity = -1.0f;
+        runtime.render(640,480,1,{1,1,1,1});
+        return paint;
+    };
+    const auto noRevealWrappers = [&] {
+        bool found = false;
+        const auto inspect = [&](auto&& self, const core::dsl::Element& element) -> void {
+            found = found || element.id.find(".reveal.") != std::string::npos;
+            for (const auto& child : element.children) self(self, *child);
+        };
+        for (const auto& root : ui->roots()) inspect(inspect, *root);
+        return !found;
+    };
+    const auto quiet = [&] {
+        return !runtime.isAnimating() && std::isinf(runtime.nextTimerWakeSeconds());
+    };
+    const auto idleQuiet = [&] {
+        // The state-inspection step requests a full paint. Consume that one
+        // outstanding invalidation, then probe the real idle loop without
+        // composing a new tree or explicitly requesting another paint.
+        if (runtime.update(window, .05f, 1, 1)) runtime.render(640,480,1,{1,1,1,1});
+        const bool paint = runtime.update(window, .05f, 1, 1);
+        if (paint) runtime.render(640,480,1,{1,1,1,1});
+        return !paint && quiet();
+    };
+    const auto fail = [&](const char* phase) {
+        std::cerr << "menu toggle " << (style == neo::UiStyle::Square ? "win10" : "win11")
+                  << " phase=" << phase << " opacity=" << backend.opacity
+                  << " wrappers=" << !noRevealWrappers()
+                  << " fast=" << runtime.isAnimating()
+                  << " wake=" << runtime.nextTimerWakeSeconds()
+                  << " paint=" << runtime.paintRequested() << '\n';
+        return finish(false);
+    };
+
+    step(0);
+    state.openMenu = neo::MenuKind::File;
+    step(0);
+    if (!core::closeEnough(backend.opacity, 1.0f) || !noRevealWrappers() || !quiet()) return fail("disabled-open");
+    // Enabling while already open must not restart the root or flash it away.
+    state.animations = true;
+    step(.03f);
+    if (!core::closeEnough(backend.opacity, 1.0f)) return fail("enable-open");
+    state.openMenu = neo::MenuKind::None;
+    step(.02f);
+    if (!(backend.opacity > 0.0f && backend.opacity < 1.0f)) return fail("exit-intermediate");
+    // Turning off during exit removes both the content and the priming seeds.
+    state.animations = false;
+    step(0);
+    if (ui->find("toggle.level.0") || !noRevealWrappers() || !quiet()) return fail("disable-exit");
+    if (!idleQuiet()) return fail("disabled-closed-idle");
+    // Restore the hidden seed before opening: the next entry must interpolate.
+    state.animations = true;
+    step(0);
+    state.openMenu = neo::MenuKind::File;
+    step(.03f);
+    if (!(backend.opacity > 0.0f && backend.opacity < 1.0f)) return fail("restored-entry-intermediate");
+    state.animations = false;
+    step(0);
+    if (!core::closeEnough(backend.opacity, 1.0f) || !noRevealWrappers() || !quiet()) return fail("disable-entry");
+    if (!idleQuiet()) return fail("disabled-open-idle");
+    state.openMenu = neo::MenuKind::None;
+    step(0);
+    if (ui->find("toggle.level.0") || !noRevealWrappers() || !quiet()) return fail("disabled-close");
+    return finish(true);
+}
+}
+
 int main() {
     neo::AppState state;
     using namespace neo::menu_detail;
@@ -213,47 +339,112 @@ int main() {
 
     for (const auto style : {neo::UiStyle::Square, neo::UiStyle::Rounded}) {
         popupState.uiStyle = style;
+        const bool square = style == neo::UiStyle::Square;
         for (const auto mode : {neo::ThemeMode::Light, neo::ThemeMode::Dark}) {
             auto tokens = neo::editorColors(mode).tokens;
+            // A style change may arrive with a token snapshot from the previous
+            // compose. The explicit application style must still win.
+            tokens.metrics = components::theme::ThemeMetricTokens{};
+            components::theme::applyCornerStyle(tokens.metrics, square
+                ? components::theme::CornerStyle::Rounded : components::theme::CornerStyle::Square);
             tokens.surface.a = 0.35f; // Imported themes cannot expose busy content behind a menu.
+            tokens.border = {0.23f, 0.46f, 0.62f, 0.48f};
             const components::ContextMenuStyle base(tokens);
-            const auto surface = neo::popup_presentation::style(tokens);
+            const auto surface = neo::popup_presentation::style(style, tokens);
+            const components::theme::RadiusTokens rounded;
             if (!core::closeEnough(surface.background.a, 1.0f) ||
                 !core::closeEnough(surface.background.r, base.background.r) ||
                 !core::closeEnough(surface.background.g, base.background.g) ||
                 !core::closeEnough(surface.background.b, base.background.b) ||
                 !core::closeEnough(surface.text, base.text) ||
-                !core::closeEnough(surface.hover, base.hover) || surface.radius != base.radius) return 27;
+                !core::closeEnough(surface.hover, base.hover) ||
+                !core::closeEnough(surface.pressed, base.pressed) ||
+                surface.radius != (square ? 0.0f : rounded.card) ||
+                surface.highlightRadius != (square ? 0.0f : rounded.card - rounded.tiny) ||
+                surface.highlightInset != (square ? 2.0f : 6.0f)) return 27;
+            if (square) {
+                if (!core::closeEnough(surface.border, neo::popup_presentation::opaque(tokens.border)) ||
+                    surface.shadow.blur != 12.0f || surface.shadow.offset.y != 2.0f) return 30;
+            } else if (!core::closeEnough(surface.border, base.border) ||
+                       surface.shadow.blur != base.shadow.blur ||
+                       !core::closeEnough(surface.shadow.offset, base.shadow.offset) ||
+                       !core::closeEnough(surface.shadow.color, base.shadow.color)) return 30;
             for (bool animations : {true, false}) {
                 popupState.animations = animations;
-                popupState.openMenu = neo::MenuKind::File;
+                const auto motion = neo::popup_presentation::motion(style, animations);
+                const auto replacement = neo::popup_presentation::motion(style, animations, false);
+                if (motion.enter.enabled != animations || motion.exit.enabled != animations ||
+                    motion.highlight.enabled != (animations && !square) || replacement.exit.enabled ||
+                    motion.clipContent != (square && animations) ||
+                    motion.directionalSubmenus != (square && animations) ||
+                    motion.offsetX != 0.0f || motion.offsetY != (square ? -8.0f : 4.0f)) return 31;
                 core::dsl::Ui* popupUi = nullptr;
-                runtime.compose("solid-popup-policy", 1000, 700, [&](core::dsl::Ui& view, const core::dsl::Screen&) {
-                    popupUi = &view;
-                    for (const auto owner : owners) {
-                        const bool open = owner == PopupOwner::MainMenu;
-                        auto menu = components::contextMenu(view, "popup." + std::to_string(static_cast<int>(owner)))
-                            .open(open).screen(1000, 700).position(20, 40).items({"Action"}).theme(tokens);
-                        neo::popup_presentation::apply(menu, popupState, tokens, open);
-                        menu.build();
-                    }
-                });
-                bool material = false;
-                const auto inspect = [&](auto&& self, const core::dsl::Element& element) -> void {
-                    material = material || static_cast<bool>(element.frozenBackdrop);
-                    for (const auto& child : element.children) self(self, *child);
+                const auto popupId = [](PopupOwner owner) {
+                    return "popup." + std::to_string(static_cast<int>(owner)) + ".level.0";
                 };
-                for (const auto& root : popupUi->roots()) inspect(inspect, *root);
-                if (material || popupUi->frozenBackdropSession() || popupUi->cachedStripSession()) return 28;
-                auto* openLevel = popupUi->find("popup." + std::to_string(static_cast<int>(PopupOwner::MainMenu)) + ".level.0");
-                auto* closedLevel = popupUi->find("popup." + std::to_string(static_cast<int>(PopupOwner::Language)) + ".level.0");
-                if (!openLevel || !closedLevel || openLevel->transition.enabled != animations ||
-                    closedLevel->transition.enabled || !closedLevel->disabled ||
-                    !core::closeEnough(openLevel->transform.scale, core::Vec2{1,1})) return 29;
+                const auto composePopups = [&](PopupOwner requestedOwner) {
+                    runtime.compose("solid-popup-policy", 1000, 700, [&](core::dsl::Ui& view, const core::dsl::Screen&) {
+                        popupUi = &view;
+                        for (const auto owner : owners) {
+                            const bool open = owner == requestedOwner;
+                            auto menu = components::contextMenu(view, "popup." + std::to_string(static_cast<int>(owner)))
+                                .open(open).screen(1000, 700).position(20, 40).items({"Action", "Other"}).theme(tokens);
+                            neo::popup_presentation::apply(menu, popupState, tokens, open);
+                            menu.build();
+                        }
+                    });
+                };
+                for (const auto active : owners) {
+                    neo::popup_presentation::activate(popupState, active);
+                    if (active == PopupOwner::MainMenu) popupState.openMenu = neo::MenuKind::File;
+                    composePopups(active);
+                    bool material = false;
+                    const auto inspect = [&](auto&& self, const core::dsl::Element& element) -> void {
+                        material = material || static_cast<bool>(element.frozenBackdrop);
+                        for (const auto& child : element.children) self(self, *child);
+                    };
+                    for (const auto& root : popupUi->roots()) inspect(inspect, *root);
+                    if (material || popupUi->frozenBackdropSession() || popupUi->cachedStripSession()) return 28;
+                    for (const auto owner : owners) {
+                        auto* level = popupUi->find(popupId(owner));
+                        const bool open = owner == active;
+                        if (!level || level->transition.enabled != (open && animations) ||
+                            level->disabled == open ||
+                            !core::closeEnough(level->transform.scale, core::Vec2{1,1})) return 29;
+                    }
+                    auto* item = popupUi->find(popupId(active) + ".item.0");
+                    if (!item || !item->onHoverChanged) return 32;
+                    item->onHoverChanged(true);
+                    composePopups(active);
+                    const auto* highlight = popupUi->find(popupId(active) + ".highlight");
+                    const auto* background = popupUi->find(popupId(active) + ".bg");
+                    if (!highlight || !background ||
+                        !core::closeEnough(highlight->frame.x - background->frame.x, surface.highlightInset) ||
+                        highlight->radius != surface.highlightRadius ||
+                        highlight->transition.enabled != (animations && !square) ||
+                        background->radius != surface.radius ||
+                        !core::closeEnough(highlight->color, surface.hover)) return 33;
+                    // A dismissal to the document retains the finite exit and
+                    // disables all six popup trees immediately.
+                    neo::popup_presentation::activate(popupState, PopupOwner::None);
+                    composePopups(PopupOwner::None);
+                    const auto* closing = popupUi->find(popupId(active));
+                    if (!closing || !closing->disabled || closing->transition.enabled != animations) return 34;
+                }
             }
         }
     }
     runtime.shutdown();
+    for (const auto style : {neo::UiStyle::Square, neo::UiStyle::Rounded}) {
+        if (!applicationAnimationToggle(style)) {
+            std::cerr << "application menu animation toggle failed\n";
+            return 35;
+        }
+    }
+    const auto imageFileMenu=fileMenuItems(false);
+    const auto imageEditMenu=editMenuItems(false);
+    for (int index : {3,4,7,8}) if (imageFileMenu[index].enabled) return 36;
+    for (const auto& item : imageEditMenu) if (item.enabled) return 37;
     std::cout<<"translated menu commands, compact layout and opaque popup policy passed\n";
     return 0;
 }

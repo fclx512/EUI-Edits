@@ -1,8 +1,8 @@
 # EUI-NEO 当前技术路线与复用指南
 
-更新：2026-10-09。面向希望复用本项目 UI 库改造的其它桌面项目。
+面向复用本仓库 UI 库的 Windows 桌面项目。接入时固定所选源码快照，按本文核对接口、构建与窗口行为。
 
-## 0. 知识较少的模型从这里开始
+## 0. 从最小消费工程开始
 
 **默认任务：在Windows上创建普通文本/按钮/菜单应用。** 先使用完整冻结fork、Win32+D2D、现有软件/DC默认路径，照第3.2节创建独立消费工程。最初只改消费工程的 `CMakeLists.txt` 和 `app.cpp`，跑通窗口后再加业务组件。改库源码、切硬件或搬单个后端属于另外的任务，要有具体需求和验证。
 
@@ -17,13 +17,13 @@
 
 要接入**已有**父工程时，先核对已有库/CRT/CURL策略；不要直接把模板中的CACHE FORCE覆盖其配置。需要blur、逐像素透明窗、透视、GPU纹理/ShaderToy、DirectWrite文字或增量屏幕present时，先看第5节能力表，再决定架构，不能默认本路线已支持。
 
-结果使用明确状态：SOURCE=仅看到源码；PASS=指定动作已执行且结果满足断言；FAIL=已执行但失败；NOT_RUN=尚未执行；SKIP=工具/环境不能覆盖。验收记录必须写清是哪种状态。
+验证状态按[开发规范](开发流程与交接规范.md#5-状态与交接)填写。
 
 ## 1. 适用版本与阅读入口
 
 本文描述 **EUI-Edits 仓库内的 EUI-NEO fork**：保留 C++17 声明式 UI、组件和共享文本模型，接入原生 Win32 宿主及实验性 Direct2D 渲染后端，按事件和定时器驱动更新。应用通过配置和组件参数决定主题、字体、动画和业务行为。
 
-当前核对基线是本地 HEAD `daef12b4ec9565ee03062aa762c724b556701079` 加现有 dirty/untracked 工作树。仅锁定该提交**不足以复制当前能力**：第六/七批输入接口和第十批菜单优化等仍有未提交内容。跨项目接入应先保存选定 fork 的提交、完整补丁/必要新增文件和源码哈希，再以该快照构建。UI 库版本与 EUI-Edits 产品版本是不同标识。
+跨项目接入时记录选定 fork 的 HEAD、必要补丁、新增文件和源码哈希，以完整快照构建。框架版本与 EUI-Edits 产品版本分别维护。
 
 资料分工：
 
@@ -32,7 +32,7 @@
 - [渲染后端与CPU处理契约](渲染后端与CPU处理契约.md)：当前 D2D 路径、图集生命周期与验收边界。10-07源码分析快照归档在本地 `local-docs/repo-docs/consolidation-2026-10-11/`。
 - 应用侧性能批次、候选哈希与实际覆盖记录在维护者本地文档区（`local-docs/repo-docs/`），不替代新项目验收，也不随仓库分发。
 
-本次为源码与文档核对，Luna 完整阅读两份调查并做独立审计，主代理复查关键调用链。**没有构建新消费项目、运行测试、GUI或性能验证，也没有追踪最新上游。** 下文示例是按当前接口整理的接入模板，不能标为已编译通过的跨项目样例。核对快照/哈希及审计笔记分别在 `out/framework-guide-20261009/`、`out/framework-guide-20261009-luna/`。
+下文是源码接入模板，尚需在目标消费工程完成构建和真实窗口验收。历史核对材料保存在本地 `out/framework-guide-20261009/`。
 
 ## 2. 架构与职责
 
@@ -249,7 +249,7 @@ Win32包含PMv2初始化与WM_DPICHANGED建议矩形处理，不等于任意布�
 
 应用侧可参照而不应固化为框架默认的内容包括：EditorColors映射theme tokens、UI/编辑字号、语义字体、动画开关、快捷键、可读行宽、标签/侧栏组织、LP和恢复调度。要启用动画可通过应用配置/组件transition，但无需搬入编辑器整套设置系统。
 
-`ContextMenuBuilder::skipClosedContent` 默认false；仅在明确opt-in、闭合且 transition / motion 入退场均关闭时省去隐藏树，并清cascade状态/根offset。开启动画仍保留根级闭合树。可选 `ContextMenuMotion` 提供分别入场/退场/高亮时间及不缩放的短位移；子级退场后回收行树，未配置 motion 的旧 transition 行为保留。其它项目应选择适合的契约；第十批收益只覆盖编辑器已测条件。
+`ContextMenuBuilder::skipClosedContent` 默认false；仅在明确opt-in、闭合且 transition / motion 入退场均关闭时省去隐藏树，并清cascade状态/根offset。开启动画仍保留根级闭合树。可选 `ContextMenuMotion` 提供分别入场/退场/高亮时间及不缩放的短位移；`clipContent` 可在固定 viewport 内平移内容，`directionalSubmenus` 按最终落位选择子级方向，不改变菜单尺寸或滚动范围。`ContextMenuStyle` 的高亮边距/半径覆盖只作用于绘制，具体参数和应用策略见[渲染契约](渲染后端与CPU处理契约.md#编辑器纯色菜单与短动画)；子级退场后回收行树，未配置 motion 的旧 transition 行为保留。其它项目应选择适合的契约；第十批收益只覆盖编辑器已测条件。
 
 内嵌资源的 [bundled_resources.h](../core/platform/bundled_resources.h) 带有EuiEditsLicenses、AboutIcon固定ID和产品导出CLI/对话框。可参考RCDATA字节view机制，但新项目须定义自己的ID、RC生成、命令和许可证内容；不把这个接口当现成通用资源库。普通框架helper仍可能复制assets，产品单EXE能力来自编辑器专用CMake资源块。
 

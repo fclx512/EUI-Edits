@@ -153,6 +153,9 @@ struct D2DRenderBackend::Impl {
     ComPtr<ID2D1SolidColorBrush> brush;
     ComPtr<ID2D1Layer> imageClip;
     ID2D1RenderTarget* target = nullptr;
+    ID2D1RenderTarget* scissorOwner = nullptr;
+    Rect scissorRect{};
+    bool cacheScissor = true;
     Atlas gray, colored;
     std::unordered_set<Texture*> textures;
     std::vector<ShadowMask> shadows;
@@ -168,7 +171,10 @@ struct D2DRenderBackend::Impl {
     bool warnedBackdrop = false, warnedImageEffects = false;
 
     ~Impl() { releaseDevice(); for (auto* texture : textures) delete texture; }
-    void unclip() { if (target && clipped) target->PopAxisAlignedClip(); clipped = false; }
+    void unclip() {
+        if (target && clipped) { target->PopAxisAlignedClip(); ++currentRenderFrameStats().scissorPops; }
+        clipped = false; scissorOwner = nullptr;
+    }
     void clearRevealBrushes() {
         for (auto& entry : revealBrushes) {
             entry.brush.Reset();
@@ -405,6 +411,9 @@ D2DRenderBackend::D2DRenderBackend(core::window::Handle window) : impl_(std::mak
     char compact[8]{};
     const DWORD compactLength = GetEnvironmentVariableA("NEO_D2D_COMPACT_ATLAS", compact, sizeof(compact));
     impl_->compactAtlases = !(compactLength == 1 && compact[0] == '0');
+    char scissor[8]{};
+    const DWORD scissorLength = GetEnvironmentVariableA("NEO_D2D_SCISSOR_CACHE", scissor, sizeof(scissor));
+    impl_->cacheScissor = !(scissorLength == 1 && scissor[0] == '0');
 }
 D2DRenderBackend::~D2DRenderBackend() = default;
 bool D2DRenderBackend::initialize() {
@@ -535,8 +544,19 @@ void D2DRenderBackend::clear(const Color& c) {
 }
 void D2DRenderBackend::setScissor(bool enabled, const Rect& r, int) {
     auto& p = *impl_; if (!p.target) return;
+    if (enabled && p.cacheScissor && p.clipped && p.scissorOwner == p.target &&
+        p.scissorRect.x == r.x && p.scissorRect.y == r.y &&
+        p.scissorRect.width == r.width && p.scissorRect.height == r.height) {
+        p.target->SetTransform(D2D1::Matrix3x2F::Identity());
+        ++currentRenderFrameStats().scissorReuses;
+        return;
+    }
     p.unclip(); p.target->SetTransform(D2D1::Matrix3x2F::Identity());
-    if (enabled) { p.target->PushAxisAlignedClip(box(r), D2D1_ANTIALIAS_MODE_ALIASED); p.clipped = true; }
+    if (enabled) {
+        p.target->PushAxisAlignedClip(box(r), D2D1_ANTIALIAS_MODE_ALIASED);
+        p.clipped = true; p.scissorOwner = p.target; p.scissorRect = r;
+        ++currentRenderFrameStats().scissorPushes;
+    }
 }
 void D2DRenderBackend::prepareBackdropBlur(const Rect&, float, int, int) {
     if (!impl_->warnedBackdrop) {

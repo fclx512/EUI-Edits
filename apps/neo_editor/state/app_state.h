@@ -176,6 +176,13 @@ struct DocumentSession : VaultContext {
 #endif
         return result;
     }();
+    // 编辑区只读图片查看：路径非空时是独立图片标签；视角随DocumentSession移动。
+    // 宽高来自现有解码器；缩放和平移按编辑区画布（不含控制栏）约束。
+    std::string imagePreviewPath;
+    float imagePreviewWidth = 0.0f;
+    float imagePreviewHeight = 0.0f;
+    ImageViewport imageViewport;
+
     std::string path;                 // 空表示还没落盘的新文档
     unsigned long long revision = 0;
     unsigned long long savedRevision = 0;
@@ -240,7 +247,8 @@ struct DocumentSession : VaultContext {
     // 节流窗口内又发生过编辑：到期后由 tickRecoveryWrite 补写一次（自动到期），
     // 避免"最后一次编辑落在节流窗口里、之后没有帧就一直不落盘"。
     bool recoveryPendingWrite = false;
-    bool dirty() const { return revision != savedRevision; }
+    bool imageDocument() const { return !imagePreviewPath.empty(); }
+    bool dirty() const { return !imageDocument() && revision != savedRevision; }
     std::string displayName() const {
         return path.empty() ? std::string(i18n::tr("safety.unsaved_name")) : textfile::fileName(path);
     }
@@ -248,7 +256,7 @@ struct DocumentSession : VaultContext {
     std::string newDocumentLanguage = "text";
     std::string languageOverride;
     int wrapOverride = -1;
-    std::string language() const { return languageOverride.empty() ? (path.empty() ? newDocumentLanguage : filetypes::detect(path).language) : languageOverride; }
+    std::string language() const { if (imageDocument()) return "image"; return languageOverride.empty() ? (path.empty() ? newDocumentLanguage : filetypes::detect(path).language) : languageOverride; }
     bool markdownCapable() const { return language() == "markdown"; }
     bool writingCapable() const { const auto lang = language(); return lang == "markdown" || lang == "text"; }
     bool sourceView() const { return filetypes::source(language()); }
@@ -328,7 +336,7 @@ struct AppState : DocumentSession {
     std::string codeFontFile;
     // 界面主题。落盘到 settings.ini 的 theme。
     ThemeMode theme = ThemeMode::Dark;
-    // 界面风格（几何轴，独立于配色）。落盘到 settings.ini 的 ui_style；
+    // 界面风格（控件几何与菜单呈现，独立于配色）。落盘到 settings.ini 的 ui_style；
     // 运行时由 model/style_schema.h 的 currentUiStyle() 提供给令牌派生。
     UiStyle uiStyle = UiStyle::Rounded;
     // 主题偏好 = "跟随系统"（settings.ini 的 theme=2）：theme 字段此时存的是
@@ -404,13 +412,6 @@ struct AppState : DocumentSession {
     // "编辑链接"弹窗（文本输入在 components::input 里，值回写 linkEditorUrl）。
     bool linkEditorOpen = false;
     std::string linkEditorUrl;
-    // 全屏图片预览（S3f 批次 E，批次 B 的收尾增量）：路径非空 = 预览打开。
-    // 宽高来自现有解码器的实际输出，预览按窗口 contain 重算缩放，
-    // 与编辑区里那颗缩略图的尺寸无关。
-    std::string imagePreviewPath;
-    float imagePreviewWidth = 0.0f;
-    float imagePreviewHeight = 0.0f;
-    ImageViewport imageViewport;
 
     // 只读思维导图预览（模态浮层，2026-10-11 计划阶段 C）：open 时解析树/布局几何
     // 在**当前页**的 derivedMindmap 里（见 DocumentSession），这里只留身份锚与视口。
@@ -1022,7 +1023,10 @@ inline bool insertBlockTemplate(components::input_detail::InputModel::InputState
 //   2. 改完必须让 doc.text 与输入组件的 text 立刻一致，否则下一次 build() 会
 //      判定"外部值变了"把光标甩到文末（同 resetEditorInputState 的理由，§3.2）。
 inline void applyEditorCommand(eui::Ui& ui, AppState& appState) {
-    if (appState.unavailable) { appState.pendingEditorCommand = EditorCommand::None; return; }
+    if (appState.unavailable || !appState.imagePreviewPath.empty()) {
+        appState.pendingEditorCommand = EditorCommand::None;
+        return;
+    }
     if (appState.pendingEditorCommand == EditorCommand::None) {
         return;
     }

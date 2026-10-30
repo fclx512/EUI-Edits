@@ -50,9 +50,9 @@ Markdown covers common writing syntax and some extensions; full Obsidian compati
 
 ## Getting started
 
-Choose a version on the [releases page](https://github.com/fclx512/EUI-Edits/releases), download its `EUI-Edits-<version>-windows-x64.exe`, put it where you plan to keep it, and run it directly. No resource folder needs unpacking. This README describes the 0.2.2 source; available downloads are listed on the releases page. The unsigned app targets Windows 10/11 x64. Windows 10 and mixed-DPI validation of this candidate remain pending. Appearance and behavior may vary with your system, fonts, and display settings.
+Download `EUI-Edits-<version>-windows-x64.exe` from the [releases page](https://github.com/fclx512/EUI-Edits/releases) and run it directly. No resource folder needs unpacking. This README describes the 0.2.3 source; available downloads are listed on the releases page. The unsigned app targets Windows 10/11 x64; The user reports successful testing on another Windows 10 computer; low-end hardware and mixed-DPI testing are no longer pending requirements for this menu work.
 
-**0.2.2 update:** Adds image viewing and an internal image icon in the document library, with centered zoom, bounded panning and normal window closing. Settings gain a rounded/square interface style; menus and the header use solid colors, with revised menu transitions and text alignment. Fixes stale context menus after returning from settings and improves narrow settings layouts; entering settings or returning to the editor takes about 200 ms. Large Markdown documents with word wrap now reflow in slices when only the width changes, retaining the previous complete layout until the new one is ready. Initial loading and text edits can still run synchronously; very large documents may take seconds to settle and require more cumulative work time and layout memory, while shorter documents may see little benefit. This version is being prepared as a local candidate for review; available downloads are listed on the releases page. See the [release notes](apps/neo_editor/RELEASE-NOTES.md).
+**0.2.3 update:** Images open in independent read-only tabs with switching, closing, reordering, and per-tab zoom/pan. Bottom controls provide zoom out, scale, zoom in, and Fit window. Plain-text and source-file context menus retain only general editing actions. Win10-style menus slide within a fixed clip and switch row highlights immediately; Win11 uses a short floating entrance and adjacent highlight motion. Direct2D reuses consecutive identical clip settings to avoid redundant operations. A local release candidate is being prepared; available downloads are listed on the releases page. See the [release notes](apps/neo_editor/RELEASE-NOTES.md).
 
 ### Common actions
 
@@ -76,7 +76,9 @@ A new document's first save chooses its name and location. For garbled text, cho
 
 Typewriter and Focus work in Markdown and plain text; their preferences last for the current session. Focus hides interface elements without entering system fullscreen. Selection-scoped find uses literal text matching. If edits, undo, or reload invalidate the original range, EUI-Edits warns and stops selection-scoped matching to prevent replacement at stale positions; choose a new range or switch to document scope to continue.
 
-Image files can also be opened directly for read-only viewing with the existing decoder. Unsupported, damaged, or unreadable files produce an error. Zoom is centered on the window; each axis stays centered until the enlarged image exceeds the window, when left-drag can pan that viewport. Zooming back to fit recenters it. The image close button or `Esc` returns to the document; the application close button follows the usual save-confirmation and exit flow. The library uses an internal image icon without adding system icon resources or image association options. Viewing an image does not replace or modify the current document.
+Image files can also be opened directly for read-only viewing with the existing decoder. Unsupported, damaged, or unreadable files produce an error. Images appear inside the editor region while the library and top bar remain usable. Each image has its own tab; reopening the same file activates that tab, and switching preserves its view. Images support the same close and reorder actions as text tabs. Bottom controls provide zoom out, the current scale, zoom in, and Fit window. The wheel zooms around the image canvas center; left-drag pans overflowing areas, and Fit window recenters the image. The percentage compares source pixels with logical display pixels. The image/tab close button, `Esc`, or `Ctrl+W` closes the current image tab; the application close button follows the usual save-confirmation and exit flow. The library uses an internal image icon without adding system icon resources or image association options. Images cannot enter text save, encoding-conversion, or formatting paths. Text tabs retain their own contents, cursor, scroll position, and undo history. Image tabs do not reopen after a normal exit, matching clean text tabs.
+
+The editor context menu follows the current syntax mode. Markdown retains links, formatting, paragraph options, and insertion; plain text, source code, and other non-Markdown modes show only Cut, Copy, Paste, and Select all. Changing the syntax mode updates this menu.
 
 ### Settings, recovery, and file associations
 
@@ -128,7 +130,7 @@ The following are **idle memory figures for the 0.2.2 candidate on Windows 11 at
 | 9 MiB plain text, 73,728 file lines | 90.6 | 60.8 | 74.7 |
 | 9 MiB Markdown, same line count, with a list item, emphasis, and inline code on every line | 278.7 | 248.6 | 270.7 |
 
-These figures are for reference only, not memory ceilings. The historical 0.1.4 table used a 1262×753 client area; this table uses 1280×800, and the 0.2.2 Markdown scenario includes the new decoration and reflow caches, so it is not directly comparable to the old table. Actual use varies with the system, document content, settings, and editing activity, and may differ from the table. The three metrics cannot be added together.
+Memory use varies with the system, documents, settings, and editing activity. The three metrics are measured separately. See the [performance measurement guide](docs/性能测试方法.md) for the procedure and metric definitions (Chinese).
 
 ## Current scope
 
@@ -148,16 +150,19 @@ Building requires Windows, Visual Studio 2022 / 2026 or Build Tools with the C++
 Run from the repository root:
 
 ```powershell
+# Check docs and source reviews; complete pending reviews using the development guide
+python scripts/check-docs.py --base HEAD
+
 # Run checks
 pwsh -NoProfile -File ./scripts/check-neoeditor.ps1
 
-# Build a Release x64 single EXE
-pwsh -NoProfile -File ./scripts/package-neoeditor.ps1 -Version 0.2.2
+# Build a Release x64 single EXE for the source version
+pwsh -NoProfile -File ./scripts/package-neoeditor.ps1
 ```
 
-The output is `out/euiedits-0.2.2-single-exe/EUI-Edits-0.2.2-windows-x64.exe`. Source folders, CMake targets, and script names retain the internal `neo_editor` identifier.
+The output is `out/euiedits-<version>-single-exe/EUI-Edits-<version>-windows-x64.exe`; the version comes from `cmake/NeoEditorVersion.cmake`. Source folders, CMake targets, and script names retain the internal `neo_editor` identifier.
 
-See the [release build guide](docs/NeoEditor-发布构建说明-2026-10-02.md) for more build options and the [documentation index](docs/目录说明.md) for maintenance and release guidance (Chinese).
+See the [development and maintenance guide](docs/开发流程与交接规范.md) for focused checks and previews, the [build guide](docs/NeoEditor-发布构建说明-2026-10-02.md) for parameters, and the [documentation index](docs/目录说明.md) for other topics (Chinese).
 
 ## License and credits
 

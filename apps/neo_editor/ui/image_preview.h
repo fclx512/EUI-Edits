@@ -1,119 +1,128 @@
 #pragma once
 
-#include "state/app_state.h"
+#include "state/app_actions.h"
 #include "ui/widgets.h"
-#include "ui/icons.h"
+#include "ui/metrics.h"
 
 #include <algorithm>
 #include <cmath>
 
 namespace neo {
 
-inline void closeImagePreview(AppState& state) {
-    state.imagePreviewPath.clear();
-    state.imagePreviewWidth = state.imagePreviewHeight = 0.0f;
-    state.imageViewport = ImageViewport{};
-    state.findEditorFocusPending = true;
-    app::requestUpdate();
-}
-
-// Images fit at the center; left drag pans only their overflowing viewport.
-// Wheel zooms about the window center. Close explicitly with the
-// upper-right button or Escape. The hidden wrapper primes a short opacity-only
-// entry without shifting the centered image or animating direct manipulation.
-inline void imagePreviewOverlay(eui::Ui& ui, AppState& state, const eui::Screen& screen) {
-    const bool open = !state.imagePreviewPath.empty() &&
-        state.imagePreviewWidth > 0.0f && state.imagePreviewHeight > 0.0f;
+// A read-only replacement for the editor region, not a window-level overlay.
+// Each image tab owns only viewport metadata; decoded textures use the existing cache.
+// Zoom/pan are direct manipulation: no animation, image copies or timers.
+inline void imagePreviewView(eui::Ui& ui, AppState& state, float width, float height) {
+    if (state.imagePreviewPath.empty()) return;
+    const auto& colors = editorColors();
+    const auto metrics = uiMetrics(state);
+    const float font = metrics.menuFontSize;
+    const float control = font + 14.0f;
+    const float header = control + 12.0f;
+    const float footer = control + 16.0f;
+    if (state.unavailable) {
+        ui.column("imagePreview.error").size(width,height).padding(24).gap(12).content([&] {
+            ui.text("imagePreview.error.message").size(std::max(0.0f,width-48),100)
+                .text(state.loadError).fontSize(font).color(colors.textMuted).wrap(true).build();
+            toolButton(ui,"imagePreview.retry",i18n::tr("tabs.retry"),120,false,true,
+                       [&state] { retryUnavailableDocument(state); },font);
+        }).build();
+        return;
+    }
+    const float canvasHeight = std::max(1.0f, height - header - footer);
+    const float canvasWidth = std::max(1.0f, width);
     auto& view = state.imageViewport;
-    if (open) view.constrain(state.imagePreviewWidth, state.imagePreviewHeight, screen.width, screen.height,
-                             ImageViewport::PanBounds::Window);
-    const float scale = view.fit(state.imagePreviewWidth, state.imagePreviewHeight, screen.width, screen.height) * view.zoom;
-    const float width = std::max(1.0f, state.imagePreviewWidth * scale);
-    const float height = std::max(1.0f, state.imagePreviewHeight * scale);
+    view.constrain(state.imagePreviewWidth, state.imagePreviewHeight, canvasWidth, canvasHeight,
+                   ImageViewport::PanBounds::Window);
+    const float scale = view.fit(state.imagePreviewWidth, state.imagePreviewHeight, canvasWidth, canvasHeight) * view.zoom;
+    const float imageWidth = std::max(1.0f, state.imagePreviewWidth * scale);
+    const float imageHeight = std::max(1.0f, state.imagePreviewHeight * scale);
+    const auto zoom = [&state, canvasWidth, canvasHeight](float steps) {
+        state.imageViewport.wheel(steps, state.imagePreviewWidth, state.imagePreviewHeight,
+                                  canvasWidth, canvasHeight, 16.0f, ImageViewport::PanBounds::Window);
+        app::requestUpdate();
+    };
 
-    ui.stack("imagePreview")
-        .size(screen.width, screen.height)
-        .zIndex(2800)
-        .disabled(!open)
-        .opacity(open ? 1.0f : 0.0f)
-        .transition(open && animationsEnabled(state)
-            ? core::Transition::make(.16f, core::Ease::OutCubic).animate(core::AnimProperty::Opacity)
-            : core::Transition::none())
-        .clip()
-        .content([&] {
-            if (!open) return;
-            ui.rect("imagePreview.dim")
-                .size(screen.width, screen.height)
-                .zIndex(2800)
-                .color(core::Color{0.0f, 0.0f, 0.0f, 0.85f})
-                .build();
+    ui.stack("imagePreview").size(width, height).clip().content([&] {
+        ui.rect("imagePreview.background").fill().color(colors.editor).build();
+        ui.stack("imagePreview.header").size(width, header).content([&] {
+            ui.rect("imagePreview.header.bg").fill().color(colors.toolbar).build();
+            iconView(ui, "imagePreview.file.icon", UiIcon::Image, 12, (header-18)*.5f, 18, colors.textMuted);
+            ui.text("imagePreview.name").position(40, 0).size(std::max(0.0f, width-control-60), header)
+                .text(elideToWidth(textfile::fileName(state.imagePreviewPath),
+                                  std::max(0.0f, width-control-60), font))
+                .fontSize(font).color(colors.text).verticalAlign(eui::VerticalAlign::Center).build();
+            ui.stack("imagePreview.close").position(std::max(0.0f, width-control-8), 6)
+                .size(control, control).content([&] {
+                    ui.rect("imagePreview.close.hit").fill().radius(neo::corner(colors, 6))
+                        .states(transparentColor(), colors.rowHover, colors.pressed)
+                        .preserveFocusOnPress().cursor(eui::CursorShape::Hand)
+                        .transition(quickTransition()).onClick([&state] { closeImagePreview(state); }).build();
+                    iconView(ui, "imagePreview.close.icon", UiIcon::Close,
+                             (control-18)*.5f, (control-18)*.5f, 18, colors.textMuted);
+                }).build();
+        }).build();
+
+        ui.stack("imagePreview.canvas").position(0, header).size(canvasWidth, canvasHeight).clip().content([&] {
             ui.image("imagePreview.img")
-                .zIndex(2801)
-                .position((screen.width - width) * 0.5f + view.panX, (screen.height - height) * 0.5f + view.panY)
-                .size(width, height)
-                .source(state.imagePreviewPath)
-                .contain()
-                .radius(neo::corner(editorColors(state.theme), 6.0f))
-                .build();
-            ui.rect("imagePreview.hit")
-                .size(screen.width, screen.height)
-                .zIndex(2802)
-                .color(core::Color{0.0f, 0.0f, 0.0f, 0.0f})
-                .acceptedButtons(core::PointerButton::Left | core::PointerButton::Middle)
-                .dragThreshold(0.0f)
-                .onMove([&state](const core::PointerEvent& event, const core::Rect&) -> bool {
-                    state.imageViewport.pointerX = static_cast<float>(event.x);
-                    state.imageViewport.pointerY = static_cast<float>(event.y);
-                    state.imageViewport.pointerKnown = true;
-                    return false;
-                })
-                .onPress([&state](const core::PointerEvent& event, const core::Rect&) {
-                    state.imageViewport.pointerX = static_cast<float>(event.x);
-                    state.imageViewport.pointerY = static_cast<float>(event.y);
-                    state.imageViewport.pointerKnown = true;
-                })
-                .onDrag([&state, screen](const core::dsl::DragEvent& event) {
+                .position((canvasWidth-imageWidth)*.5f+view.panX, (canvasHeight-imageHeight)*.5f+view.panY)
+                .size(imageWidth, imageHeight).source(state.imagePreviewPath).contain().build();
+            ui.rect("imagePreview.hit").size(canvasWidth, canvasHeight).zIndex(1).color(transparentColor())
+                .acceptedButtons(core::PointerButton::Left | core::PointerButton::Middle).dragThreshold(0)
+                .onDrag([&state, canvasWidth, canvasHeight](const core::dsl::DragEvent& event) {
                     if (event.button != core::PointerButton::Left && event.button != core::PointerButton::Middle) return;
-                    state.imageViewport.panX += static_cast<float>(event.deltaX);
-                    state.imageViewport.panY += static_cast<float>(event.deltaY);
-                    state.imageViewport.constrain(state.imagePreviewWidth, state.imagePreviewHeight, screen.width, screen.height,
-                                                  ImageViewport::PanBounds::Window);
+                    auto& viewport = state.imageViewport;
+                    viewport.panX += static_cast<float>(event.deltaX);
+                    viewport.panY += static_cast<float>(event.deltaY);
+                    viewport.constrain(state.imagePreviewWidth, state.imagePreviewHeight, canvasWidth, canvasHeight,
+                                       ImageViewport::PanBounds::Window);
                 })
-                .onScroll([&state, screen](const core::ScrollEvent& event) {
-                    state.imageViewport.wheel(static_cast<float>(event.y), state.imagePreviewWidth,
-                                              state.imagePreviewHeight, screen.width, screen.height,
-                                              16.0f, ImageViewport::PanBounds::Window);
-                })
+                .onScroll([zoom](const core::ScrollEvent& event) { zoom(static_cast<float>(event.y)); })
                 .onKeyEvent([&state](const core::KeyEvent& event) {
-                    if (event.isDown() && event.key == core::InputKey::Escape) closeImagePreview(state);
-                    return true;
-                })
-                // The native window keeps an IME context even for non-text
-                // controls. Cancel any attempted preedit immediately so its
-                // candidate window cannot consume Escape before this layer.
-                .onTextInput([](const core::TextInputEvent& event) {
-                    if (event.composing || event.compositionChanged) {
-                        core::window::cancelImeComposition(core::window::mainWindowHandle());
+                    if (event.isDown() && event.key == core::InputKey::Escape) {
+                        if (state.openMenu != MenuKind::None || state.vaultContextMenuOpen ||
+                            state.contextMenuOpen || state.languageMenuOpen || state.tabListOpen)
+                            return false;
+                        closeImagePreview(state);
+                        return true;
                     }
+                    // Let app shortcuts navigate/open/close normally. Printable
+                    // keys stay here and cannot edit the hidden manuscript.
+                    return !event.modifiers.shortcut();
+                })
+                .onTextInput([](const core::TextInputEvent& event) {
+                    if (event.composing || event.compositionChanged)
+                        core::window::cancelImeComposition(core::window::mainWindowHandle());
                 })
                 .onContextMenu([](const core::PointerEvent&, const core::Rect&) {})
-                .cursor(eui::CursorShape::Hand)
-                .build();
-            ui.stack("imagePreview.close")
-                .position(std::max(4.0f, screen.width - 48.0f), uiMetrics(state).menuBarHeight + 12.0f)
-                .size(36.0f, 36.0f).zIndex(2803)
-                .content([&] {
-                    ui.rect("imagePreview.close.hit").fill()
-                        .radius(neo::corner(editorColors(state.theme), 6.0f))
-                        .states({0,0,0,.55f}, {0,0,0,.70f}, {0,0,0,.82f})
-                        .preserveFocusOnPress().cursor(eui::CursorShape::Hand)
-                        .transition(quickTransition())
-                        .onClick([&state] { closeImagePreview(state); }).build();
-                    iconView(ui, "imagePreview.close.icon", UiIcon::Close, 8, 8, 20, {1,1,1,.95f});
+                .cursor(eui::CursorShape::Hand).build();
+        }).build();
+
+        const float buttonWidth = control+4;
+        const float percentWidth = font*4.5f;
+        const float fitWidth = std::max(76.0f, estimateTextWidth(i18n::tr("image.fit"), font)+20);
+        const float controlsWidth = buttonWidth*2+percentWidth+fitWidth+18;
+        ui.stack("imagePreview.footer").position(0, height-footer).size(width, footer).content([&] {
+            ui.rect("imagePreview.footer.bg").fill().color(colors.toolbar).build();
+            ui.row("imagePreview.controls").position(std::max(4.0f, (width-controlsWidth)*.5f), 8)
+                .size(controlsWidth, control).gap(6).content([&] {
+                    toolButton(ui, "imagePreview.zoomOut", "−", buttonWidth, false, view.zoom > .1001f,
+                               [zoom] { zoom(-1); }, font);
+                    ui.text("imagePreview.percent").size(percentWidth, control)
+                        .text(std::to_string(static_cast<int>(std::lround(scale*100)))+"%")
+                        .fontSize(font).color(colors.textMuted).horizontalAlign(eui::HorizontalAlign::Center)
+                        .verticalAlign(eui::VerticalAlign::Center).build();
+                    toolButton(ui, "imagePreview.zoomIn", "+", buttonWidth, false, view.zoom < 15.999f,
+                               [zoom] { zoom(1); }, font);
+                    toolButton(ui, "imagePreview.fit", i18n::tr("image.fit"), fitWidth, false, true, [&state] {
+                        state.imageViewport.zoom = 1;
+                        state.imageViewport.panX = state.imageViewport.panY = 0;
+                        app::requestUpdate();
+                    }, font);
                 }).build();
-        })
-        .build();
-    if (open && view.focusPending) {
+        }).build();
+    }).build();
+    if (view.focusPending) {
         view.focusPending = false;
         ui.requestFocus("imagePreview.hit");
     }

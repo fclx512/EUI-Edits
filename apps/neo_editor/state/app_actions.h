@@ -59,8 +59,12 @@ bool mergeRelatedVaultRoots(AppState& state);
 
 void newDocument(AppState& state);
 bool loadDocument(AppState& state, const std::string& path);
-// Reuse the existing image decoder/viewer without creating or replacing a text tab.
+// Images share ordinary tab identity/navigation; bytes stay out of the text model.
 bool openImagePreview(AppState& state, const std::string& path);
+inline void closeImagePreview(AppState& state) {
+    if (state.imageDocument()) requestCloseTab(state, state.tabId);
+}
+
 void retryUnavailableDocument(AppState& state);
 // Startup preserves a crash recovery draft before honoring an explicit file.
 void restoreStartupDocument(AppState& state, const std::string& commandLinePath);
@@ -68,13 +72,12 @@ void openFileFromDialog(AppState& state);
 void openRecentFile(AppState& state, std::size_t index);
 
 // 有未保存修改时先确认再打开，避免浏览文档库顺手丢掉正在写的内容。
-// Window closing may dismiss a read-only image first; other actions continue to
-// treat it as modal. Save/conflict and destructive-confirmation guards stay on.
-inline bool documentModalOpen(const AppState& state, bool includeImagePreview = true) {
+// The embedded image viewer leaves library/tab navigation available. Save,
+// conflict and destructive-confirmation transactions retain their modal guards.
+inline bool documentModalOpen(const AppState& state) {
     return state.closeApproved || state.sessionClosePending || state.savePickerOpen || state.pending != PendingAction::None || state.saveConflictOpen ||
         state.riskAction != AppState::RiskAction::None ||
         state.vaultPromptKind != VaultPromptKind::None || state.vaultDeletePending || state.linkEditorOpen ||
-        (includeImagePreview && !state.imagePreviewPath.empty()) ||
         (state.mindmapPreview.open && !state.mindmapPreview.inlineMode) || state.exitClosing;
 }
 void requestOpenPath(AppState& state, const std::string& path);

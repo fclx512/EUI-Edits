@@ -47,6 +47,7 @@ bool check(bool condition, const char* message) {
 
 int main() {
     neo::AppState& state = neo::state();
+    state.newDocumentLanguage = "markdown";
     state.doc.text = "## 标题 [站点](https://example.com)\n\n普通段落\n";
     state.contextMenuOpen = false;
     state.animations = true;
@@ -128,5 +129,46 @@ int main() {
     if (!check(reopenedHighlight && reopenedHighlight->opacity == 0.0f &&
                findSuffix(ui, ".level.1.item.0") == nullptr,
                "reopened menu retained a stale active cascade")) return 8;
+    // Non-Markdown modes never consult the LP parser, even when their bytes
+    // happen to look like headings/links or a stale link hit remains installed.
+    for (const char* path : {"note.txt", "source.cpp", "settings.json", "unknown.xyz"}) {
+        state.path = path;
+        state.languageOverride.clear();
+        input.contextLinkByte = static_cast<int>(state.doc.text.find("站点"));
+        input.selectionStart = 0; input.selectionEnd = 1;
+        (void)neo::lp::cachedPlan(preeditText);
+        const auto plainVersion = neo::lp::planCache().version;
+        compose(ui, state);
+        const auto& plain = ui.state<Presentation>("editor.contextmenu.presentation");
+        auto items = neo::context_menu_detail::editorContextMenuItems(false, true, true, 2);
+        if (!check(!plain.markdown && !plain.onLink && plain.headingLevel == 0 &&
+                   plain.hasSelection && items.size() == 4 && !items[0].separatorBefore &&
+                   std::all_of(items.begin(), items.end(), [](const auto& item) { return item.children.empty(); }) &&
+                   neo::lp::planCache().version == plainVersion && neo::lp::planCache().text == preeditText &&
+                   findSuffix(ui, ".level.0.item.3") && !findSuffix(ui, ".level.0.item.4"),
+                   "plain/source context must contain only clipboard actions without LP work")) return 9;
+        const neo::EditorCommand expected[]{neo::EditorCommand::Cut, neo::EditorCommand::Copy,
+            neo::EditorCommand::Paste, neo::EditorCommand::SelectAll};
+        for (int index=0; index<4; ++index) {
+            state.pendingEditorCommand = neo::EditorCommand::None;
+            neo::context_menu_detail::dispatchEditorContextItem(state, {index}, false, false, ui);
+            if (!check(state.pendingEditorCommand == expected[index], "compact menu dispatched the wrong action")) return 10;
+        }
+        for (const std::vector<int>& invalid : {std::vector<int>{-1}, {4}, {0,0}, {2,4}}) {
+            state.pendingEditorCommand = neo::EditorCommand::None;
+            neo::context_menu_detail::dispatchEditorContextItem(state, invalid, false, false, ui);
+            if (!check(state.pendingEditorCommand == neo::EditorCommand::None && !state.pendingImageImport,
+                       "compact menu accepted an invalid/Markdown path")) return 11;
+        }
+    }
+    state.languageOverride = "markdown";
+    compose(ui, state);
+    if (!check(ui.state<Presentation>("editor.contextmenu.presentation").markdown &&
+               findSuffix(ui, ".level.0.item.6"), "explicit Markdown override must restore rich menu")) return 12;
+    state.languageOverride = "text";
+    state.pendingEditorCommand = neo::EditorCommand::None;
+    neo::context_menu_detail::dispatchEditorContextItem(state, {2,0}, true, false, ui);
+    if (!check(state.pendingEditorCommand == neo::EditorCommand::None,
+               "stale Markdown menu cannot format a newly plain document")) return 13;
     return 0;
 }

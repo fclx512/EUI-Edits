@@ -21,6 +21,10 @@ $tools = Get-EuiReleaseTools -CMake $CMake -Generator $Generator -Python $Python
 $CMake = $tools.CMake; $ctest = $tools.CTest; $Generator = $tools.Generator; $Python = $tools.Python
 if ($PreflightOnly) { $tools; return }
 
+& $Python -B (Join-Path $repo 'scripts/check-docs.py')
+if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits documentation checks failed.' }
+& $Python -B (Join-Path $repo 'tests/python/test_check_docs.py')
+if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits documentation checker regressions failed.' }
 & $Python (Join-Path $repo 'tests/tools/check_i18n.py')
 if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits translation checks failed.' }
 & $CMake -S $repo -B $BuildDirectory -G $Generator -A x64 `
@@ -35,7 +39,7 @@ if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits check configuration failed.' }
 # Registry tests redirect HKCU in their own process; settings use temporary APPDATA.
 $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encoding', 'settings_atomic', 'settings_confirmation', 'settings_reveal', 'reveal_state', 'settings_reveal_benchmark', 'hover_transition_benchmark', 'decoration_cadence', 'reveal_d2d_benchmark',
     'vault_watcher', 'save_dialog_protocol', 'font_safety', 'heading_anchor', 'find_search', 'find_actions',
-    'i18n', 'menu_commands', 'menu_motion', 'settings_transition', 'control_text_alignment', 'transition_cadence_benchmark', 'file_assoc_registration', 'context_menu', 'frozen_backdrop', 'frozen_menu_benchmark', 'frozen_runtime_benchmark', 'editor_context_menu_lp', 'link_editor_focus', 'toast_layout',
+    'i18n', 'menu_commands', 'menu_motion', 'menu_style_benchmark', 'settings_transition', 'control_text_alignment', 'transition_cadence_benchmark', 'file_assoc_registration', 'context_menu', 'frozen_backdrop', 'frozen_menu_benchmark', 'frozen_runtime_benchmark', 'editor_context_menu_lp', 'link_editor_focus', 'toast_layout',
     'input_scrollbar', 'pointer_input', 'vault_delete_state', 'file_operations', 'vault_rename',
     'portable_resource_paths', 'theme_loader', 'theme_workbench', 'theme_workbench_ui', 'input_selection_color', 'image_viewport', 'mindmap_plan', 'mindmap_layout', 'mindmap_preview_state', 'mindmap_preview_ui', 'mindmap_inline_ui', 'mindmap_manual_sample', 'input_line_overlay', 'ime_rect', 'ime_frame_refresh', 'dsl_main_handle', 'win32_input',
     'text_metrics_cache', 'text_metrics_cursor', 'text_glyph_advance_cache', 'text_glyph_cache_budget', 'text_font_resolution_scope', 'text_atlas_growth', 'text_atlas_overflow', 'session_write_scheduler',
@@ -43,7 +47,7 @@ $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encod
     'tab_presentation', 'system_appearance', 'window_chrome', 'input_placeholder_refresh', 'input_vertical_alignment', 'layout_numeric',
     'input_horizontal_viewport', 'input_callback_layout', 'input_reflow', 'input_reflow_callback', 'input_reflow_scroll', 'input_reflow_render', 'input_drag_feedback', 'input_pointer_feedback',
     'document_vault_loading', 'virtual_list_wheel', 'win32_event_pump', 'runtime_scroll_sync',
-    'main_window_frame_reentry', 'dsl_main_compose', 'dsl_window_resize_throttle', 'runtime_timer', 'd2d_render_policy', 'd2d_atlas_capacity',
+    'main_window_frame_reentry', 'dsl_main_compose', 'dsl_window_resize_throttle', 'runtime_timer', 'd2d_render_policy', 'd2d_render_probe', 'd2d_atlas_capacity',
     'input_model', 'input_navigation', 'input_value_reference', 'input_source_line_count', 'table_selection_background', 'lp_decorations', 'source_decorations', 'decoration_uniform_pages', 'undo_incremental', 'image_attach', 'markdown_writing')
 $tests = @($targets) + @('text_italic', 'settings_language_zh', 'settings_language_en', 'settings_language_invalid', 'settings_language_legacy', 'cached_strip_runtime')
 $filter = '^(' + (($tests | ForEach-Object { [Regex]::Escape($_) }) -join '|') + ')$'

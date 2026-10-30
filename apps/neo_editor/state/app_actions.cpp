@@ -158,32 +158,59 @@ bool openImagePreview(AppState& state, const std::string& path) {
     std::error_code error;
     const auto absolute = std::filesystem::absolute(textfile::pathFromUtf8(path), error).lexically_normal();
     const auto resolved = error ? path : textfile::pathToUtf8(absolute);
+    clearTabCloseAnchor(state);
+    for (const auto id : state.tabOrder) {
+        const auto* document = documentTab(state, id);
+        if (document && sameDocumentFile(document->path, resolved))
+            return activateDocumentTab(state, id);
+    }
     const auto decoded = core::render::image::loadStaticImageFromPath(resolved, false);
     if (!decoded || !decoded->pixels || decoded->width <= 0 || decoded->height <= 0) {
         showToast(state, i18n::tr("image.open_failed"),
                   i18n::format("image.open_failed_hint", {{"path", path}}));
         return false;
     }
+    if (!(state.tabOrder.size()==1 && state.tabId==1 && state.path.empty() &&
+          !state.dirty() && state.doc.text.empty()) && !createDocumentTab(state)) return false;
+    state.doc = makeEmptyDocument();
+    state.path = resolved;
+    state.languageOverride.clear(); state.wrapOverride = -1;
+    state.revision = state.savedRevision = 1;
+    state.recovered = state.unavailable = false;
+    state.loadError.clear(); state.recoveredFrom.clear();
     state.openMenu = MenuKind::None;
     state.contextMenuOpen = state.vaultContextMenuOpen = state.findOptionsOpen = false;
     state.markdownHeadingMenuOpen = state.languageMenuOpen = state.tabListOpen = false;
     state.settingsOpen = false;
     state.fontPicker = FontPickerTarget::None;
     state.themeListOpen = false;
+    state.pendingEditorCommand = EditorCommand::None;
+    state.pendingImagePaste = state.pendingImageImport = false;
+    state.pendingImageLink.clear();
+    state.mindmapPreviewPending = false;
+    state.mindmapPreview.close();
+    core::window::cancelImeComposition(core::window::mainWindowHandle());
     state.imagePreviewPath = resolved;
     state.imagePreviewWidth = static_cast<float>(decoded->width);
     state.imagePreviewHeight = static_cast<float>(decoded->height);
     state.imageViewport = ImageViewport{};
+    if (followDocumentDirectory(state, resolved) | mergeRelatedVaultRoots(state)) prepareVault(state, true);
+    const auto relative = vaultRelativePath(state, resolved);
+    if (!relative.empty() && documentWithinRoot(resolved, state.vaultRoot)) {
+        for (std::size_t i=0; i<relative.size(); ++i)
+            if (relative[i]=='/') state.expanded.insert(relative.substr(0,i));
+        state.vaultSelectedPath = state.vaultPendingReveal = relative;
+        rebuildRows(state);
+    }
+    refreshTabPresentation(state);
+    recordRecentFile(resolved);
+    persistDocumentSession(state);
     app::requestUpdate();
     return true;
 }
 
 bool loadDocument(AppState& state, const std::string& path) {
-    if (filetypes::image(path)) {
-        if (!openImagePreview(state, path)) return false;
-        recordRecentFile(path);
-        return true;
-    }
+    if (filetypes::image(path)) return openImagePreview(state, path);
     clearTabCloseAnchor(state);
     for (const auto id : state.tabOrder) {
         const auto* document = documentTab(state, id);
@@ -232,6 +259,17 @@ bool loadDocument(AppState& state, const std::string& path) {
 }
 
 void retryUnavailableDocument(AppState& state) {    if (!state.unavailable || documentModalOpen(state)) return;
+    if (state.imageDocument()) {
+        const auto decoded = core::render::image::loadStaticImageFromPath(state.path, false);
+        if (!decoded || !decoded->pixels || decoded->width<=0 || decoded->height<=0) {
+            showToast(state,i18n::tr("image.open_failed"),state.path);
+            return;
+        }
+        state.imagePreviewWidth=static_cast<float>(decoded->width);
+        state.imagePreviewHeight=static_cast<float>(decoded->height);
+        state.unavailable=false;state.loadError.clear();state.imageViewport=ImageViewport{};
+        app::requestUpdate();return;
+    }
     auto loaded = filesafety::load(state.path);
     if (!loaded.result.ok) { state.loadError = loaded.result.error; showToast(state, i18n::tr("safety.open_failed"), state.loadError); return; }
     state.doc = std::move(loaded.result.document); state.diskFingerprint = loaded.fingerprint;
@@ -279,6 +317,16 @@ void restoreStartupDocument(AppState& state, const std::string& commandLinePath)
                 document.doc = std::move(record.document);
                 document.recovered = true; document.recoveredFrom = record.path;
                 document.revision = 1;
+            } else if (!record.path.empty() && (record.language=="image" || filetypes::image(record.path))) {
+                document.path = document.imagePreviewPath = record.path;
+                const auto decoded = core::render::image::loadStaticImageFromPath(record.path,false);
+                if (decoded && decoded->pixels && decoded->width>0 && decoded->height>0) {
+                    document.imagePreviewWidth=static_cast<float>(decoded->width);
+                    document.imagePreviewHeight=static_cast<float>(decoded->height);
+                } else {
+                    document.unavailable=true;
+                    document.loadError=i18n::format("image.open_failed_hint",{{"path",record.path}});
+                }
             } else if (!record.path.empty()) {
                 auto loaded = filesafety::load(record.path);
                 if (!loaded.result.ok) {
@@ -439,6 +487,7 @@ bool saveToPath(AppState& state, const std::string& path, const filesafety::Fing
 } // namespace
 
 bool saveDocument(AppState& state) {
+    if (state.imageDocument()) return false;
     if (state.unavailable) { showToast(state, i18n::tr("safety.open_failed"), state.loadError); return false; }
     if (state.path.empty()) return saveDocumentAs(state);
     if (!state.dirty()) {
@@ -455,7 +504,7 @@ bool saveDocument(AppState& state) {
 }
 
 bool convertDocumentToUtf8(AppState& state) {
-    if (documentModalOpen(state) || state.unavailable) return false;
+    if (documentModalOpen(state) || state.unavailable || state.imageDocument()) return false;
     if (state.doc.encoding == textfile::Encoding::Utf8 && state.doc.ansiCodePage == 0) return true;
     state.doc.encoding = textfile::Encoding::Utf8;
     state.doc.ansiCodePage = 0;
@@ -472,12 +521,7 @@ bool convertDocumentToUtf8(AppState& state) {
 bool requestCloseDocument(AppState& state) {
     if (state.closeApproved) return true;
     if (state.sessionClosePending) return false; // repeated WM_CLOSE must not reopen the editable tree
-    if (documentModalOpen(state, /*includeImagePreview=*/false)) return false;
-    // A read-only viewer must not veto the window's close button or Alt+F4.
-    // Remove it before the ordinary dirty-document/save/exit chain takes over.
-    state.imagePreviewPath.clear();
-    state.imagePreviewWidth = state.imagePreviewHeight = 0.0f;
-    state.imageViewport = ImageViewport{};
+    if (documentModalOpen(state)) return false;
     state.settingsOpen = false;
     state.exitClosing = true;
     for (const auto id : state.tabOrder) {
@@ -588,6 +632,7 @@ const std::vector<ReopenEncodingOption>& reopenEncodingOptions() {
 }
 
 void performReloadWithEncoding(AppState& state, const textfile::ForcedEncoding& forced) {
+    if (state.imageDocument()) return;
     // 失败不动当前文档：错误提示完，用户手里的文稿与撤销历史原样保留。
     auto loaded = filesafety::load(state.path, &forced);
     textfile::LoadResult& result = loaded.result;
@@ -609,6 +654,7 @@ void performReloadWithEncoding(AppState& state, const textfile::ForcedEncoding& 
 }
 
 void requestReloadWithEncoding(AppState& state, std::size_t optionIndex) {
+    if (state.imageDocument()) return;
     const auto& options = reopenEncodingOptions();
     if (optionIndex >= options.size()) {
         return;
@@ -746,6 +792,7 @@ void importImageFromPicker(AppState& state) {
 }
 
 bool saveDocumentAs(AppState& state) {
+    if (state.imageDocument()) return false;
     if (state.unavailable) { showToast(state, i18n::tr("safety.open_failed"), state.loadError); return false; }
     if (state.savePickerOpen) return false;
     state.savePickerOpen = true;
@@ -1308,6 +1355,7 @@ bool vaultRenameEntry(AppState& state, const std::string& oldRelative, std::stri
         auto movedPath = textfile::pathFromUtf8(newAbsolute);
         for (; tail != currentNative.end(); ++tail) movedPath /= *tail;
         state.path = textfile::pathToUtf8(movedPath);
+        if (state.imageDocument()) state.imagePreviewPath = state.path;
         // Rename preserves the opened version: never rebaseline external edits.
         const auto moved = filesafety::inspect(state.path);
         if (!filesafety::same(state.diskFingerprint, moved)) state.diskFingerprint.status = filesafety::DiskStatus::Unknown;
@@ -1330,6 +1378,7 @@ bool vaultRenameEntry(AppState& state, const std::string& oldRelative, std::stri
             auto movedPath = textfile::pathFromUtf8(newAbsolute);
             for (; tail != current.end(); ++tail) movedPath /= *tail;
             document->path = textfile::pathToUtf8(movedPath);
+            if (document->imageDocument()) document->imagePreviewPath = document->path;
             const auto observed = filesafety::inspect(document->path);
             if (!filesafety::same(document->diskFingerprint, observed)) document->diskFingerprint.status = filesafety::DiskStatus::Unknown;
         }
@@ -1369,15 +1418,22 @@ void vaultDeleteEntry(AppState& state, const std::string& relative, bool isDir) 
     }
     const std::string absolute = vaultAbsolutePath(state, relative);
     // Resolve relationships before Shell can remove any of the path components.
-    const bool affectsCurrentDocument = pathAffected(state, absolute);
+    const bool affectsCurrentDocument = !state.imageDocument() && pathAffected(state, absolute);
     const platform::DeleteResult result =
         platform::deleteVaultEntry(state.vaultRoot, relative, isDir);
+    for (const auto id : state.tabOrder) {
+        auto* document=documentTab(state,id);
+        if (!document || !document->imageDocument() || !pathAffected(*document,absolute) ||
+            !pathDefinitelyMissing(document->path)) continue;
+        document->unavailable=true;
+        document->loadError=i18n::format("image.open_failed_hint",{{"path",document->path}});
+    }
     // Shell may partially delete before cancellation/failure. Preserve every actually
     // missing open document, including clean background pages, as an unsaved draft.
     for (const auto id : state.tabOrder) {
         if (id == state.tabId) continue;
         auto* document = documentTab(state, id);
-        if (!document || !pathAffected(*document, absolute) || !pathDefinitelyMissing(document->path)) continue;
+        if (!document || document->imageDocument() || !pathAffected(*document, absolute) || !pathDefinitelyMissing(document->path)) continue;
         document->recoveredFrom = document->path;
         document->newDocumentLanguage = document->language();
         document->path.clear(); document->diskFingerprint = {};

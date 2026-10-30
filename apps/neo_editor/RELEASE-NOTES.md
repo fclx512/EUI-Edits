@@ -1,37 +1,37 @@
 # EUI-Edits @NEO_EDITOR_VERSION@ — 发布说明
 
-## 相比 0.2.1 的主要更新
+## 相比 0.2.2 的主要更新
 
-0.2.2 增加文档库图片查看，调整菜单、设置页及窄窗口交互，并将大型 Markdown 文档的自动换行宽度重排分片处理。本版本先作为本地候选供确认。
+0.2.3 完善图片标签、非 Markdown 编辑菜单和两种界面风格的菜单动画，并减少 Direct2D 的重复裁剪操作。
 
-### 图片查看
+### 图片标签与查看
 
-- **文档库图片：** 点击图片文件可进入只读查看，复用Markdown现有图片解码能力；当前解码器不支持或已损坏的文件会提示无法打开，不按文本加载。
-- **居中与拖动：** 图片默认居中，滚轮围绕窗口中心缩放；放大后仅超出窗口的方向可用左键拖动视角，缩小后自动归中。
-- **关闭与退出：** 右上角按钮或Esc返回编辑区，打开图片期间也可直接关闭应用窗口；未保存文稿仍走原有保存确认。
-- **内部图标：** 文档库增加照片文件图标；不新增图片的系统图标或“打开方式”注册。图片查看不会创建文本标签或改变原文稿。
+- 图片在编辑区的独立只读标签中打开，支持切换、关闭、拖拽重排和标签列表；重复打开同一文件会定位到已有页。
+- 每页独立保留缩放和平移。底部提供缩小、当前比例、放大和“适应窗口”；放大后左键可平移超出画布的部分。
+- 图片不会进入文字保存、编码转换或格式编辑流程；文字页的正文、光标、滚动和撤销记录独立保留。正常退出仍确认其他未保存文稿。
+- 与干净文字标签一致，图片页不会在正常退出后自动重开。图片字节不写入正文恢复稿；恢复目标缺失时显示可重试的只读错误页。
 
-### 菜单与界面
+### 菜单与绘制
 
-- **界面风格：** 设置 → 外观新增圆角/直角切换；圆角沿用 Windows 11 观感，直角更接近 Windows 10。只改界面控件几何，不改配色、编辑区或主题文件。
-- **纯色菜单：** 菜单和顶栏改用不透明主题底色，便于阅读；保留短展开、淡入和菜单项高亮过渡。
-- **动画采样：** 颜色、位置及其它被动装饰过渡使用最高60 Hz的共享采样；直接输入与拖动继续即时处理，不把这一上限用于限制编辑输入。
-- **文字对齐：** 统一菜单与常规控件的字体参考基线，设置标题和说明按实际换行测量布局。
-- **设置往返：** 修复返回编辑区时旧右键菜单重新出现的问题；进入设置和回到编辑区均采用约200 ms的轻量过渡，关闭动画时即时切换。
-- **窄窗设置：** 分类导航可按文字宽度分排，主题说明按换行高度排列，短窗口可滚动访问底部操作，按钮宽度适配译文。
-
-### Markdown 自动换行
-
-- **调整窗口：** 已有完整布局且仅宽度变化时，长段落、带格式段落和表格单元格可分片重排，减少受测长文档在一次 UI 调用内的连续工作。完成前保留上一份完整布局，最新宽度排完后整体切换。
-- **布局一致性：** 修复布局切换后文字缓存未同步造成的重叠；手动滚动保留正文位置，旧布局的点击回调会检查正文和字体上下文。
-- **适用边界：** 首次打开、正文编辑及输入法重排仍可能同步处理。极大文档可能需要数秒完成重排，并增加累计工作段耗时及布局内存；较短文档收益有限，不保证每个工作片低于 3 ms，也不代表实际帧率或整体 CPU 使用率改善。
+- 非 Markdown 语法模式的编辑区右键菜单只保留剪切、复制、粘贴和全选；手动切换语法模式后菜单同步更新。
+- Win10 风格菜单在固定裁剪窗内短滑入，行高亮即时切换，保留亮边；Win11 风格使用短浮入和相邻行高亮过渡。两种风格分别使用固定边框、阴影和高亮几何，关闭动画时直接切换。
+- Direct2D 对相同目标、完全相同矩形的连续裁剪请求复用现有状态，不新增图像缓存或改变重绘范围。本机同轨迹测量观察到周期与调用墙钟改善，不能换算为所有设备的 CPU 使用率、能耗或屏幕延迟保证。
 
 ### 下载与更新
 
-用新 EXE 替换旧版本；如果此前已注册打开方式，在新版本的文件关联设置中点击“应用并修复”。设置和本地主题保存在用户配置目录，替换 EXE 不会清除它们。
+用新 EXE 替换旧版本。设置和本地主题保存在用户配置目录，替换 EXE 不会清除它们；如果曾登记文件打开方式，在新版本的文件关联设置中应用并修复登记。
 
-### 使用说明
+目标平台为 Windows 10/11 x64，程序未签名。自绘最大化按钮暂不提供 Windows 11 Snap 悬停布局。主题工作台仍为测试功能，长期使用请将主题草稿保存为文件；CSS 导入只映射支持的配色。
 
-目标平台为 Windows 10/11 x64，程序未签名。本地实窗检查在 Windows 11 进行；Windows 10、GPU、低配、多屏 DPI、长时间编辑和专项 IME 矩阵仍需进一步验证。局部动画测试不代表整体 CPU、屏幕延迟或不同硬件下的性能结论。自绘最大化按钮暂不提供 Windows 11 Snap 悬停布局，早期偶发图标缺失尚未确认根治。
+## English
 
-主题工作台仍为测试功能。主题草稿及其撤销历史仅在本次应用会话内保留，长期使用请保存为主题文件。CSS 导入只映射支持的配色，不执行样式，也不保证还原 Obsidian 布局或插件效果。
+### Changes since 0.2.2
+
+- Images open in independent read-only tabs with switching, closing, drag reordering, a tab list, and per-tab zoom/pan. Reopening the same file activates its existing tab.
+- Bottom controls provide zoom out, scale, zoom in, and Fit window. Dragging pans only overflowing areas. Text tabs retain their own contents, cursor, scroll position, and undo history.
+- Images cannot enter text save, encoding-conversion, or formatting paths. They do not reopen after a normal exit, matching clean text tabs. Recovery stores image metadata only; unavailable image targets show a retry page.
+- Non-Markdown context menus contain only Cut, Copy, Paste, and Select all, following the selected syntax mode.
+- Win10-style menus slide inside a fixed clip with immediate row highlights and Reveal; Win11 uses a short floating entrance and adjacent highlight motion. Borders, shadows, and highlight geometry follow each style. Disabling animations applies changes immediately.
+- Direct2D reuses consecutive identical clips on the same target without adding image caches or changing redraw bounds. Local measurements observed fewer cycles and shorter timed calls; this is not a universal CPU, power, or display-latency guarantee.
+
+Replace the old EXE to update. Settings and saved local themes remain in the user configuration folder. Reapply file associations in Settings if previously registered. Windows 10/11 x64 is targeted; the app is unsigned. The custom maximize button does not provide Windows 11 Snap hover layouts. The theme workbench remains experimental; save drafts as theme files for long-term use.

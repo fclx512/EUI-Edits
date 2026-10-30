@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Path $EvidenceDirectory | Out-Null
 $pwsh = Join-Path $PSHOME 'pwsh.exe'
 $results = @()
 # Both Windows workflows call this preflight once before candidate preparation.
-# Keep these Python regressions out of the 81 CTest cases and their nested gate.
+# Python checker regressions are separate from the CTest application cases.
 $regressionOutput = @(& $Python -B (Join-Path $repo 'tests/python/test_check_i18n.py') -v 2>&1)
 $regressionCode = $LASTEXITCODE
 $regressionOutput | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'i18n-checker-regressions.log') -Encoding utf8
@@ -44,6 +44,7 @@ function Check-FailedStage {
     Copy-Item -LiteralPath (Join-Path $repo 'scripts/prepare-neoeditor-release.ps1'), (Join-Path $repo 'scripts/neoeditor-release-common.ps1') -Destination (Join-Path $fixture 'scripts')
     Copy-Item -LiteralPath (Join-Path $repo 'cmake/NeoEditorVersion.cmake') -Destination (Join-Path $fixture 'cmake')
     Copy-Item -LiteralPath (Join-Path $repo '.gitignore') -Destination $fixture
+    'raise SystemExit(0)' | Set-Content -LiteralPath (Join-Path $fixture 'scripts/check-docs.py') -Encoding utf8
     @("from pathlib import Path", "Path(__file__).parents[2].joinpath('injected-source-change.txt').write_text('changed')", "raise SystemExit($InjectedExit)") |
         Set-Content -LiteralPath (Join-Path $fixture 'tests/tools/check_i18n.py') -Encoding utf8
     $run = Join-Path $fixture 'out/run'
@@ -86,6 +87,47 @@ function Check-I18nRegressionFailure {
     if (Test-Path -LiteralPath (Join-Path $run 'occupied')) { throw 'Failed Python regressions continued into release guard checks.' }
     $script:results += [ordered]@{ name = 'i18n-regression-failure'; status = 'PASS'; exitCode = $code }
 }
+function Check-DocsPreflightFailure {
+    # A documentation failure must stop preparation before any build directory.
+    $fixture = Join-Path $EvidenceDirectory 'docs-preflight-failure'
+    & git clone --local --shared --no-checkout $repo $fixture 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot prepare documentation failure fixture.' }
+    foreach ($directory in @('scripts', 'cmake', 'tests/tools')) {
+        New-Item -ItemType Directory -Path (Join-Path $fixture $directory) | Out-Null
+    }
+    Copy-Item -LiteralPath (Join-Path $repo 'scripts/prepare-neoeditor-release.ps1'), (Join-Path $repo 'scripts/neoeditor-release-common.ps1') -Destination (Join-Path $fixture 'scripts')
+    Copy-Item -LiteralPath (Join-Path $repo 'cmake/NeoEditorVersion.cmake') -Destination (Join-Path $fixture 'cmake')
+    Copy-Item -LiteralPath (Join-Path $repo '.gitignore') -Destination $fixture
+    'raise SystemExit(0)' | Set-Content -LiteralPath (Join-Path $fixture 'tests/tools/check_i18n.py') -Encoding utf8
+    'print("DOC003 broken fixture link"); raise SystemExit(9)' | Set-Content -LiteralPath (Join-Path $fixture 'scripts/check-docs.py') -Encoding utf8
+    $run = Join-Path $fixture 'out/run'
+    $output = @(& $pwsh -NoProfile -NonInteractive -File (Join-Path $fixture 'scripts/prepare-neoeditor-release.ps1') `
+        -Version $version -Python $Python -RunDirectory $run 2>&1)
+    $code = $LASTEXITCODE
+    $output | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'docs-preflight-failure.log') -Encoding utf8
+    $record = Get-Content -LiteralPath (Join-Path $run 'result.json') -Raw | ConvertFrom-Json
+    $stage = @($record.stages | Where-Object name -eq 'docs-preflight')
+    if ($code -eq 0 -or $record.status -ne 'FAIL' -or $stage.Count -ne 1 -or $stage[0].exitCode -ne 9) {
+        throw 'Documentation preflight did not retain the failing stage and exit code.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $run 'check-build')) { throw 'Documentation failure continued into compilation.' }
+    $script:results += [ordered]@{ name = 'docs-preflight-failure'; status = 'PASS'; exitCode = $code }
+}
+function Check-DocsDeliveryFailure {
+    param([string]$Name, [string]$ScriptName, [string[]]$ExtraArguments)
+    $fixture = Join-Path $EvidenceDirectory $Name
+    New-Item -ItemType Directory -Path (Join-Path $fixture 'scripts') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo "scripts/$ScriptName") -Destination (Join-Path $fixture "scripts/$ScriptName")
+    'print("DOC006 pending review"); raise SystemExit(9)' | Set-Content -LiteralPath (Join-Path $fixture 'scripts/check-docs.py') -Encoding utf8
+    $output = @(& $pwsh -NoProfile -NonInteractive -File (Join-Path $fixture "scripts/$ScriptName") -Python $Python @ExtraArguments 2>&1)
+    $code = $LASTEXITCODE
+    $output | Set-Content -LiteralPath (Join-Path $EvidenceDirectory "$Name.log") -Encoding utf8
+    if ($code -eq 0 -or ($output -join "`n") -notmatch 'Documentation checks failed before') {
+        throw "$Name did not stop on pending documentation review."
+    }
+    if (Test-Path -LiteralPath (Join-Path $fixture 'handoff')) { throw 'Pending review created a handoff snapshot.' }
+    $script:results += [ordered]@{ name = $Name; status = 'PASS'; exitCode = $code }
+}
 function Check-BuildRetention {
     param([string]$Name, [bool]$Keep)
     # Only tiny simulated trees in this fixture are created/removed. The real
@@ -99,6 +141,7 @@ function Check-BuildRetention {
     Copy-Item -LiteralPath (Join-Path $repo 'scripts/prepare-neoeditor-release.ps1'), (Join-Path $repo 'scripts/neoeditor-release-common.ps1') -Destination (Join-Path $fixture 'scripts')
     Copy-Item -LiteralPath (Join-Path $repo 'cmake/NeoEditorVersion.cmake') -Destination (Join-Path $fixture 'cmake')
     Copy-Item -LiteralPath (Join-Path $repo '.gitignore') -Destination $fixture
+    'raise SystemExit(0)' | Set-Content -LiteralPath (Join-Path $fixture 'scripts/check-docs.py') -Encoding utf8
     'raise SystemExit(0)' | Set-Content -LiteralPath (Join-Path $fixture 'tests/tools/check_i18n.py') -Encoding utf8
     @'
 param([string]$BuildDirectory, [string]$CMake, [string]$Python, [string]$Generator, [int]$Parallel)
@@ -167,6 +210,9 @@ try {
 Check-FailedStage 'native-stage-failure' 7 'i18n-preflight failed with exit code 7'
 Check-FailedStage 'source-drift' 0 'Candidate source or Git state changed'
 Check-I18nRegressionFailure
+Check-DocsPreflightFailure
+Check-DocsDeliveryFailure 'docs-preview-failure' 'check-neoeditor-preview.ps1' @('-Exe', (Join-Path $EvidenceDirectory 'absent.exe'))
+Check-DocsDeliveryFailure 'docs-handoff-failure' 'write-handoff-summary.ps1' @('-Repository', (Join-Path $EvidenceDirectory 'docs-handoff-failure'), '-OutputDirectory', (Join-Path $EvidenceDirectory 'docs-handoff-failure/handoff'))
 Check-BuildRetention 'default-build-cleanup' $false
 Check-BuildRetention 'explicit-build-retention' $true
 if (Test-Path -LiteralPath $absentBuild) { throw 'A rejected request created a build tree.' }

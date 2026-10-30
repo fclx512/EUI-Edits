@@ -75,6 +75,20 @@ inline void statusBarView(eui::Ui& ui, AppState& state, float width) {
     const float fontSize = metrics.statusFontSize;
     const char* uiFont = uiFontFamily(state);
 
+    if (state.imageDocument()) {
+        const std::string dimensions=std::to_string(static_cast<int>(state.imagePreviewWidth))+" × "+
+            std::to_string(static_cast<int>(state.imagePreviewHeight));
+        ui.stack("status").size(width,height).content([&] {
+            ui.rect("status.bg").fill().color(colors.toolbar).build();
+            ui.text("status.image").position(12,0).size(std::max(0.0f,width-24),height)
+                .text(elideToWidth(state.displayName()+"   ·   "+dimensions+"   ·   "+i18n::tr("image.read_only"),
+                                  std::max(0.0f,width-24),fontSize))
+                .fontFamily(uiFont).fontSize(fontSize).color(colors.textMuted)
+                .verticalAlign(eui::VerticalAlign::Center).build();
+        }).build();
+        return;
+    }
+
     // 行数/字符数按 revision 缓存，避免每次 compose 都扫一遍全文。
     if (state.statsRevision != state.revision) {
         state.stats = textfile::measure(state.doc.text);

@@ -4,13 +4,24 @@ param(
     [string]$OutputDirectory = '',
     [string]$ExePath = '',
     [string]$GateLog = '',
-    [int]$RecentOutCount = 8
+    [int]$RecentOutCount = 8,
+    [string]$Python = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repo = (Resolve-Path -LiteralPath $Repository).Path
+if (-not $Python) {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCommand) { $Python = $pythonCommand.Source }
+}
+if (-not $Python -or -not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    throw 'Python 3 not found. Pass -Python with an absolute executable path.'
+}
+$docsOutput = @(& $Python -B (Join-Path $repo 'scripts/check-docs.py') --root $repo --base HEAD --json)
+if ($LASTEXITCODE -ne 0) { throw "Documentation checks failed before handoff.`n$($docsOutput -join "`n")" }
+$docsCheck = ($docsOutput -join "`n") | ConvertFrom-Json
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repo 'local-docs/repo-docs/handoffs'
 } elseif (-not [System.IO.Path]::IsPathRooted($OutputDirectory)) {
@@ -96,7 +107,7 @@ if (Test-Path -LiteralPath $outRoot -PathType Container) {
     })
 }
 
-$sourceFiles = @(Invoke-GitLines @('ls-files', '*.cpp', '*.h', '*.hpp', '*.c', '*.cmake', 'CMakeLists.txt', '*.ps1', '*.py'))
+$sourceFiles = @(Invoke-GitLines @('ls-files', '--cached', '--others', '--exclude-standard', '*.cpp', '*.h', '*.hpp', '*.c', '*.cmake', 'CMakeLists.txt', '*.ps1', '*.py') | Sort-Object -Unique)
 $sourceHash = 'NOT_RUN'
 if ($sourceFiles.Count -gt 0) {
     $hashLines = foreach ($relative in $sourceFiles) {
@@ -144,11 +155,23 @@ $lines.Add('## 本轮交接待填写')
 $lines.Add('')
 $lines.Add('- 目标与完成条件：')
 $lines.Add('- 实际修改与未采用功能：')
+$lines.Add('- 文档更新与无需修改的核对结论：')
 $lines.Add('- 定向测试与正式门禁结果：')
 $lines.Add('- 真实窗口/性能状态：PASS / FAIL / OBSERVED / SKIP / NOT_RUN')
 $lines.Add('- 覆盖缺口与失败原因：')
 $lines.Add('- 下一步：一个具体动作、文件或脚本、通过条件。')
 $lines.Add('- 提交/推送/标签/发布授权：未授权 / 已明确授权（按实际填写）')
+$lines.Add('')
+$lines.Add('## 文档维护检查')
+$lines.Add('')
+$lines.Add('- 文档检查：PASS（清单、导航、链接、版本简介与源码同步核对）。')
+$lines.Add(('- 比较基准：{0}' -f $docsCheck.base))
+foreach ($impact in $docsCheck.impacts) {
+    $lines.Add(('- 已核对 {0}：{1}' -f $impact.topic, ($impact.review_docs -join '、')))
+}
+foreach ($decision in $docsCheck.document_reviews.PSObject.Properties) {
+    $lines.Add(('- {0}：{1}' -f $decision.Name, $decision.Value))
+}
 
 [IO.File]::WriteAllLines($outputPath, $lines, [Text.UTF8Encoding]::new($false))
 Write-Output $outputPath

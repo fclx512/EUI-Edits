@@ -947,6 +947,9 @@ if(EUI_BUILD_TEST_FIXTURES)
         target_link_libraries(${unit_name} PRIVATE eui::neo)
         target_include_directories(${unit_name} PRIVATE "${NEO_EDITOR_GENERATED_INCLUDE_DIR}")
         eui_apply_compile_options(${unit_name})
+        if(unit_name STREQUAL "menu_style_benchmark")
+            target_include_directories(${unit_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+        endif()
         if(unit_name STREQUAL "mindmap_plan" OR unit_name STREQUAL "mindmap_preview_state" OR unit_name STREQUAL "mindmap_manual_sample" OR unit_name STREQUAL "mindmap_preview_ui" OR unit_name STREQUAL "mindmap_inline_ui")
             target_sources(${unit_name} PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/mindmap_plan.cpp"

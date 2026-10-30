@@ -1,40 +1,25 @@
 # EUI-Edits 项目协作约定
 
-## 起点与范围
+## 接手
 
-- 先执行 `git status --short`，阅读与当前任务相关的 `docs/` 规划和验收记录，再核对源码。旧文档中的版本、门禁数量、候选路径和状态可能过时，以当前源码及绑定时间的证据为准。
-- 保留已有未提交文件、未跟踪文件和 `out/` 证据。不要 reset、clean、覆盖既有输出目录或宽泛暂存。提交、推送、打标签和发布须有用户明确授权；普通调查、实现、构建和验证在任务范围内直接进行。
-- 对外名称为 EUI-Edits。保留活动内部标识 `neo_editor`、`NEO_EDITOR_VERSION`、`neoeditor-v*`；产品版本在 `cmake/NeoEditorVersion.cmake`，不要因产品改名修改 EUI-NEO 框架版本。
+- 先运行 `git status --short`，再读 [开发与维护规范](docs/开发流程与交接规范.md)、[文档导航](docs/目录说明.md)、[当前路线](docs/当前实现与验收路线.md)和任务相关契约，最后核对源码。
+- 保留已有修改、未跟踪文件和 `out/` 证据。普通调查、实现、构建与验证直接进行；提交、推送、标签和发布须有用户明确授权。
+- 对外名称为 EUI-Edits；内部保留 `neo_editor`、`NEO_EDITOR_VERSION`、`neoeditor-v*`。产品版本源是 `cmake/NeoEditorVersion.cmake`，与 EUI-NEO 框架版本分别维护。
 
-## 代码与性能
+## 实现与验证
 
-- 编辑器入口为 `apps/neo_editor/app.cpp`；文档视图在 `apps/neo_editor/ui/editor_view.h`，输入组件与模型在 `components/input.h`、`components/input_model.h`。布局、装饰、源字节/可见字节/视觉行的映射须保持一致。
-- 性能工作先测当前基线，再确定主要成本，一次处理一个有证据的目标。使用同规模、同配置、同轨迹 A/B；记录原始轮次、预热、指标口径、范围、中位数及源码/EXE SHA256。
-- 不以微基准推断整体 CPU、真实鼠标到屏幕延迟或低配性能。不以 `EndDraw` 成功证明帧已经显示。嵌套阶段时间不可直接相加；工作集、私有工作集、私有提交不可相加。
-- 缓存必须覆盖文档身份、文本、装饰、字体、宽度及相关版本。不得以不完整 revision 键跳过外部回写、换页、撤销、IME 或布局变化。保留 UTF-8、隐藏标记、中文/emoji、反向和跨视口选区正确性。
+- 编辑器入口为 `apps/neo_editor/app.cpp`，文档视图为 `apps/neo_editor/ui/editor_view.h`，输入组件与模型为 `components/input.h`、`components/input_model.h`。源字节、可见字节、视觉行与几何映射须一致。
+- 缓存覆盖文档身份、正文、装饰、字体、宽度及相关版本；核对外部回写、切页、撤销、IME、中英/emoji、反向和跨视口选区。
+- 性能任务先测当前基线，同规模、同配置、同轨迹 A/B，记录预热、原始轮次、指标口径、中位数与源码/EXE SHA256。组件计时与整窗响应分别报告；嵌套阶段时间和不同内存指标分别列出。
+- Windows / PowerShell 7、MSVC x64 Release、Win32 / Direct2D。Python 为 `D:/Python312/python.exe`。构建目录属于当前仓库；本机 CMake 路径及命令见[构建参数](docs/NeoEditor-发布构建说明-2026-10-02.md)。
+- 小改动用定向检查、增量构建和 `out/preview-1..3` 轮换预览；交付前运行 `scripts/check-neoeditor-preview.ps1`。完整检查与可用版本按开发规范选择，新关键回归核对 `scripts/check-neoeditor.ps1` 的正式集合。
+- GUI 按当前 computer-use 技能执行，绑定目标 EXE、独立配置、所属窗口及正常退出。正确性、性能、真实窗口和独立包分别验收；未覆盖的设备、IME、DPI 或拖选轨迹简记 `SKIP` / `NOT_RUN`。
+- 发版先读[发版流程](docs/发版流程.md)，统一使用 `scripts/prepare-neoeditor-release.ps1`，先预检后完整准备，默认 `-Parallel 2`。由一个主代理冻结和构建候选；推源后先等该 SHA 的 Windows checks，再按授权打标签。最终资产哈希变化时重新绑定 GUI。
 
-## 构建与检查
+## 文档与收尾
 
-- Windows / PowerShell；本仓库使用 Win32 / Direct2D / MSVC x64 Release。构建目录须属于当前仓库；不要复用其他 checkout 的 CMake cache。创建新证据目录，保留已有结果。
-- Python：`D:/Python312/python.exe`。翻译检查为 `tests/tools/check_i18n.py`。
-- CMake 不在 PATH 时可用 `D:/ruanjian/Microsoft Visual Studio/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe`，使用前检查存在；脚本也支持通过 vswhere 定位。
-- 有针对性地构建并运行相关测试。单元测试源文件由 CMake 自动发现；新增关键回归需核对是否纳入 `scripts/check-neoeditor.ps1` 的正式集合。
-- 完整正确性门禁示例（目录必须不存在）：
-
-```powershell
-./scripts/check-neoeditor.ps1 -BuildDirectory ./out/check-unique/build `
-  -CMake 'D:/ruanjian/Microsoft Visual Studio/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe' `
-  -Python D:/Python312/python.exe -Parallel 2
-git -c core.whitespace=cr-at-eol diff --check
-```
-
-- 正确性、性能、真实窗口和独立打包分开验收。正式包使用 `scripts/package-neoeditor.ps1`，明确版本和全新构建/输出目录，验证最终资产 SHA256；开发 EXE 不改名冒充发布包。
-- 更新发版先读 `docs/发版流程.md`，统一使用 `scripts/prepare-neoeditor-release.ps1`：先 `-PreflightOnly`，冻结后去掉该开关，默认 `-Parallel 2` 串行门禁与独立包。`READY_FOR_GUI` 只表示可验收，不能发布。推源提交后先等该 SHA 的新检出/Windows checks 成功，再授权标签；最终上传资产哈希变化须重新绑定 GUI。一个主代理执行，不并行修改候选或同时跑多套完整构建。
-
-## 证据与文档
-
-- `out/` 保存本轮构建、日志、原始数据和哈希；`docs/` 保存可复查的方法、结果、剩余事项与命令。不要修改历史报告来冒充新一轮通过。
-- `out/` 构建区规范（详见 `docs/开发流程与交接规范.md` 第 4 节）：小改动只做增量构建 + `out/preview-1..3` 轮换覆写 + 截图预览，不跑全量门禁；改动累积到合适节点主动向用户提出出可用版本。可用版本产物放 `out/stable-candidate/`，用户确认可发版后就地改名为 `stable-v<版本>-<日期>/` 归档（保留最近 3 个）。含 `CMakeCache.txt` 的构建树当轮验收结束后即删，不在 `out/` 堆积。
-- GUI 操作按当前可用 computer-use 技能执行；绑定本轮目标 EXE、独立配置、所属窗口和正常退出。工具不能执行的轨迹标为 SKIP；无头模型测试不替代真实窗口验收。
-- 区分 PASS、FAIL、OBSERVED、SKIP、NOT_RUN；注明 GPU、低配、IME、多屏 DPI 及持续拖选的实际覆盖。历史 OPT-001/OPT-002 未复现并不等于已解决。
-- 文档核对先中文后英文，描述实际行为和条件，避免无证据的普遍收益或固定内存上限。
+- 行为、契约或命令变化时，同轮更新对应文档；同步范围由 `docs/文档清单.json` 维护。先中文后英文，先写实际行为，仅在未实测或证据不足处简述边界。
+- 长期规则归开发规范，发布顺序归发版流程，当前状态页只保留能力地图和后续事项。具体轮次、测量数据和历史结论留在 `local-docs/` 与 `out/`。
+- 代码改动后用 `D:/Python312/python.exe scripts/check-docs.py --write-review` 生成待核对记录，逐项核对并填写 `docs/文档同步记录.json` 的更新内容或无需更新的原因。代码再次变化后重新生成并核对；新增源码目录补充同步映射。
+- 收尾运行 `D:/Python312/python.exe scripts/check-docs.py` 和 `git -c core.whitespace=cr-at-eol diff --check`，再生成本地交接快照。默认比较 HEAD，未完成同步核对会失败；清单变化后先用 `--write-index` 更新导航。文档 CI 检查整个 push / PR 的源码范围。
+- `out/` 的轮换、候选保护、归档保留和本轮构建树清理统一按开发规范第 4 节执行，保留已有证据。

@@ -197,6 +197,7 @@ inline std::string tabLabel(const TabInfo& tab, const std::vector<TabInfo>& tabs
 }
 
 inline UiIcon tabIcon(const std::string& path, const std::string& language) {
+    if (language == "image" || filetypes::image(path)) return UiIcon::ImageFile;
     if (path.empty()) return language == "markdown" ? UiIcon::MarkdownFile : UiIcon::TextFile;
     switch (filetypes::detect(path).category) {
     case filetypes::Category::Markdown: return UiIcon::MarkdownFile;

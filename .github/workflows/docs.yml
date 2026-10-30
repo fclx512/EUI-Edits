@@ -1,0 +1,28 @@
+name: EUI-Edits documentation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Check documentation and checker regressions
+        shell: pwsh
+        run: |
+          python -B scripts/check-docs.py --ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B tests/python/test_check_docs.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

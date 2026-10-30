@@ -1,5 +1,13 @@
 #pragma once
 
+// Windows RPC headers define `small` as `char`. Keep that macro local to its
+// owner without allowing it to rewrite the spacing token used below.
+#ifdef small
+#pragma push_macro("small")
+#undef small
+#define NEO_POPUP_PRESENTATION_RESTORE_SMALL
+#endif
+
 #include "components/contextmenu.h"
 #include "state/app_state.h"
 #include "ui/widgets.h"
@@ -57,18 +65,37 @@ inline core::Color opaque(core::Color color) {
 }
 
 inline components::ContextMenuStyle style(
-    const components::theme::ThemeColorTokens& tokens) {
+    UiStyle uiStyle, const components::theme::ThemeColorTokens& tokens) {
     components::ContextMenuStyle style(tokens);
     style.background = opaque(style.background);
+    // UiStyle is explicit: the token snapshot can belong to the previous style
+    // during a settings change. Only presentation changes, never row geometry.
+    const components::theme::RadiusTokens rounded;
+    if (uiStyle == UiStyle::Square) {
+        style.radius = 0.0f;
+        style.highlightInset = tokens.metrics.spacing.micro;
+        style.highlightRadius = 0.0f;
+        style.border = opaque(tokens.border);
+        style.shadow.blur = 12.0f;
+        style.shadow.offset = {0.0f, 2.0f};
+    } else {
+        style.radius = rounded.card;
+        style.highlightInset = tokens.metrics.spacing.small;
+        style.highlightRadius = rounded.card - rounded.tiny;
+    }
     return style;
 }
 
-inline components::ContextMenuMotion motion(bool animations, bool allowExit = true) {
+inline components::ContextMenuMotion motion(UiStyle uiStyle, bool animations, bool allowExit = true) {
     components::ContextMenuMotion result;
+    const bool square = uiStyle == UiStyle::Square;
+    result.offsetY = square ? -8.0f : 4.0f;
+    result.clipContent = square && animations;
+    result.directionalSubmenus = square && animations;
     if (animations) {
         result.enter = core::Transition::make(0.12f, core::Ease::OutCubic);
         if (allowExit) result.exit = core::Transition::make(0.07f, core::Ease::OutQuad);
-        result.highlight = core::Transition::make(0.075f, core::Ease::OutCubic);
+        if (!square) result.highlight = core::Transition::make(0.075f, core::Ease::OutCubic);
     }
     return result;
 }
@@ -80,7 +107,13 @@ inline void apply(components::ContextMenuBuilder& menu,
     // A replacement popup hides the previous one immediately. Only a dismissal
     // to the document gets the short exit, so two sets of labels never overlap.
     const bool allowExit = requestedOpen || activeOwner(state) == Owner::None;
-    menu.style(style(tokens)).motion(motion(animationsEnabled(state), allowExit));
+    menu.style(style(state.uiStyle, tokens))
+        .motion(motion(state.uiStyle, animationsEnabled(state), allowExit));
 }
 
 } // namespace neo::popup_presentation
+
+#ifdef NEO_POPUP_PRESENTATION_RESTORE_SMALL
+#pragma pop_macro("small")
+#undef NEO_POPUP_PRESENTATION_RESTORE_SMALL
+#endif

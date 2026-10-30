@@ -100,6 +100,42 @@ bool disabledActionDoesNotDispatchOrDismiss() {
     return true;
 }
 
+bool highlightGeometryDoesNotChangeActionTargets() {
+    core::dsl::Ui ui;
+    const auto tokens = components::theme::light();
+    components::ContextMenuStyle style(tokens);
+    const auto compose = [&] {
+        ui.begin("highlight-geometry");
+        components::contextMenu(ui, "sample").open().screen(640,480)
+            .position(30,28).size(240,38).items({"Action", "Other"})
+            .theme(tokens).style(style).build();
+        ui.end(); ui.layout(core::dsl::Screen{640,480});
+    };
+    compose();
+    auto* item = findSuffix(ui, ".level.0.item.0");
+    if (!item || !item->onHoverChanged) return false;
+    const auto target = item->frame;
+    item->onHoverChanged(true);
+    compose();
+    const auto* baseline = findSuffix(ui, ".level.0.highlight");
+    if (!baseline || std::fabs(baseline->frame.x-target.x) > .01f) return false;
+    style.highlightInset = 0;
+    style.highlightRadius = 0;
+    compose();
+    const auto* level = findSuffix(ui, ".level.0");
+    const auto* highlight = findSuffix(ui, ".level.0.highlight");
+    item = findSuffix(ui, ".level.0.item.0");
+    if (!level || !highlight || !item ||
+        std::fabs(item->frame.x-target.x) > .01f || std::fabs(item->frame.width-target.width) > .01f ||
+        std::fabs(highlight->frame.x-level->frame.x) > .01f ||
+        std::fabs(highlight->frame.width-level->frame.width) > .01f || highlight->radius != 0 ||
+        highlight->hitTestMode != core::dsl::HitTestMode::None) {
+        std::cerr << "visual highlight overrides changed action hit geometry\n";
+        return false;
+    }
+    return true;
+}
+
 bool submenuFeedbackAndCloseReopen() {
     core::dsl::Ui ui;
     MenuHarness state;
@@ -724,6 +760,7 @@ int main() {
         }
     }
     if (!disabledActionDoesNotDispatchOrDismiss()) return 1;
+    if (!highlightGeometryDoesNotChangeActionTargets()) return 1;
     if (!submenuFeedbackAndCloseReopen()) return 1;
     if (!explicitMenuTransitionRemainsAvailable()) return 1;
     if (!closedContentOptInPreservesReopenAndAnimation()) return 1;

@@ -1,14 +1,24 @@
-# Read-only identity check before handing over a development preview.
+# Read-only documentation and identity checks before handing over a preview.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
     [string]$BuildDirectory,
-    [string]$Version
+    [string]$Version,
+    [string]$Python = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+if (-not $Python) {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCommand) { $Python = $pythonCommand.Source }
+}
+if (-not $Python -or -not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    throw 'Python 3 not found. Pass -Python with an absolute executable path.'
+}
+& $Python -B (Join-Path $repo 'scripts/check-docs.py')
+if ($LASTEXITCODE -ne 0) { throw 'Documentation checks failed before preview.' }
 if (-not $PSBoundParameters.ContainsKey('Version')) {
     $source = Get-Content -LiteralPath (Join-Path $repo 'cmake/NeoEditorVersion.cmake') -Raw
     if ($source -notmatch '(?m)^set\(NEO_EDITOR_VERSION "([^"]+)" CACHE STRING ') {

@@ -42,6 +42,10 @@ struct ContextMenuStyle {
     core::Color border;
     core::Shadow shadow;
     float radius = 12.0f;
+    // Negative values preserve the component's automatic geometry. These are
+    // visual-only overrides: action hit rectangles retain their normal inset.
+    float highlightInset = -1.0f;
+    float highlightRadius = -1.0f;
 };
 
 // Optional application motion policy. Unlike transition(), it keeps glyphs at
@@ -51,6 +55,11 @@ struct ContextMenuMotion {
     core::Transition exit;
     core::Transition highlight;
     float offsetY = -4.0f;
+    float offsetX = 0.0f;
+    // Keep the final panel/shadow fixed and slide only content inside its
+    // existing viewport. No animated layout size or offscreen layer is needed.
+    bool clipContent = false;
+    bool directionalSubmenus = false;
 };
 
 struct ContextMenuItem {
@@ -437,6 +446,7 @@ private:
         const float itemHeight = resolvedItemHeight();
         const float separatorGap = metrics_.spacing.tiny * 2.0f;
         int renderedLevels = 0;
+        bool opensRight = true;
 
         // 每一级的宽度/呈现配置来自它的**父项**：根级用调用方的 width/inset 与默认配置，
         // 之后的每一级在进入时从父项取 childrenPresentation 解析自己的宽度与局部列参数。
@@ -465,7 +475,9 @@ private:
                     ? resolvedLevelWidth(levelPresentation.preferredWidth, levelWidth)
                     : context_menu_detail::preferredChildWidth(
                           parent.children, levelPresentation, screenWidth_, metrics_);
-                menuX = context_menu_detail::childMenuX(menuX, levelWidth, childWidth, screenWidth_, metrics_.spacing.tiny);
+                const float childX = context_menu_detail::childMenuX(menuX, levelWidth, childWidth, screenWidth_, metrics_.spacing.tiny);
+                opensRight = childX >= menuX;
+                menuX = childX;
                 levelWidth = childWidth;
                 menuY = clampVisibleMenuY(desiredY,
                     context_menu_detail::menuHeight(*levelItems, itemHeight, levelInset, separatorGap));
@@ -474,7 +486,7 @@ private:
             const bool visible = open_ && (depth == 0 || depth <= static_cast<int>(cascade.openPath.size()));
             ui_.state<float>(id_ + ".level." + std::to_string(depth) + ".resolvedWidth") = levelWidth;
             renderLevel(*levelItems, prefix, depth, menuX, menuY, levelWidth, levelInset, levelPresentation,
-                        visible, cascade, separatorGap, onSelect, onSelectPath, requestDismiss,
+                        visible, opensRight, cascade, separatorGap, onSelect, onSelectPath, requestDismiss,
                         backdropSession);
             renderedLevels = depth + 1;
         }
@@ -489,7 +501,7 @@ private:
     void renderLevel(const std::vector<ContextMenuItem>& levelItems, const std::vector<int>& prefix,
                      int depth, float x, float y, float width, float inset,
                      const ContextMenuItem::ChildrenPresentation& presentation,
-                     bool visible, CascadeState& cascade,
+                     bool visible, bool opensRight, CascadeState& cascade,
                      float separatorGap,
                      const std::function<void(int)>& onSelect,
                      const std::function<void(const std::vector<int>&)>& onSelectPath,
@@ -511,7 +523,10 @@ private:
         const std::string scrollId = levelId + ".viewport";
         const float opacity = visible ? 1.0f : 0.0f;
         const float scale = visible || motion_ ? 1.0f : 0.94f;
-        const float offsetY = visible ? 0.0f : motion_ ? motion_->offsetY : -4.0f;
+        const bool clipContent = motion_ && motion_->clipContent;
+        const core::Vec2 hiddenOffset = contentOffset(depth, opensRight);
+        const float offsetY = visible || clipContent ? 0.0f : hiddenOffset.y;
+        const float offsetX = visible || clipContent ? 0.0f : hiddenOffset.x;
         const bool hasCheckColumn = std::any_of(levelItems.begin(), levelItems.end(),
             [](const ContextMenuItem& item) { return item.checkable || item.checked; });
         const float checkColumnWidth = presentation.compactCheckColumn ? 24.0f : 26.0f;
@@ -522,6 +537,7 @@ private:
         level.x(x).y(y).size(width, viewportHeight)
             .disabled(!visible)
             .opacity(opacity)
+            .translateX(offsetX)
             .translateY(offsetY)
             .scale(scale)
             .transformOrigin(0.0f, 0.0f);
@@ -567,6 +583,7 @@ private:
                     .scrollState(scrollId, offset, maxOffset, itemHeight * 2.0f)
                     .onScrollOffsetChanged([&offset](float value) { offset = value; })
                     .content([&] {
+                    const auto drawContent = [&] {
                     ui_.stack(levelId + ".content").size(width, height).scrollContentFrom(scrollId).content([&] {
 
                 // One static highlight per menu level prevents independently animated
@@ -611,12 +628,15 @@ private:
                         (std::abs(highlightedIndex - previous.index) == 1 ||
                          (highlightedIndex == previous.index && previous.follow)) && previous.prefix == prefix &&
                         core::closeEnough(previous.width, width) && core::closeEnough(previous.offset, offset);
+                    const float highlightInset = style_.highlightInset >= 0.0f ? style_.highlightInset : inset;
+                    const float highlightRadius = style_.highlightRadius >= 0.0f ? style_.highlightRadius
+                        : std::max(metrics_.radius.tiny, style_.radius - metrics_.radius.tiny);
                     auto highlight = ui_.rect(levelId + ".highlight")
-                        .x(inset).y(highlightedY)
-                        .size(std::max(0.0f, width - inset * 2.0f), itemHeight)
+                        .x(highlightInset).y(highlightedY)
+                        .size(std::max(0.0f, width - highlightInset * 2.0f), itemHeight)
                         .opacity(highlightedIndex >= 0 ? 1.0f : 0.0f)
                         .color(highlightedPressed ? style_.pressed : style_.hover)
-                        .radius(std::max(metrics_.radius.tiny, style_.radius - metrics_.radius.tiny))
+                        .radius(highlightRadius)
                         .hitTestMode(core::dsl::HitTestMode::None);
                     if (motion_ && highlightedIndex >= 0 && motion_->highlight.enabled) {
                         highlight.transition(motion_->highlight).animate(core::AnimProperty::Color |
@@ -750,17 +770,57 @@ private:
                     }
                 }
                     }).build();
+                    };
+                    if (clipContent) {
+                        auto reveal = ui_.stack(contentMotionId(levelId, depth, opensRight))
+                            .size(width, height)
+                            .translateX(visible ? 0.0f : hiddenOffset.x)
+                            .translateY(visible ? 0.0f : hiddenOffset.y);
+                        if (transition.enabled) reveal.transition(transition).animate(core::AnimProperty::Transform);
+                        reveal.content(drawContent).build();
+                        // Both directions have a primed empty instance before a
+                        // submenu first opens. Only the chosen branch has rows.
+                        // There are O(depth) inert seeds, never per-row timers.
+                        if (depth > 0 && motion_->directionalSubmenus)
+                            seedContentMotion(levelId, depth, !opensRight, width);
+                    } else {
+                        drawContent();
+                    }
                 }).build();
             });
         level.build();
     }
 
+    core::Vec2 contentOffset(int depth, bool opensRight) const {
+        if (!motion_) return {0.0f, -4.0f};
+        if (depth > 0 && motion_->directionalSubmenus) {
+            const float distance = std::abs(motion_->offsetX) > 0.0f
+                ? std::abs(motion_->offsetX) : std::abs(motion_->offsetY);
+            return {opensRight ? -distance : distance, 0.0f};
+        }
+        return {motion_->offsetX, motion_->offsetY};
+    }
+
+    std::string contentMotionId(const std::string& levelId, int depth, bool opensRight) const {
+        return levelId + (depth > 0 && motion_->directionalSubmenus
+            ? (opensRight ? ".reveal.right" : ".reveal.left") : ".reveal.root");
+    }
+
+    void seedContentMotion(const std::string& levelId, int depth, bool opensRight, float width) {
+        const core::Vec2 offset = contentOffset(depth, opensRight);
+        ui_.stack(contentMotionId(levelId, depth, opensRight)).size(width, 0.0f)
+            .translateX(offset.x).translateY(offset.y).disabled()
+            .hitTestMode(core::dsl::HitTestMode::None).build();
+    }
+
     void renderHiddenLevel(int depth, float width) {
-        auto level = ui_.stack(id_ + ".level." + std::to_string(depth));
+        const std::string levelId = id_ + ".level." + std::to_string(depth);
+        auto level = ui_.stack(levelId);
         level.size(width, 0.0f)
             .disabled()
             .opacity(0.0f)
-            .translateY(motion_ ? motion_->offsetY : -4.0f)
+            .translateX(motion_ && !motion_->clipContent ? motion_->offsetX : 0.0f)
+            .translateY(motion_ && motion_->clipContent ? 0.0f : motion_ ? motion_->offsetY : -4.0f)
             .scale(motion_ ? 1.0f : 0.94f)
             .transformOrigin(0.0f, 0.0f);
         const auto transition = levelTransition(false);
@@ -768,6 +828,11 @@ private:
             level.transition(transition)
                 .animate(core::AnimProperty::Opacity | core::AnimProperty::Transform);
         }
+        if (motion_ && motion_->clipContent) level.content([&] {
+            seedContentMotion(levelId, depth, true, width);
+            if (depth > 0 && motion_->directionalSubmenus)
+                seedContentMotion(levelId, depth, false, width);
+        });
         level.build();
     }
 

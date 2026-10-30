@@ -354,6 +354,7 @@ void suspendActiveDocument(AppState& state) {
 }
 
 void afterSwitch(AppState& state) {
+    if (state.imageDocument()) state.imageViewport.focusPending = true;
     core::window::cancelImeComposition(core::window::mainWindowHandle());
     state.pendingEditorCommand = EditorCommand::None;
     state.pendingTaskByte = -1; state.pendingImagePaste = false; state.pendingImageLink.clear();
@@ -715,7 +716,7 @@ void closeActiveDocumentTab(AppState& state) {
 // 路径、页面、正文代次与干净状态仍吻合才应用新内容 —— 期间用户编辑、另存、重命名、
 // 关闭/复开一律丢弃自动覆盖。脏页不核验（原指纹保留到确证保存）。
 void scheduleActiveFileVerification(AppState& appState) {
-    if (appState.path.empty() || appState.dirty() || appState.unavailable) {
+    if (appState.imageDocument() || appState.path.empty() || appState.dirty() || appState.unavailable) {
         return;
     }
     const std::uint64_t tabId = appState.tabId;
@@ -891,7 +892,7 @@ void syncDocumentTabInputs(eui::Ui& ui, AppState& state) {
         // Preserve the stored viewport; automatic follow would undo scrolling on every switch.
         input.followCaret = false;
     }
-    state.displayedInputTabId = state.tabId;
+    state.displayedInputTabId = state.imageDocument() ? 0 : state.tabId;
     // 输入内存刚挂回页上，预算可能因此被顶破：这里再校一次（页数不多，O(页) 很便宜）。
     enforceDerivedBudget(state);
 }

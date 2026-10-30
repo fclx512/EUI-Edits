@@ -39,7 +39,7 @@ struct Data {
     // theme 键（首次运行）时也落在这里，之后以用户的选择为准。
     int theme = 2;
     // 界面风格：0 = 圆角（Win11 观感），1 = 直角（Win10 观感）。与 theme 是
-    // 两条独立的轴：只改控件几何，不改配色；落盘 key 是 ui_style。
+    // 两条独立的轴：控制控件几何与菜单呈现，不改配色；落盘 key 是 ui_style。
     int uiStyle = 0;
     // 主题文件（T13）：UTF-8 绝对路径，空 = 用内置配色。落盘 key 是
     // last_theme_file，开机由 app.cpp 在首帧配色之前恢复。

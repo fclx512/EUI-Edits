@@ -58,6 +58,9 @@ struct RenderFrameStats {
     std::uint64_t dirtyPixels = 0;
     std::uint64_t blitPixels = 0;
     int clearCalls = 0;
+    // D2D's outer setScissor/unclip operations only. Temporary clips inside
+    // material/image drawing are excluded; reuses count exact enabled hits.
+    int scissorPushes = 0, scissorPops = 0, scissorReuses = 0;
     int renderDirectPasses = 0;
     int cacheBlits = 0;
     int backendRenderPasses = 0;
