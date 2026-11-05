@@ -27,14 +27,6 @@ if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits documentation checks failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits documentation checker regressions failed.' }
 & $Python (Join-Path $repo 'tests/tools/check_i18n.py')
 if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits translation checks failed.' }
-& $CMake -S $repo -B $BuildDirectory -G $Generator -A x64 `
-    '-DEUI_BUILD_APPS=OFF' '-DEUI_BUILD_USER_APPS=OFF' '-DEUI_BUILD_NEOEDITOR_ONLY=OFF' `
-    '-DEUI_BUILD_TEST_FIXTURES=ON' '-DEUI_WINDOW_BACKEND=win32' '-DEUI_RENDER_BACKEND=d2d' `
-    '-DEUI_DEPS_MODE=bundled' '-DEUI_BUILD_SHARED=OFF' '-DEUI_ENABLE_INSTALL=OFF' `
-    '-DEUI_ENABLE_MODULES=OFF' '-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE' `
-    '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>'
-if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits check configuration failed.' }
-
 # Bounded correctness gate; performance and interactive acceptance stay separate.
 # Registry tests redirect HKCU in their own process; settings use temporary APPDATA.
 $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encoding', 'settings_atomic', 'settings_confirmation', 'settings_reveal', 'reveal_state', 'settings_reveal_benchmark', 'hover_transition_benchmark', 'decoration_cadence', 'reveal_d2d_benchmark',
@@ -49,6 +41,16 @@ $targets = @('file_safety', 'document_tabs', 'session_storage', 'text_file_encod
     'document_vault_loading', 'virtual_list_wheel', 'win32_event_pump', 'runtime_scroll_sync',
     'main_window_frame_reentry', 'dsl_main_compose', 'dsl_window_resize_throttle', 'runtime_timer', 'd2d_render_policy', 'd2d_render_probe', 'd2d_atlas_capacity',
     'input_model', 'input_navigation', 'input_value_reference', 'input_source_line_count', 'table_selection_background', 'lp_decorations', 'source_decorations', 'decoration_uniform_pages', 'undo_incremental', 'image_attach', 'markdown_writing')
+
+& $CMake -S $repo -B $BuildDirectory -G $Generator -A x64 `
+    '-DEUI_BUILD_APPS=OFF' '-DEUI_BUILD_USER_APPS=OFF' '-DEUI_BUILD_NEOEDITOR_ONLY=OFF' `
+    '-DEUI_BUILD_TEST_FIXTURES=ON' '-DEUI_WINDOW_BACKEND=win32' '-DEUI_RENDER_BACKEND=d2d' `
+    '-DEUI_DEPS_MODE=bundled' '-DEUI_BUILD_SHARED=OFF' '-DEUI_ENABLE_INSTALL=OFF' `
+    '-DEUI_ENABLE_MODULES=OFF' '-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE' `
+    '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>' `
+    "-DEUI_NEOEDITOR_CHECK_TARGETS:STRING=$($targets -join ';')"
+if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits check configuration failed.' }
+
 $tests = @($targets) + @('text_italic', 'settings_language_zh', 'settings_language_en', 'settings_language_invalid', 'settings_language_legacy', 'cached_strip_runtime')
 $filter = '^(' + (($tests | ForEach-Object { [Regex]::Escape($_) }) -join '|') + ')$'
 # CTest can otherwise succeed with an accidentally empty or incomplete selection.
@@ -58,7 +60,8 @@ $listed = @((($listing -join "`n") | ConvertFrom-Json).tests | ForEach-Object { 
 if ($listed.Count -ne $tests.Count -or @(Compare-Object $tests $listed).Count -ne 0) {
     throw 'EUI-Edits check selection is incomplete; refusing to report a pass.'
 }
-& $CMake --build $BuildDirectory --config Release --target @targets --parallel $Parallel
+# Give the Visual Studio generator one project graph to schedule.
+& $CMake --build $BuildDirectory --config Release --target eui_neoeditor_check --parallel $Parallel
 if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits check build failed.' }
 & $ctest --test-dir $BuildDirectory -C Release -R $filter --output-on-failure --timeout 180
 if ($LASTEXITCODE -ne 0) { throw 'EUI-Edits correctness checks failed.' }

@@ -914,6 +914,36 @@ if(EUI_BUILD_TEST_FIXTURES)
             EUI_TEST_SHADERS_DIR="${shadertoy_probe_assets_dir}")
     endif()
 
+    # These fixtures supply their own Shell/dialog/settings doubles and compile
+    # the same application code with the same options.
+    add_library(eui_neoeditor_action_test_objects OBJECT EXCLUDE_FROM_ALL
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/platform/vault_rename.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/app_actions.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/document_tabs.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/vault_cache.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/file_check.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/session_writer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/tabs_trace.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/session_storage.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/vault.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/lp_plan.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/text_file.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/clean_ai.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/attachment.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/png_encode.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/tab_presentation.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/platform/clipboard_image.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/atomic_write.cpp"
+    )
+    target_include_directories(eui_neoeditor_action_test_objects PRIVATE
+        "${NEO_EDITOR_GENERATED_INCLUDE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
+    target_link_libraries(eui_neoeditor_action_test_objects PRIVATE eui::neo)
+    if(TARGET png_static)
+        target_link_libraries(eui_neoeditor_action_test_objects PRIVATE png_static)
+    endif()
+    eui_apply_compile_options(eui_neoeditor_action_test_objects)
+
     file(GLOB TEST_UNIT_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/*.cpp")
     foreach(unit_source ${TEST_UNIT_SOURCES})
         get_filename_component(unit_name "${unit_source}" NAME_WE)
@@ -1168,28 +1198,7 @@ if(EUI_BUILD_TEST_FIXTURES)
         if(unit_name STREQUAL "vault_delete_state" OR unit_name STREQUAL "file_safety" OR unit_name STREQUAL "document_tabs"
            OR unit_name STREQUAL "document_tab_cache" OR unit_name STREQUAL "document_activation_check"
            OR unit_name STREQUAL "document_vault_loading" OR unit_name STREQUAL "editor_prepare_benchmark")
-            # Exercise real action dispatch with test doubles for Shell/dialogs/settings.
-            # app_actions 引用 png_encode/attachment/clipboard_image（图片粘贴路径），一并编入。
-            # 切页/缓存/后台任务相关的应用侧模块（阶段 B～E）也必须编入：document_tabs 与
-            # app_actions 现在引用 vault_cache/file_check/session_writer/tabs_trace。
-            target_sources(${unit_name} PRIVATE
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/platform/vault_rename.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/app_actions.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/document_tabs.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/vault_cache.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/file_check.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/session_writer.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/state/tabs_trace.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/session_storage.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/vault.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/lp_plan.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/text_file.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/clean_ai.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/attachment.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/png_encode.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/tab_presentation.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/platform/clipboard_image.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor/model/atomic_write.cpp")
+            target_link_libraries(${unit_name} PRIVATE eui_neoeditor_action_test_objects)
             target_include_directories(${unit_name} PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/apps/neo_editor")
             if(TARGET png_static)
@@ -1250,6 +1259,16 @@ if(EUI_BUILD_TEST_FIXTURES)
             set_tests_properties(${unit_name} PROPERTIES LABELS "unit")
         endif()
     endforeach()
+
+    if(EUI_NEOEDITOR_CHECK_TARGETS)
+        foreach(check_target IN LISTS EUI_NEOEDITOR_CHECK_TARGETS)
+            if(NOT TARGET "${check_target}")
+                message(FATAL_ERROR "Unknown NeoEditor check target: ${check_target}")
+            endif()
+        endforeach()
+        add_custom_target(eui_neoeditor_check)
+        add_dependencies(eui_neoeditor_check ${EUI_NEOEDITOR_CHECK_TARGETS})
+    endif()
 endif()
 
 if(Python3_Interpreter_FOUND)

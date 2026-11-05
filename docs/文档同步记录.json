@@ -3,13 +3,13 @@
   "sources": {
     ".github/workflows/docs.yml": "f9c5bfc4c33aadd8d4ae0ac1a9c82a8a73c45f4f34829e2d29f35fb48d538d25",
     "scripts/check-docs.py": "8991702edb07a1183018edf56440c1e15cd535c884460d47249dcdfb4e0212d7",
-    "scripts/check-neoeditor.ps1": "b9bfda05b44a048df8fd6bca21cab1cb52c29a9a26e9857e3b62e24ecbac8857",
+    "scripts/check-neoeditor.ps1": "f0d018aaeee8d99ef4c69d6df9f3f58d365992eeb496090ab5a605a75f84c581",
     "scripts/prepare-neoeditor-release.ps1": "720dc3f2e8e4ed4a82cdda85474be9c2a71d3dac31a2d786a6c5eaa4a32806c0",
     "scripts/write-handoff-summary.ps1": "31d15a0c912527bf19d3f46a65df9a0f48ac63b751c8efbc6543ba58279cb804",
     "tests/python/test_check_docs.py": "26e333cb3f3636760a4a0c424409d94f325a0f1a5ad9f5778cd9770b10104400",
     "tests/tools/test_release_scripts.ps1": "7b333c1b806fc8ca4a5ecd455fb02a3c9c3910ceb66e2e45bdd145cee86f4760",
     "scripts/check-neoeditor-preview.ps1": "d4cfe83f06b0ca3e13c773e7988ec715e180dcc91cecab9daa0c44764fb20664",
-    "CMakeLists.txt": "656adee336a704ab35c91da5bdee324e2e93cabde314170e87aff76639533eea",
+    "CMakeLists.txt": "7e7e8e1723a3be88fdc153dad80dd0a83c6bddee15f3e6aa2e87196e588e8bc0",
     "apps/neo_editor/model/settings.h": "6b401c7a13530488b92bf3396b54f47dac6bc621ed29145c309c1ce09c005cac",
     "apps/neo_editor/state/app_state.h": "1e0d606b186107cd964f91d87eca5a026f4bb7f3b0bdd6ce06d410c48ddd6568",
     "apps/neo_editor/ui/popup_presentation.h": "ee7ef15d38c8506e44604e9ed85de24bfa61921db3eb3b22664f483a9eb49148",
@@ -42,9 +42,9 @@
     "tests/unit/document_tabs.cpp": "0ea82b085119ee0e757de9ba0f64d96a988a77bf810e1e8e3a2a9d36ec39da8f"
   },
   "documents": {
-    "docs/开发流程与交接规范.md": "已增加文档检查器命令行标准输出/错误输出的 UTF-8 契约；补充英文 cp1252 环境中普通文本和 JSON 的成功/失败回归，保持原有退出码与核对规则。",
-    "docs/NeoEditor-发布构建说明-2026-10-02.md": "已核对：仅文档工具输出显式 UTF-8，PowerShell 7 按现有 UTF-8 捕获，无新构建参数、产品源码或依赖变化。",
-    "docs/发版流程.md": "已核对：首轮 Windows runner 预检出现 cp1252 中文日志编码异常，工具修复后按新提交 SHA 重跑 Windows checks 再打 0.2.3 标签；发版顺序与产物验收规则不变。",
+    "docs/开发流程与交接规范.md": "已核对，正式门禁继续使用冷构建与明确的测试清单。聚合目标和测试对象库归构建说明。",
+    "docs/NeoEditor-发布构建说明-2026-10-02.md": "已同步聚合目标、CTest 清单来源、out/work 临时构建示例和测试对象库复用。",
+    "docs/发版流程.md": "已核对，统一发版入口继续执行完整正确性检查和独立包。内部构建调度和测试对象复用由构建说明维护。",
     "README.md": "已更新0.2.3摘要与图片独立标签、去重、切页、关闭/重排、独立视角及只读保护；保留此前已确认菜单行为和测试范围。历史0.2.2内存数据不改日期或身份。",
     "README_EN.md": "已同步中文版0.2.3摘要与图片标签/只读行为，历史0.2.2测量保持原范围。",
     "apps/neo_editor/README.md": "已同步随包中英文版本0.2.3及图片独立标签操作，保留缩放/适配与分风格菜单说明。",

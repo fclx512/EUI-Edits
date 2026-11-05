@@ -28,11 +28,13 @@ git -c core.whitespace=cr-at-eol diff --check
 
 ```powershell
 pwsh -NoProfile -File ./scripts/check-neoeditor.ps1 `
-  -BuildDirectory ./out/check-<唯一名称>/build `
+  -BuildDirectory ./out/work/<日期>-<主题>/build `
   -CMake $EuiBuildCMake -Python $EuiPython -Parallel 2
 ```
 
-构建目录必须不存在。脚本核对文档与回归、翻译、配置、构建和实际 CTest 名单；集合以当前 `$targets` 及衍生案例为准。`-PreflightOnly` 只定位工具和核对路径，统一发版入口的预检另含翻译及文档检查。
+构建目录必须不存在。脚本核对文档与回归、翻译、配置、构建和实际 CTest 名单。脚本将正式构建清单传给 CMake 的 `eui_neoeditor_check` 聚合目标，Visual Studio 生成器一次提交整个依赖图。CTest 集合以当前 `$targets` 及衍生案例为准。`-PreflightOnly` 只定位工具和核对路径，统一发版入口的预检另含翻译及文档检查。
+
+文件安全和文档标签等测试通过一个测试对象库复用同配置下编译的应用源码。每个测试仍单独编译自己的入口和测试替身，并生成独立的可执行文件。
 
 ## 独立包的底层入口
 
