@@ -4,6 +4,7 @@
 #include "cpp/scheme/scheme_neutral.h"
 #include "cpp/scheme/scheme_tonal_spot.h"
 #include "cpp/scheme/scheme_vibrant.h"
+#include <algorithm>
 #include <cmath>
 #include <cctype>
 
@@ -26,12 +27,18 @@ bool generate(const ThemeAutoRecipe& recipe, ThemeFileData& result, std::string&
     if (!validRecipe(recipe)) { error = "请选择有效的主色和配色方案。"; return false; }
     const auto seed = static_cast<mcu::Argb>(std::stoul(recipe.seed.substr(1), nullptr, 16)) | 0xff000000u;
     const mcu::Hct source(seed);
+    const auto rgb = color(seed);
+    const auto high = std::max({rgb.r, rgb.g, rgb.b});
+    const auto low = std::min({rgb.r, rgb.g, rgb.b});
+    const double saturation = high > 0 ? (high - low) / high : 0;
+    const double chromaScale = recipe.useSeedIntensity ? 1.6 * saturation : 1.0;
+    const double toneOffset = recipe.useSeedIntensity ? (high - .5) * 12.0 : 0.0;
     constexpr int rotations[]{0, 10, -10, 20, -20, 5, -5};
     const double hue = std::fmod(source.get_hue() + rotations[recipe.round % 7] + 360.0, 360.0);
     const mcu::Hct hct(hue, source.get_chroma(), source.get_tone());
     const bool neutral = recipe.variant == "neutral", vivid = recipe.variant == "vivid";
-    const mcu::TonalPalette base(hue, neutral ? 1 : vivid ? 11 : 6);
-    const mcu::TonalPalette secondary(hue + 25, neutral ? 10 : vivid ? 36 : 20);
+    const mcu::TonalPalette base(hue, (neutral ? 1 : vivid ? 11 : 6) * chromaScale);
+    const mcu::TonalPalette secondary(hue + 25, (neutral ? 10 : vivid ? 36 : 20) * chromaScale);
     ThemeFileData generated;
     generated.version = 2;
     generated.autoRecipe = recipe;
@@ -41,24 +48,33 @@ bool generate(const ThemeAutoRecipe& recipe, ThemeFileData& result, std::string&
                     mcu::DynamicScheme(mcu::SchemeTonalSpot(hct, dark, 0));
         auto& p = (dark ? generated.dark : generated.light).colors;
         const auto surface = [&](double tone) { return color(base.get(tone)); };
-        p["window"] = surface(neutral ? (dark ? 8 : 94) : (dark ? 9 : 93));
-        p["panel"] = surface((dark ? 12 : 96) + (vivid ? (dark ? 1 : -1) : 0));
-        p["toolbar"] = surface((dark ? 15 : 94) + (vivid ? (dark ? 2 : -1) : 0));
-        p["editor"] = surface(neutral ? (dark ? 15 : 100) : (dark ? 17 : 99));
-        p["statusBar"] = surface(dark ? 11 : 92);
+        const auto background = [&](double tone) {
+            return surface(std::clamp(tone + toneOffset, 0.0, 100.0));
+        };
+        const auto accentColor = [&](mcu::Argb argb, double alpha = 1.0) {
+            if (!recipe.useSeedIntensity) return color(argb, alpha);
+            const mcu::Hct original(argb);
+            return color(mcu::Hct(original.get_hue(), original.get_chroma() * chromaScale,
+                                  std::clamp(original.get_tone() + toneOffset, 0.0, 100.0)).ToInt(), alpha);
+        };
+        p["window"] = background(neutral ? (dark ? 8 : 94) : (dark ? 9 : 93));
+        p["panel"] = background((dark ? 12 : 96) + (vivid ? (dark ? 1 : -1) : 0));
+        p["toolbar"] = background((dark ? 15 : 94) + (vivid ? (dark ? 2 : -1) : 0));
+        p["editor"] = background(neutral ? (dark ? 15 : 100) : (dark ? 17 : 99));
+        p["statusBar"] = background(dark ? 11 : 92);
         p["text"] = surface(dark ? 92 : 16);
         p["textMuted"] = surface(dark ? 76 : 36);
         p["border"] = surface(dark ? 36 : 74);
-        p["accent"] = color(scheme.GetPrimary());
-        p["selectionBackground"] = color(scheme.GetPrimary(), dark ? .26 : .22);
+        p["accent"] = accentColor(scheme.GetPrimary());
+        p["selectionBackground"] = accentColor(scheme.GetPrimary(), dark ? .26 : .22);
         p["rowHover"] = surface(dark ? 23 : 87);
-        p["rowActive"] = color(scheme.GetPrimary(), dark ? .18 : .14);
+        p["rowActive"] = accentColor(scheme.GetPrimary(), dark ? .18 : .14);
         p["pressed"] = surface(dark ? 29 : 80);
         p["heading"] = color((neutral ? base : secondary).get(dark ? 94 : 17));
-        p["markdownAccent"] = color(scheme.tertiary_palette.get(dark ? 82 : 35));
-        p["quoteBackground"] = color(scheme.GetPrimary(), dark ? .09 : .07);
+        p["markdownAccent"] = accentColor(scheme.tertiary_palette.get(dark ? 82 : 35));
+        p["quoteBackground"] = accentColor(scheme.GetPrimary(), dark ? .09 : .07);
         p["divider"] = surface(dark ? 40 : 72);
-        p["codeBackground"] = surface(dark ? 12 : 96);
+        p["codeBackground"] = background(dark ? 12 : 96);
         p["codeText"] = surface(dark ? 90 : 19);
         const std::pair<const char*, double> anchors[]{
             {"tokenKeyword",325},{"tokenString",145},{"tokenNumber",285},

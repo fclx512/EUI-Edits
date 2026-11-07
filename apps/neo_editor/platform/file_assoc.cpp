@@ -175,9 +175,10 @@ RegisterOutcome applyWithStatuses(const std::vector<std::string>& requested,cons
         if(!filetypes::associationEligible(ext)) {result.error=i18n::tr("assoc.unknown_type");return result;}
         if(std::find(selected.begin(),selected.end(),ext)==selected.end()) selected.push_back(ext);
     }
+    const bool clearingExisting = selected.empty() && hasRegistrationEntries();
     for(const auto& t:statuses) {
         if(std::find(selected.begin(),selected.end(),t.extension)!=selected.end()) continue;
-        if(t.defaultApp==DefaultApp::EUIEdits || ((t.registered || (selected.empty() && hasRegistrationEntries())) && t.defaultApp==DefaultApp::Unknown)) {
+        if(removalBlocked(t, clearingExisting)) {
             result.error=i18n::format("assoc.extension_protected", {{"extension", t.extension}});return result;
         }
     }

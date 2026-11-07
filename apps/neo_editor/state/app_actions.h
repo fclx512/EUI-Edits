@@ -93,6 +93,7 @@ namespace testing {
 void setBeforeSaveVerification(std::function<void(const std::string&)> hook);
 }
 bool requestCloseDocument(AppState& state);
+void discardAllAndClose(AppState& state);
 void resolveDocumentConfirmation(AppState& state, filesafety::UnsavedChoice choice);
 void resolveSaveConflict(AppState& state, int choice); // 0 overwrite, 1 Save As, 2 cancel
 
@@ -165,7 +166,7 @@ std::string vaultRelativePath(const AppState& state, const std::string& absolute
 std::string vaultAbsolutePath(const AppState& state, const std::string& relativePath);
 
 void performPending(AppState& state, PendingAction action);
-void persistSettings(const AppState& state);
+bool persistSettings(const AppState& state);
 
 // app.cpp 持有全应用唯一的 DslAppConfig。界面缩放要能在运行时改，
 // 所以单独开一个可写入入口；改完必须自己调 app::requestUpdate()，
@@ -212,6 +213,7 @@ void unregisterDefaultFileType(AppState& state);
 void refreshFileAssocState(AppState& state);
 
 // 恢复界面默认值。只重置界面相关项，不动 vault / last_file。
-void resetViewSettings(AppState& state);
+// Only Appearance and Editor own resettable preferences. Other categories are no-ops.
+void resetSettingsCategory(AppState& state, SettingsCategory category);
 
 } // namespace neo

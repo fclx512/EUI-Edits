@@ -62,26 +62,27 @@ std::size_t matchingBrace(const std::string& css, std::size_t open, std::size_t 
     return limit;
 }
 
-enum class Scope { None, Global, Light, Dark, Both };
+struct Scope {
+    bool common = false;
+    bool light = false;
+    bool dark = false;
+};
 
 Scope selectorScope(const std::string& selector) {
-    bool global = false, light = false, dark = false;
+    Scope scope;
     std::size_t begin = 0;
     while (begin < selector.size()) {
         const std::size_t comma = selector.find(',', begin);
         const std::string part = trim(selector.substr(begin, comma - begin));
-        if (part == ":root" || part == "body" || part == "html") global = true;
+        if (part == ":root" || part == "body" || part == "html") scope.common = true;
         else if (part == ".theme-light" || part == "body.theme-light" ||
-                 part == "html.theme-light" || part == ":root.theme-light") light = true;
+                 part == "html.theme-light" || part == ":root.theme-light") scope.light = true;
         else if (part == ".theme-dark" || part == "body.theme-dark" ||
-                 part == "html.theme-dark" || part == ":root.theme-dark") dark = true;
+                 part == "html.theme-dark" || part == ":root.theme-dark") scope.dark = true;
         if (comma == std::string::npos) break;
         begin = comma + 1;
     }
-    if (light && dark) return Scope::Both;
-    if (light) return Scope::Light;
-    if (dark) return Scope::Dark;
-    return global ? Scope::Global : Scope::None;
+    return scope;
 }
 
 void declarations(const std::string& css, std::size_t begin, std::size_t end, Vars& target) {
@@ -104,29 +105,40 @@ void declarations(const std::string& css, std::size_t begin, std::size_t end, Va
     }
 }
 
-void scanRules(const std::string& css, std::size_t begin, std::size_t end,
-               Vars& common, Vars& light, Vars& dark, int depth = 0) {
-    if (depth > 16) return;
-    std::size_t cursor = begin;
-    while (cursor < end) {
-        const std::size_t open = css.find('{', cursor);
-        if (open == std::string::npos || open >= end) break;
-        const std::size_t close = matchingBrace(css, open, end);
-        if (close >= end) break;
+// At-rules may end in ';' or own a block. Quoted strings and function
+// arguments can contain either delimiter.
+std::size_t ruleDelimiter(const std::string& css, std::size_t cursor) {
+    char quote = 0;
+    int parentheses = 0;
+    for (; cursor < css.size(); ++cursor) {
+        const char c = css[cursor];
+        if (c == '\\') { ++cursor; continue; }
+        if (quote) {
+            if (c == quote) quote = 0;
+            continue;
+        }
+        if (c == '\'' || c == '"') quote = c;
+        else if (c == '(') ++parentheses;
+        else if (c == ')' && parentheses) --parentheses;
+        else if (!parentheses && (c == ';' || c == '{')) break;
+    }
+    return cursor;
+}
+
+void scanRules(const std::string& css, Vars& common, Vars& light, Vars& dark) {
+    std::size_t cursor = css.compare(0, 3, "\xef\xbb\xbf") == 0 ? 3 : 0;
+    while (cursor < css.size()) {
+        const std::size_t open = ruleDelimiter(css, cursor);
+        if (open >= css.size()) break;
+        if (css[open] == ';') { cursor = open + 1; continue; }
+        const std::size_t close = matchingBrace(css, open, css.size());
+        if (close >= css.size()) break;
         const std::string selector = trim(css.substr(cursor, open - cursor));
-        if (!selector.empty() && selector[0] == '@') {
-            scanRules(css, open + 1, close, common, light, dark, depth + 1);
-        } else {
-            switch (selectorScope(selector)) {
-                case Scope::Global: declarations(css, open + 1, close, common); break;
-                case Scope::Light: declarations(css, open + 1, close, light); break;
-                case Scope::Dark: declarations(css, open + 1, close, dark); break;
-                case Scope::Both:
-                    declarations(css, open + 1, close, light);
-                    declarations(css, open + 1, close, dark);
-                    break;
-                case Scope::None: break;
-            }
+        if (!selector.empty() && selector.front() != '@') {
+            const auto scope = selectorScope(selector);
+            if (scope.common) declarations(css, open + 1, close, common);
+            if (scope.light) declarations(css, open + 1, close, light);
+            if (scope.dark) declarations(css, open + 1, close, dark);
         }
         cursor = close + 1;
     }
@@ -333,18 +345,15 @@ bool parse(const std::string& css, const std::string& name,
     error.clear();
     Vars common, light, dark;
     const std::string clean = stripComments(css);
-    scanRules(clean, 0, clean.size(), common, light, dark);
-    const bool commonOnly = light.empty() && dark.empty() && !common.empty();
-    const bool hasLight = !light.empty() || commonOnly;
-    const bool hasDark = !dark.empty() || commonOnly;
+    scanRules(clean, common, light, dark);
+    const bool hasLight = !light.empty() || !common.empty();
+    const bool hasDark = !dark.empty() || !common.empty();
     if (!hasLight && !hasDark) {
         error = i18n::tr("obsidian.no_variables");
         return false;
     }
-    for (const auto& entry : common) {
-        if (hasLight) light.insert(entry);
-        if (hasDark) dark.insert(entry);
-    }
+    light.insert(common.begin(), common.end());
+    dark.insert(common.begin(), common.end());
     out.version = 2;
     out.name = name;
     mapColors(light, out.light, out, true, hasLight);

@@ -56,7 +56,9 @@ void settingsInkBlocksAreCentered() {
             neo::UiMetrics metrics;metrics.panelLabelFontSize=size;metrics.panelHintFontSize=size-1;
             neo::EditorColors colors{};colors.tokens=components::theme::light();
             neo::settings_detail::PanelGeometry geometry;geometry.contentWidth=width+36;
-            geometry.stacked=stacked;geometry.cardHeight=160+(stacked?48:0);
+            geometry.stacked=stacked;geometry.labelWidth=width;
+            geometry=neo::settings_detail::settingsRowGeometry(geometry,metrics,neo::kUiFontFamily,"Ag中文",
+                "Ag中文 Ag中文 Ag中文 Ag中文 Ag中文 Ag中文 Ag中文");
             neo::settings_detail::rowLabel(ui,colors,metrics,neo::kUiFontFamily,"row","Ag中文",
                 "Ag中文 Ag中文 Ag中文 Ag中文 Ag中文 Ag中文 Ag中文",0,20,width,geometry);
             ui.end();ui.layout(core::dsl::Screen{600,600});
@@ -70,7 +72,8 @@ void settingsInkBlocksAreCentered() {
                 text.setPosition(e->frame.x*scale,e->frame.y*scale);text.setMaxWidth(e->frame.width*scale);
                 text.setWrap(e->wrap);text.render(2048,1536);
             }
-            const float expected=(20+80)*scale;
+            const float textArea=geometry.cardHeight-(stacked?56.0f:0.0f);
+            const float expected=(20+textArea*.5f)*scale;
             if(std::fabs((backend.top+backend.bottom)*.5f-expected)>=.8f)
                 std::cerr<<"ink observation scale="<<scale<<" font="<<size<<" width="<<width
                     <<" stacked="<<stacked<<" top="<<backend.top<<" bottom="<<backend.bottom
@@ -81,10 +84,77 @@ void settingsInkBlocksAreCentered() {
     core::TextPrimitive::setLayoutPixelScale(1);
 }
 
+void settingsRowsAndPreviewsFit() {
+    using namespace neo::settings_detail;
+    for (const char* language : {"zh-CN", "en"}) {
+        neo::i18n::setPreference(language);
+        for (float font : {12.0f, 18.0f}) for (float width : {284.0f, 368.0f, 848.0f}) {
+            neo::AppState state; state.uiFontSize=font;
+            const auto metrics=neo::uiMetrics(state);
+            PanelGeometry base; base.contentWidth=width;
+            base.stacked=width<700; base.labelWidth=base.stacked?width-36:width-330;
+            const auto shortRow=settingsRowGeometry(base,metrics,neo::uiFontFamily(state),
+                neo::i18n::tr("settings.line_numbers"),neo::i18n::tr("settings.line_numbers_hint"));
+            const auto longRow=settingsRowGeometry(base,metrics,neo::uiFontFamily(state),
+                neo::i18n::tr("settings.body_font"),std::string(15,'W')+" / Long font family, Regular / 中文字体名称");
+            check(longRow.cardHeight>=shortRow.cardHeight,"long hints grow only their own setting row");
+            check(shortRow.controlTop>=0 && shortRow.controlTop+34<=shortRow.cardHeight,
+                  "row controls stay inside the independently measured card");
+            for(float body : {12.0f,16.0f,32.0f}) {
+                state.editorFontSize=body;
+                const auto revision=state.revision;const auto text=state.doc.text;
+                const auto style=settingsPreviewStyle(state);
+                check(style.bodySize==body,"preview uses actual body size rather than interface size");
+                for(bool editor : {false,true}) {
+                    core::dsl::Ui ui;ui.begin("settings-preview-test");
+                    const float measured=settingsSizePreview(nullptr,state,editor,base,0);
+                    const float drawn=settingsSizePreview(&ui,state,editor,base,0);
+                    ui.end();ui.layout(core::dsl::Screen{1000,2000});
+                    const std::string id=editor?"settings.preview.editor":"settings.preview.ui";
+                    const auto* card=ui.find(id);const auto* label=ui.find(id+".label");
+                    const auto* sample=ui.find(id+(editor?".document":".sidebar"));
+                    check(measured==drawn && card && label && sample,"measured previews build the same complete sample");
+                    if(card && label && sample) {
+                        check(sample->frame.y>=label->frame.y+label->frame.height &&
+                              sample->frame.y+sample->frame.height<=card->frame.y+card->frame.height-10,
+                              "wrapped preview content and labels fit their measured card at maximum size");
+                    }
+                }
+                check(state.revision==revision && state.doc.text==text,"size previews do not modify the open document");
+            }
+        }
+    }
+}
+
+void fontSearchMatchesNamesAndFiles() {
+    neo::fonts::Entry font;
+    font.displayName="Cascadia Code 中文";font.path="C:/Windows/Fonts/CascadiaCode-Regular.ttf";
+    check(neo::fonts::matchesSearch(font,"CAScadia code"),"font search ignores English case");
+    check(neo::fonts::matchesSearch(font,"中文"),"font search preserves Chinese UTF-8 names");
+    check(neo::fonts::matchesSearch(font,"regular.TTF"),"font search includes the file basename");
+    check(neo::fonts::matchesSearch(font,"  Code\tRegular  "),"search words may match name and filename together");
+    check(neo::fonts::matchesSearch(font," \t "),"empty search restores the complete category list");
+    check(!neo::fonts::matchesSearch(font,"Arial"),"unmatched font names are filtered out");
+    check(!neo::fonts::matchesSearch(font,"Windows"),"search does not match unrelated directory names");
+    font.path="D:\\fonts\\自定义字体.otf";
+    check(neo::fonts::matchesSearch(font,"自定义字体"),"imported font filenames remain searchable");
+    for(float size : {12.0f,18.0f}) {
+        neo::AppState state;state.uiFontSize=size;
+        const auto layout=neo::settings_detail::fontPickerSearchLayout(neo::uiMetrics(state));
+        check(layout.countY>=layout.searchY+layout.searchHeight &&
+              layout.sampleY>=layout.countY+layout.countHeight,
+              "search, result count and sample occupy separate measured rows");
+        check(layout.minimumHeight-54-layout.sampleY-12>=layout.rowHeight*3-.01f,
+              "short font pages retain a reachable three-row list and footer");
+    }
+}
+
 } // namespace
 
 int main() {
     settingsInkBlocksAreCentered();
+    settingsRowsAndPreviewsFit();
+    fontSearchMatchesNamesAndFiles();
     // Production text measurement controls both the navigation row count and
     // the theme-library scroll range; cover translations and font changes.
     for (const char* language : {"zh-CN", "en"}) {
@@ -135,24 +205,6 @@ int main() {
     check(!enabled(neo::UiStyle::Rounded, true, nullptr), "rounded disabled");
     check(!enabled(neo::UiStyle::Square, false, nullptr), "feedback disabled");
     check(!enabled(neo::UiStyle::Square, true, "0"), "environment override");
-
-    // The reset control is the final row on both settings pages. Appearance has
-    // eight regular rows (including interface style); Editor has six.
-    constexpr float sectionHeight = 48.0f;
-    constexpr float rowHeight = 92.0f;
-    for (const auto [category, regularRows, label] : {
-             std::tuple{neo::SettingsCategory::Appearance, 8, "appearance"},
-             std::tuple{neo::SettingsCategory::Editor, 6, "editor"}}) {
-        check(neo::settings_detail::settingsRowsBeforeReset(category) == regularRows,
-              label);
-        const float contentHeight = neo::settings_detail::settingsMainContentHeight(
-            category, sectionHeight, rowHeight);
-        const float resetBottom = sectionHeight + (regularRows + 1) * rowHeight;
-        const float viewportHeight = 420.0f;
-        const float maxOffset = std::max(0.0f, contentHeight - viewportHeight);
-        check(resetBottom - maxOffset <= viewportHeight,
-              "reset row remains reachable at maximum scroll");
-    }
 
     neo::EditorColors colors{};
     colors.accent = {0.2f, 0.4f, 0.8f, 0.5f};

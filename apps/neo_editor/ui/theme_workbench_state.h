@@ -24,6 +24,7 @@ struct Session {
     bool saveDialog = false, closeDialog = false, closeAfterSave = false, draftMenu = false;
     bool compare = false, codeView = false, light = true;
     bool missingOnly = true, shareType = false, seedEditing = false;
+    bool useSeedIntensity = true;
     bool windowClosePending = false, windowCloseApproved = false;
     bool panelHidden = false, catalogRefreshNeeded = false;
     bool hexFocused = false, seedFocused = false, nameFocused = false;
@@ -38,7 +39,7 @@ struct Session {
     std::map<std::size_t, std::string> cleanState;
     ThemeFileData pendingImport;
     std::string pendingPath, selected = "accent", hovered, message;
-    std::string hexDraft, alphaDraft, seedHex = "#62866B", candidateSeed;
+    std::string hexDraft, alphaDraft, seedHex = "#62866B";
     std::vector<ThemeFileData> candidates;
     float panelScroll = 0, typeScroll = 0, previewScroll = 0, previewSidebarScroll = 0, reportScroll = 0;
     // 内嵌取色器：HSV 单独保存，灰色时色相不丢；拖动期间记录命中区域。

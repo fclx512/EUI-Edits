@@ -44,6 +44,8 @@ namespace {
 int failures = 0, recoveryCalls = 0, clearRecoveryCalls = 0, closeRequests = 0;
 bool recoveryAvailable = false;
 bool systemPrefersLight = true;
+int settingsFlushCalls = 0;
+bool settingsFlushOk = true, fontArmOk = true;
 int fullPaintRequests = 0;
 std::string lastRecoveryOrigin;
 std::string sessionConfigDirectory;
@@ -76,7 +78,7 @@ Data& current() {
 }
 
 std::string configDirectory() { return sessionConfigDirectory; }
-bool flush() { return true; }
+bool flush() { ++settingsFlushCalls; return settingsFlushOk; }
 bool systemThemePrefersLight() { return systemPrefersLight; }
 bool writeRecovery(const std::string& text, const std::string& originPath, const textfile::Document*) {
     ++recoveryCalls; lastRecoveryOrigin = originPath; return true;
@@ -130,7 +132,10 @@ bool unregister(std::string& error) {
 namespace neo::fontsafety {
 
 ProbeResult validate(const std::string&, unsigned) { return ProbeResult{true, false, {}}; }
-bool armSession(const settings::Data&, std::string&) { return true; }
+bool armSession(const settings::Data&, std::string& error) {
+    if (!fontArmOk) error = "test font marker failure";
+    return fontArmOk;
+}
 
 } // namespace neo::fontsafety
 
@@ -415,6 +420,87 @@ int main() {
         check(!appearance.themeFollowSystem && appearance.theme==neo::ThemeMode::Light &&
               neo::settings::current().theme==1, "fixed light ignores system dark");
         systemPrefersLight=true;
+    }
+    {
+        const neo::settings::Data defaults;
+        neo::AppState reset;
+        reset.doc.text="unsaved draft 中文";reset.revision=9;reset.savedRevision=3;
+        reset.inactiveTabs[402].doc.text="background draft";
+        reset.mode=neo::EditorMode::Vault;reset.editorFontSize=27;
+        reset.editorFontFile="body.ttf";reset.codeFontFile="code.ttf";
+        reset.showLineNumbers=false;reset.showStatusBar=false;reset.readableWidth=false;
+        reset.autoCompactWindow=false;reset.vaultWidth=345;
+        reset.uiFontSize=18;reset.uiScale=1.4f;reset.uiFontFile="interface.ttf";
+        reset.uiStyle=neo::UiStyle::Square;reset.animations=false;
+        reset.themeFollowSystem=false;reset.theme=neo::ThemeMode::Dark;reset.themeFile="custom.json";
+        reset.associationSelected={"txt","md","cpp"};
+        auto& data=neo::settings::current();
+        data.lastFile="last.md";data.recentFiles={"recent.md"};
+        data.automaticUpdateCheck=false;data.lastUpdateCheck=123;
+        neo::i18n::setPreference("en");
+        const auto tabId=reset.tabId;
+        const int before=settingsFlushCalls;
+        fontArmOk=false;
+        neo::resetSettingsCategory(reset,neo::SettingsCategory::Appearance);
+        check(reset.uiFontSize==18 && reset.themeFile=="custom.json" && settingsFlushCalls==before,
+              "failed font marker leaves every category setting unchanged");
+        fontArmOk=true;
+        neo::resetSettingsCategory(reset,neo::SettingsCategory::Appearance);
+        check(reset.uiFontSize==defaults.uiFontSize && reset.uiScale==defaults.uiScale &&
+              reset.uiFontFile.empty() && reset.uiStyle==neo::UiStyle::Rounded && reset.animations==defaults.animations &&
+              reset.themeFollowSystem && reset.theme==neo::ThemeMode::Light && reset.themeFile.empty() &&
+              neo::i18n::preference()==defaults.uiLanguage,
+              "appearance reset restores all controls belonging to Appearance");
+        check(reset.editorFontSize==27 && reset.editorFontFile=="body.ttf" && reset.codeFontFile=="code.ttf" &&
+              reset.mode==neo::EditorMode::Vault && !reset.showLineNumbers && !reset.showStatusBar &&
+              !reset.readableWidth && !reset.autoCompactWindow && reset.vaultWidth==345,
+              "appearance reset preserves editor settings and sidebar width");
+        check(data.uiFontSize==defaults.uiFontSize && data.editorFontSize==27 &&
+              data.editorFontFile=="body.ttf" && data.codeFontFile=="code.ttf" && data.uiStyle==0,
+              "appearance reset persists only the selected category values");
+        reset.uiFontSize=18;reset.uiScale=1.4f;reset.uiStyle=neo::UiStyle::Square;
+        reset.uiFontFile="interface.ttf";reset.animations=false;
+        reset.themeFollowSystem=false;reset.theme=neo::ThemeMode::Dark;reset.themeFile="keep.json";
+        neo::i18n::setPreference("en");
+        reset.settingsCategory=neo::SettingsCategory::Editor;
+        const auto requestedCategory=reset.settingsCategory;
+        neo::requestRisk(reset,"Editor?","Editor only","Reset",[&reset,requestedCategory] {
+            neo::resetSettingsCategory(reset,requestedCategory);
+        });
+        neo::cancelRisk(reset);neo::confirmRisk(reset);
+        check(reset.editorFontSize==27,"cancelled category reset keeps current settings");
+        neo::requestRisk(reset,"Editor?","Editor only","Reset",[&reset,requestedCategory] {
+            neo::resetSettingsCategory(reset,requestedCategory);
+        });
+        reset.settingsCategory=neo::SettingsCategory::Appearance;
+        neo::confirmRisk(reset);
+        check(reset.editorFontSize==defaults.editorFontSize && reset.editorFontFile.empty() && reset.codeFontFile.empty() &&
+              reset.mode==neo::EditorMode::Simple && reset.showLineNumbers && reset.showStatusBar &&
+              reset.readableWidth && reset.autoCompactWindow,
+              "confirmation restores the originally requested category after navigation");
+        check(reset.uiFontSize==18 && reset.uiScale==1.4f && reset.uiFontFile=="interface.ttf" &&
+              reset.uiStyle==neo::UiStyle::Square && !reset.animations && !reset.themeFollowSystem &&
+              reset.theme==neo::ThemeMode::Dark && reset.themeFile=="keep.json" && neo::i18n::preference()=="en",
+              "editor reset preserves every appearance setting");
+        check(data.editorFontSize==defaults.editorFontSize && data.uiFontSize==18 && data.lastThemeFile=="keep.json",
+              "editor reset persists defaults while retaining appearance preferences");
+        const int after=settingsFlushCalls;
+        neo::resetSettingsCategory(reset,neo::SettingsCategory::FileSystem);
+        neo::resetSettingsCategory(reset,neo::SettingsCategory::About);
+        check(settingsFlushCalls==after && reset.uiFontSize==18,"categories without a reset perform no writes");
+        settingsFlushOk=false;
+        reset.toastVisible=false;reset.toastTitle.clear();
+        neo::resetSettingsCategory(reset,neo::SettingsCategory::Editor);
+        check(reset.toastVisible && reset.toastTitle==neo::i18n::tr("settings.reset_session_only"),
+              "reset persistence failure is visible to the user");
+        settingsFlushOk=true;
+        check(reset.doc.text=="unsaved draft 中文" && reset.revision==9 && reset.savedRevision==3 && reset.tabId==tabId &&
+              reset.inactiveTabs.at(402).doc.text=="background draft" && reset.associationSelected.size()==3 &&
+              data.lastFile=="last.md" && data.recentFiles==std::vector<std::string>{"recent.md"} &&
+              !data.automaticUpdateCheck && data.lastUpdateCheck==123,
+              "both resets preserve documents, revisions, recent files, associations and update settings");
+        neo::setUiStyle(neo::UiStyle::Rounded);
+        neo::i18n::initialize("en");
     }
     const auto dir = fs::temp_directory_path() / ("neo-tabs-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(dir / "project/docs/nested"); fs::create_directories(dir / "project-extra"); fs::create_directories(dir / "other");
@@ -916,6 +1002,22 @@ int main() {
     fs::remove_all(blockedRecovery);
     check(neo::requestCloseDocument(blockedClose) && blockedClose.closeApproved,
           "normal-exit cleanup can be retried after a failure");
+
+    neo::sessionwriter::resetForTest();
+    neo::sessionwriter::setInlineForTest(true);
+    neo::AppState discardClose;
+    const auto parentBeforeDiscard = get(parent), otherBeforeDiscard = get(unrelated);
+    neo::loadDocument(discardClose, path(parent));
+    discardClose.doc.text += "discarded parent edit"; ++discardClose.revision;
+    neo::loadDocument(discardClose, path(unrelated));
+    discardClose.doc.text += "discarded other edit"; ++discardClose.revision;
+    check(!neo::requestCloseDocument(discardClose) && discardClose.pending == neo::PendingAction::CloseWindow,
+          "two dirty documents prompt before a discard-all exit");
+    neo::discardAllAndClose(discardClose);
+    check(discardClose.closeApproved && discardClose.pending == neo::PendingAction::None &&
+              !discardClose.sessionClosePending && get(parent) == parentBeforeDiscard &&
+              get(unrelated) == otherBeforeDiscard,
+          "discard-all approves exit after cleanup and never writes either document");
 
     neo::sessionwriter::resetForTest();
     neo::AppState asyncClose;

@@ -380,6 +380,8 @@ struct AppState : DocumentSession {
     // 框架的命中顺序不按 zIndex 走，叠层是踩过的坑）。
     FontPickerTarget fontPicker = FontPickerTarget::None;
     float fontListScroll = 0.0f;
+    std::string fontSearch;
+    bool fontSearchFocusPending = false;
     EditorCommand pendingEditorCommand = EditorCommand::None;
     // ToggleTask 的载荷：要翻转的任务状态字符偏移（-1 = 无）。
     // 命中判定发生在按下那一刻（事件阶段），真正改字节在 compose（同上，见 EditorCommand）。
@@ -456,8 +458,8 @@ struct AppState : DocumentSession {
     bool languageMenuOpen = false;
     std::string associationSearch;
     int associationCategory = 0;
-    bool associationSelectionLoaded = false;
-    bool associationManagementOpen = false;
+    bool associationCustomOpen = false;
+    bool associationRefreshPending = false;
     std::vector<std::string> associationSelected;
     std::vector<fileassoc::TypeStatus> associationStatuses;
 };

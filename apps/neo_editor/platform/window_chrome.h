@@ -2,6 +2,8 @@
 
 #include "platform/system_appearance.h"
 #include <algorithm>
+#include <functional>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -16,6 +18,7 @@ inline constexpr float controlsWidth = 120;
 inline constexpr float dragWidth = 64;
 struct HitRect { float left, top, right, bottom; };
 inline std::vector<HitRect> interactiveRects;
+inline std::function<void()> nextActivation;
 inline float logicalWidth = 1, titleHeight = 34;
 inline void exclude(float x, float y, float width, float height) {
     if (width > 0 && height > 0) interactiveRects.push_back({x,y,x+width,y+height});
@@ -84,6 +87,10 @@ inline LRESULT CALLBACK procedure(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_
     }
     if (msg == WM_ACTIVATE || msg == WM_DWMCOMPOSITIONCHANGED || msg == WM_THEMECHANGED)
         applyDwmFrame(hwnd);
+    if (msg == WM_ACTIVATE && LOWORD(w) != WA_INACTIVE && !HIWORD(w) && nextActivation) {
+        auto callback = std::exchange(nextActivation, {});
+        callback();
+    }
     if (msg == WM_NCCALCSIZE) {
         auto& r = w ? reinterpret_cast<NCCALCSIZE_PARAMS*>(l)->rgrc[0]
                     : *reinterpret_cast<RECT*>(l);
@@ -115,7 +122,10 @@ inline LRESULT CALLBACK procedure(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_
     }
     if (msg == WM_NCDESTROY) {
         RemoveWindowSubclass(hwnd, procedure, id);
-        if (window == hwnd) window = nullptr;
+        if (window == hwnd) {
+            window = nullptr;
+            nextActivation = {};
+        }
     }
     return DefSubclassProc(hwnd, msg, w, l);
 }

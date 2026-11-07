@@ -308,7 +308,9 @@ void writeVariant(std::ostringstream& out, const EditorColors& colors,
     number("h3SizeFactor", typography.h3SizeFactor, 1.318f);
     number("h1LineHeightFactor", typography.h1LineHeightFactor, 1.2f);
     number("h2LineHeightFactor", typography.h2LineHeightFactor, 1.2f);
-    number("h3LineHeightFactor", typography.h3LineHeightFactor, 1.3f);
+    // The sample box and Live Preview have distinct legacy defaults.
+    if (typography.h3LineHeightFactor)
+        number("h3LineHeightFactor", typography.h3LineHeightFactor, 1.3f);
     number("headingSpaceBefore", typography.headingSpaceBefore, 1.0f);
     number("tableSpaceBefore", typography.tableSpaceBefore, 1.0f);
     out << pad << "    \"bodyFontFamily\": "
@@ -406,6 +408,10 @@ bool parse(const std::string& json, ThemeFileData& out, std::string& error) {
                 if (recipeValue.type() != eui::json::Type::Object ||
                     !recipeValue.get("seed").string(recipe.seed) || !recipeValue.get("variant").string(recipe.variant) ||
                     !recipeValue.get("round").number(round) || !std::isfinite(round) || round < 0 || round > 1000000 || std::floor(round) != round) {
+                    error = "主题工作台自动配色记录无效。"; return false;
+                }
+                const auto intensity = recipeValue.get("useSeedIntensity");
+                if (intensity.valid() && !intensity.boolean(recipe.useSeedIntensity)) {
                     error = "主题工作台自动配色记录无效。"; return false;
                 }
                 recipe.round = static_cast<int>(round);
@@ -696,7 +702,9 @@ std::string serializeWorkbench(const ThemeFileData& current, const ThemeFileData
     if (current.autoRecipe) {
         const auto& recipe = *current.autoRecipe;
         out << ",\n    \"autoRecipe\": {\"seed\":" << jsonString(recipe.seed)
-            << ",\"variant\":" << jsonString(recipe.variant) << ",\"round\":" << recipe.round << "}";
+            << ",\"variant\":" << jsonString(recipe.variant) << ",\"round\":" << recipe.round;
+        if (recipe.useSeedIntensity) out << ",\"useSeedIntensity\":true";
+        out << "}";
     }
     out << "\n  }\n}\n";
     return out.str();

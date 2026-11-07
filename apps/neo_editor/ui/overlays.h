@@ -25,12 +25,21 @@ inline void safetyDialog(eui::Ui& ui, AppState& state, const eui::Screen& screen
     if (!open) { state.safetyDialogWasOpen = false; return; }
     if (!state.safetyDialogWasOpen) { state.safetyChoice = 2; state.safetyScroll = 0; }
     state.safetyDialogWasOpen = true;
+    const bool closing = !conflict && state.pending == PendingAction::CloseWindow;
+    const auto resolve = [&state, conflict, closing](int choice) {
+        if (conflict) resolveSaveConflict(state, choice);
+        else if (closing && choice == 1) discardAllAndClose(state);
+        else resolveDocumentConfirmation(state,
+            choice == 0 ? filesafety::UnsavedChoice::Save :
+            choice == 1 ? filesafety::UnsavedChoice::Discard : filesafety::UnsavedChoice::Cancel);
+        app::requestUpdate();
+    };
     const auto& colors = editorColors();
     const std::string id = conflict ? "editor.saveConflict" : "editor.confirm";
     const float width = std::min(520.0f, std::max(220.0f, screen.width - 48.0f));
     const auto message = conflict
         ? i18n::format("safety.conflict_body", {{"file", textfile::fileName(state.conflictPath)}})
-        : state.displayName() + "\n\n" + i18n::tr("safety.unsaved_body");
+        : state.displayName() + "\n\n" + i18n::tr(closing ? "safety.exit_body" : "safety.unsaved_body");
     core::TextStyle titleStyle, messageStyle;
     titleStyle.text = i18n::tr(conflict ? "safety.conflict_title" : "safety.unsaved_title");
     titleStyle.fontFamily = uiFontFamily(state);
@@ -51,13 +60,9 @@ inline void safetyDialog(eui::Ui& ui, AppState& state, const eui::Screen& screen
     const float contentHeight = titleHeight + 16 + messageHeight;
     const float height = std::min(std::clamp(contentHeight + 84, 160.0f, 320.0f),
                                   std::max(140.0f, screen.height - 48.0f));
-    const auto cancel = [&state, conflict] {
-        if (conflict) resolveSaveConflict(state, 2);
-        else resolveDocumentConfirmation(state, filesafety::UnsavedChoice::Cancel);
-        app::requestUpdate();
-    };
+    const auto cancel = [resolve] { resolve(2); };
     ui.rect(id + ".keySink").size(0, 0).focusable()
-        .onKeyEvent([&state, conflict, cancel](const eui::KeyEvent& event) {
+        .onKeyEvent([&state, resolve, cancel](const eui::KeyEvent& event) {
             if (!event.isDown()) return true;
             if (event.key == eui::InputKey::Escape && event.action == core::KeyAction::Press) cancel();
             else if (event.key == eui::InputKey::Tab || event.key == eui::InputKey::Right ||
@@ -67,11 +72,7 @@ inline void safetyDialog(eui::Ui& ui, AppState& state, const eui::Screen& screen
                 app::requestUpdate();
             } else if ((event.key == eui::InputKey::Enter || event.key == eui::InputKey::Space) &&
                        event.action == core::KeyAction::Press) {
-                if (conflict) resolveSaveConflict(state, state.safetyChoice);
-                else resolveDocumentConfirmation(state,
-                    state.safetyChoice == 0 ? filesafety::UnsavedChoice::Save :
-                    state.safetyChoice == 1 ? filesafety::UnsavedChoice::Discard : filesafety::UnsavedChoice::Cancel);
-                app::requestUpdate();
+                resolve(state.safetyChoice);
             }
             return true;
         }).build();
@@ -115,7 +116,7 @@ inline void safetyDialog(eui::Ui& ui, AppState& state, const eui::Screen& screen
                 buttonWidth < 85 ? 12.0f : uiMetrics(state).panelFontSize);
             const char* labels[] = {
                 conflict ? "safety.overwrite" : "safety.save",
-                conflict ? "safety.save_as" : "safety.discard",
+                conflict ? "safety.save_as" : closing ? "safety.discard_exit" : "safety.discard",
                 "safety.cancel"};
             for (int i = 0; i < 3; ++i) {
                 components::button(ui, id + ".action" + std::to_string(i))
@@ -124,13 +125,7 @@ inline void safetyDialog(eui::Ui& ui, AppState& state, const eui::Screen& screen
                     .size(buttonWidth, 32).text(i18n::tr(labels[i]))
                     .fontSize(buttonFont).radius(neo::corner(colors, 6.0f))
                     .border(1.5f, state.safetyChoice == i ? colors.accent : colors.tokens.border)
-                    .onClick([&state, conflict, i] {
-                        if (conflict) resolveSaveConflict(state, i);
-                        else resolveDocumentConfirmation(state,
-                            i == 0 ? filesafety::UnsavedChoice::Save :
-                            i == 1 ? filesafety::UnsavedChoice::Discard : filesafety::UnsavedChoice::Cancel);
-                        app::requestUpdate();
-                    }).build();
+                    .onClick([resolve, i] { resolve(i); }).build();
             }
         }).onOpenChange([cancel](bool value) { if (!value) cancel(); }).build();
 }

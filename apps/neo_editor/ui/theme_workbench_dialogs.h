@@ -104,7 +104,11 @@ inline void closeDialogView(eui::Ui& ui,AppState& state,float width,float height
             if(!dirty(session().active))for(std::size_t i=0;i<session().drafts.size();++i)if(dirty(i)){session().active=i;break;}
             openSave(true);
         });
-        ghostButton(ui,"themeWorkbench.close.leave",tr(s.windowClosePending?"theme_wb.exit_unsaved":"theme_wb.keep_library"),d.pad,footer+d.control+d.gap,inner,d.control,c,d.font,[&state]{if(session().windowClosePending)finishWindowClose();else leave(state);});
+        ghostButton(ui,"themeWorkbench.close.leave",tr(s.windowClosePending?"theme_wb.exit_unsaved":"theme_wb.keep_library"),d.pad,footer+d.control+d.gap,inner,d.control,c,d.font,[&state] {
+            if (!session().windowClosePending) { leave(state); return; }
+            session().windowClosePending = session().open = session().closeDialog = false;
+            discardAllAndClose(state);
+        });
     });
 }
 

@@ -174,6 +174,7 @@ struct ThemeAutoRecipe {
     std::string seed = "#62866B";
     std::string variant = "soft";
     int round = 0;
+    bool useSeedIntensity = false;
 };
 
 struct ThemeFileData {
@@ -434,16 +435,9 @@ inline const EditorColors& editorColors(ThemeMode mode) {
 // 配色作为参数传入（T10 拆层）：本函数纯、不查 state()，主题由调用方给 ——
 // UI 编排层传 editorColors(state.theme)，单测传 editorColors(ThemeMode::Dark/Light)。
 //
-// 排版覆盖：v1 读取单侧 typography；v2 读取指定明暗侧的 typography。
-// 缺字段回退上面的默认倍率。v1 不接受标题字段，v2 支持。
 inline components::MarkdownStyle markdownStyle(float bodySize, const char* bodyFontFamily,
-                                               const char* codeFontFamily,
-                                               const EditorColors& colors,
-                                               ThemeMode mode = ThemeMode::Dark) {
-    const ThemeFileData& theme = activeTheme();
-    const ThemeTypography& typography = theme.version >= 2
-        ? (mode == ThemeMode::Light ? theme.light.typography : theme.dark.typography)
-        : theme.typography;
+                                                const char* codeFontFamily, const EditorColors& colors,
+                                                const ThemeTypography& typography) {
     components::MarkdownStyle style(colors.tokens);
     // 颜色全部从配色表取（含主题）：这里不再有任何写死的 rgba，
     // 否则切到浅色主题时会留下几处"暗色专属"的文字色。
@@ -497,6 +491,19 @@ inline components::MarkdownStyle markdownStyle(float bodySize, const char* bodyF
     style.listIndent = em * typography.listIndent.value_or(kMarkdownListIndent);
     style.radius = em * typography.radius.value_or(kMarkdownRadius);  // --radius-s 4px @ 16
     return style;
+}
+
+// v1 shares the same base-side rule for colors and typography.
+inline components::MarkdownStyle markdownStyle(float bodySize, const char* bodyFontFamily,
+                                                const char* codeFontFamily, const EditorColors& colors,
+                                                ThemeMode mode = ThemeMode::Dark) {
+    static const ThemeTypography defaults;
+    const auto& theme = activeTheme();
+    const bool light = mode == ThemeMode::Light;
+    const auto& typography = theme.version >= 2
+        ? (light ? theme.light.typography : theme.dark.typography)
+        : theme.version == 1 && theme.baseLight == light ? theme.typography : defaults;
+    return markdownStyle(bodySize, bodyFontFamily, codeFontFamily, colors, typography);
 }
 
 // ── 字体名的纯取值（T10 拆层）──────────────────────────────────────────────

@@ -28,7 +28,8 @@ inline const char* variantLabel(int i) {
     constexpr const char* ids[]{"theme_wb.neutral","theme_wb.soft","theme_wb.vivid"};return tr(ids[std::clamp(i,0,2)]);
 }
 inline ThemeAutoRecipe recipe(int i) {
-    ThemeAutoRecipe r;r.seed=session().candidateSeed;r.variant=variantKey(i);r.round=session().autoRound;return r;
+    const auto& candidates = session().candidates;
+    return *candidates[i].autoRecipe;
 }
 inline bool hasImportedColors() {
     const auto& report=draft().current.importReport;
@@ -52,31 +53,55 @@ inline bool readOnly(){return session().compare||session().trial>=0;}
 inline void syncInputs() {
     auto& s=session();const auto c=selectedColor();s.hexDraft=hexColor(c,true);
     s.alphaDraft=std::to_string(static_cast<int>(std::lround(c.a*100)));
-    const auto h=toHsv(c);s.pickH=h.h;s.pickS=h.s;s.pickV=h.v;s.pickA=c.a;
+    if (!s.seedEditing) {
+        const auto h = toHsv(c);
+        s.pickH = h.h; s.pickS = h.s; s.pickV = h.v; s.pickA = c.a;
+    }
 }
 inline void select(const std::string& key) {
     if(!themeworkbench::editableField(key))return;
     auto& s=session();s.selected=key;s.layer=Layer::Color;s.panelHidden=false;
     s.seedEditing=false;s.panelScroll=0;s.hovered.clear();s.dragging=false;syncInputs();app::requestUpdate();
 }
-inline bool generateCandidates() {
+inline bool generateCandidates(bool preview = false) {
     auto& s=session();eui::Color seed;
     if(!parseHex(s.seedHex,seed)||(s.seedHex.size()!=7&&s.seedHex.size()!=6)){
         s.message=tr("theme_wb.invalid_seed");s.trial=-1;s.candidates.clear();app::requestUpdate();return false;
     }
     const auto canonical=hexColor(seed,false);std::vector<ThemeFileData> next;
-    for(int i=0;i<3;++i){ThemeAutoRecipe r;r.seed=canonical;r.variant=variantKey(i);r.round=s.autoRound;
+    for(int i=0;i<3;++i){ThemeAutoRecipe r;r.seed=canonical;r.variant=variantKey(i);r.round=s.autoRound;r.useSeedIntensity=s.useSeedIntensity;
         ThemeFileData data;std::string error;
         if(!themeauto::generate(r,data,error)){s.message=error.empty()?tr("theme_wb.generate_failed"):error;app::requestUpdate();return false;}
         next.push_back(std::move(data));
     }
-    s.candidateSeed=canonical;s.candidates=std::move(next);s.trial=-1;s.message.clear();app::requestUpdate();return true;
+    s.candidates = std::move(next);
+    s.trial = preview && !s.compare ? (s.trial < 0 ? 1 : s.trial) : -1;
+    s.message.clear();
+    app::requestUpdate();
+    return true;
 }
+inline void shuffleSeed() {
+    auto& s = session();
+    eui::Color seed{};
+    parseHex(s.seedHex, seed);
+    const auto hsv = s.seedEditing ? Hsv{s.pickH, s.pickS, s.pickV} : toHsv(seed);
+    s.pickH = std::fmod(hsv.h + .381966f, 1.0f);
+    s.pickS = std::max(hsv.s, .5f);
+    s.pickV = std::max(hsv.v, .65f);
+    s.seedHex = hexColor(fromHsv(s.pickH, s.pickS, s.pickV), false);
+    s.autoRound = 0;
+    s.useSeedIntensity = true;
+    generateCandidates(true);
+}
+
 inline void prepareDraft() {
     auto& s=session();s.layer=Layer::Palette;s.compare=false;s.trial=-1;s.draftMenu=false;
     s.seedEditing=false;s.dragging=false;s.panelHidden=false;s.shareType=false;
     s.panelScroll=s.typeScroll=s.previewScroll=s.previewSidebarScroll=0;s.hovered.clear();s.message.clear();s.missingOnly=true;
-    const auto& r=draft().current.autoRecipe;s.seedHex=r?r->seed:"#62866B";s.autoRound=r?r->round:0;
+    const auto& r = draft().current.autoRecipe;
+    s.seedHex = r ? r->seed : "#62866B";
+    s.autoRound = r ? r->round : 0;
+    s.useSeedIntensity = !r || r->useSeedIntensity;
     generateCandidates();syncInputs();
 }
 inline void ensureDraft(AppState& state) {
@@ -123,8 +148,15 @@ inline bool save(AppState& state,bool apply) {
         s.saveReceipts[s.active]={bytes(d),d.savedPath};
     }
     s.cleanState[s.active]=bytes(d);s.catalogRefreshNeeded=true;
-    if(apply){themeloader::activate(d.current,d.savedPath);state.themeFile=d.savedPath;mutableAppConfig().clearColorValue=editorColors().window;persistSettings(state);app::detail::requestFullPaint();}
-    s.message=tr(apply?"theme_wb.applied":"theme_wb.saved");
+    bool remembered = true;
+    if (apply) {
+        themeloader::activate(d.current, d.savedPath);
+        state.themeFile = d.savedPath;
+        mutableAppConfig().clearColorValue = editorColors().window;
+        remembered = persistSettings(state);
+        app::detail::requestFullPaint();
+    }
+    s.message = tr(!remembered ? "settings.theme_session_only" : apply ? "theme_wb.applied" : "theme_wb.saved");
     showToast(state,s.message,d.savedPath);s.saveDialog=false;
     if(s.closeAfterSave){
         if(s.windowClosePending){
@@ -144,7 +176,7 @@ inline void changePicker(float fraction,int channel,bool seed) {
     auto& s=session();fraction=std::clamp(fraction,0.0f,1.0f);
     if(channel==0)s.pickH=fraction;if(channel==1)s.pickS=fraction;if(channel==2)s.pickV=fraction;if(channel==3)s.pickA=fraction;
     auto color=fromHsv(s.pickH,s.pickS,s.pickV);color.a=s.pickA;
-    if(seed){s.seedHex=hexColor(color,false);generateCandidates();}
+    if(seed){s.seedHex=hexColor(color,false);s.useSeedIntensity=true;generateCandidates(true);}
     else {
         if(readOnly())return;const auto p=themeworkbench::colors(draft(),s.light);const auto* f=findThemeColorField(s.selected);
         if(f&&(!themeworkbench::sameColor(p.*(f->member),color)||!themeworkbench::isLocked(draft(),s.light,s.selected))){themeworkbench::setColor(draft(),s.light,s.selected,color,!s.dragRecorded);s.dragRecorded=true;}
@@ -165,7 +197,7 @@ inline void handleThemeWorkbenchEscape(AppState& state) {
     if(s.reviewingImport){s.reviewingImport=false;s.pendingPath.clear();}
     else if(s.saveDialog){s.saveDialog=false;s.closeAfterSave=false;s.windowClosePending=false;}
     else if(s.closeDialog){s.closeDialog=false;s.windowClosePending=false;}
-    else if(s.seedEditing)s.seedEditing=false;
+    else if(s.trial>=0||s.seedEditing){s.trial=-1;s.seedEditing=false;syncInputs();}
     else if(s.compare){s.compare=false;syncInputs();}
     else if(s.layer!=Layer::Palette){s.layer=Layer::Palette;s.panelScroll=0;s.seedEditing=false;}
     else requestThemeWorkbenchClose(state);

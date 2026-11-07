@@ -26,7 +26,8 @@ namespace detail { void requestFullPaint() {} }
 }
 namespace neo {
 void showToast(AppState&, std::string, std::string) { ++toastRequests; }
-void persistSettings(const AppState&) { ++settingsWrites; }
+bool persistSettings(const AppState&) { ++settingsWrites; return true; }
+void discardAllAndClose(AppState&) { ++closeRequests; }
 float effectiveWindowScale() { return 1.0f; }
 app::DslAppConfig& mutableAppConfig() { static app::DslAppConfig value; return value; }
 }
@@ -88,6 +89,36 @@ void testCandidateCallbacks() {
     check(wb::bytes(wb::draft()) == adopted, "before-comparison mode cannot adopt a candidate");
     check(model::undo(wb::draft()) && wb::bytes(wb::draft()) == before && !wb::anyDirty(),
           "undoing the only change returns the draft to clean state");
+}
+
+void testSeedPreview() {
+    Fixture f;
+    const auto before = wb::bytes(wb::draft());
+    const auto seed = wb::session().seedHex;
+    const auto color = wb::candidateDraft(1).current.light.colors.at("accent");
+    wb::shuffleSeed();
+    check(wb::session().seedHex != seed && wb::session().trial == 1 &&
+              !model::sameColor(color, wb::shownColors().accent) && wb::bytes(wb::draft()) == before,
+          "another seed changes the visible trial without editing the draft");
+    const auto saturated = wb::shownColors();
+    wb::changePicker(0.05f, 1, true);
+    const auto desaturated = wb::shownColors();
+    check(!model::sameColor(saturated.accent, desaturated.accent),
+          "seed saturation changes the generated accent");
+    wb::session().seedEditing = true;
+    wb::changePicker(0.2f, 2, true);
+    check(!model::sameColor(desaturated.panel, wb::shownColors().panel) &&
+              wb::bytes(wb::draft()) == before,
+          "seed brightness changes candidate surfaces without adopting them");
+    f.compose();
+    const auto* adopt = f.element("themeWorkbench.candidate.1.bg");
+    if (adopt && adopt->onClick) adopt->onClick();
+    check(wb::draft().current.autoRecipe && wb::draft().current.autoRecipe->useSeedIntensity &&
+              wb::session().seedHex == wb::draft().current.autoRecipe->seed && wb::session().pickV == 0.2f,
+          "adoption records the new recipe and leaves the seed picker on the same color");
+    wb::shuffleSeed();
+    neo::handleThemeWorkbenchEscape(f.state);
+    check(wb::session().trial == -1 && wb::session().open, "Escape returns from trial to the working draft");
 }
 
 void testPickerGestureCallbacks() {
@@ -340,6 +371,7 @@ int main() {
 #endif
     neo::i18n::initialize("zh-CN");
     testCandidateCallbacks();
+    testSeedPreview();
     testPickerGestureCallbacks();
     testAllDraftsCloseProtection();
     testSaveAndImport(root);

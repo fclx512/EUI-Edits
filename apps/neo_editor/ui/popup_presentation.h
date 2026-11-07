@@ -57,6 +57,7 @@ inline void setSettingsOpen(AppState& state, bool open) {
     state.settingsOpen = open;
     state.fontPicker = FontPickerTarget::None;
     state.themeListOpen = false;
+    state.associationCustomOpen = false;
 }
 
 inline core::Color opaque(core::Color color) {

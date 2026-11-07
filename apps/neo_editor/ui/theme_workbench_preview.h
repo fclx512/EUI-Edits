@@ -7,7 +7,6 @@
 #include "core/dsl.h"
 
 #include <algorithm>
-#include <cstring>
 #include <functional>
 #include <string>
 #include <utility>
@@ -18,45 +17,7 @@ namespace neo::theme_workbench_preview {
 // 场景命中、代码 token 与部分几何独立绘制，不代表完整编辑器的像素一致性。
 inline components::MarkdownStyle draftMarkdownStyle(const EditorColors& colors, const ThemeTypography& t,
                                                     float bodyPx, const char* bodyFont, const char* codeFont) {
-    components::MarkdownStyle style(colors.tokens);
-    style.text = colors.text;
-    style.heading = colors.heading;
-    style.muted = colors.textMuted;
-    style.accent = colors.markdownAccent;
-    style.codeText = colors.codeText;
-    style.codeBackground = colors.codeBackground;
-    style.inlineCodeBackground = core::mixColor(colors.editor, colors.accent, .075f);
-    style.inlineCodeBorder = core::mixColor(colors.editor, colors.accent, .28f);
-    style.quoteBackground = colors.quoteBackground;
-    style.divider = colors.divider;
-    const char* body = bodyFont ? bodyFont : "";
-    const char* code = codeFont ? codeFont : "monospace";
-    if (t.bodyFontFamily && !t.bodyFontFamily->empty() &&
-        (!*body || std::strcmp(body, kUiFontFamily) == 0)) body = t.bodyFontFamily->c_str();
-    if (t.codeFontFamily && !t.codeFontFamily->empty() &&
-        (!*code || std::strcmp(code, "monospace") == 0)) code = t.codeFontFamily->c_str();
-    style.fontFamily = body;
-    style.codeFontFamily = code;
-    const float em = bodyPx;
-    style.bodySize = em;
-    style.bodyLineHeight = em * t.bodyLineHeight.value_or(kMarkdownBodyLineHeight);
-    style.h1Size = em * t.h1SizeFactor.value_or(1.618f);
-    style.h2Size = em * t.h2SizeFactor.value_or(1.462f);
-    style.h3Size = em * t.h3SizeFactor.value_or(1.318f);
-    style.h1LineHeight = style.h1Size * t.h1LineHeightFactor.value_or(1.2f) + em;
-    style.h2LineHeight = style.h2Size * t.h2LineHeightFactor.value_or(1.2f) + em;
-    style.h3LineHeight = style.h3Size * t.h3LineHeightFactor.value_or(1.2f) + em;
-    style.h1TextLineHeight = style.h1Size * t.h1LineHeightFactor.value_or(1.2f);
-    style.h2TextLineHeight = style.h2Size * t.h2LineHeightFactor.value_or(1.2f);
-    style.h3TextLineHeight = style.h3Size * t.h3LineHeightFactor.value_or(1.3f);
-    style.headingSpaceBefore = em * t.headingSpaceBefore.value_or(1.0f);
-    style.tableSpaceBefore = em * t.tableSpaceBefore.value_or(1.0f);
-    style.codeSize = em * t.codeSizeFactor.value_or(kMarkdownCodeSizeFactor);
-    style.codeLineHeight = style.codeSize * kMarkdownCodeLineHeight;
-    style.blockGap = em * t.blockGap.value_or(kMarkdownBlockGap);
-    style.listIndent = em * t.listIndent.value_or(kMarkdownListIndent);
-    style.radius = em * t.radius.value_or(kMarkdownRadius);
-    return style;
+    return markdownStyle(bodyPx, bodyFont, codeFont, colors, t);
 }
 
 struct Args {

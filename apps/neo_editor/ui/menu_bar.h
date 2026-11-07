@@ -167,7 +167,7 @@ inline void dispatchCommand(AppState& state, int id) {
             else requestCloseTab(state, state.tabId);
             break;
         case Command::Exit:
-            if (requestCloseDocument(state)) app::requestClose();
+            app::requestClose();
             break;
         case Command::Save: saveDocument(state); break;
         case Command::SaveAs: saveDocumentAs(state); break;

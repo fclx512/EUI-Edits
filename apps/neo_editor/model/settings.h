@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,8 @@ struct Data {
     // 粘贴图片的附件目录模式（R2）：0 = shared（文档旁 _assets/，默认），
     // 1 = per-file（<文档名>.assets/）。其他值按 0 处理。
     int attachmentMode = 0;
+    bool automaticUpdateCheck = true;
+    std::int64_t lastUpdateCheck = 0;
 };
 
 std::string configDirectory();

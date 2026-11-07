@@ -141,7 +141,12 @@ void testGoldenRoundTrip() {
     check(parsed.dark.colors.size() == std::size(neo::kThemeColorFields),
           "导出应写全每一个可主题化颜色字段");
 
+    const auto beforeSave = neo::markdownStyle(16.0f, neo::kUiFontFamily, "monospace", builtinDark);
     neo::themeloader::activate(parsed, "memory:builtin-dark");
+    const auto afterSave = neo::markdownStyle(16.0f, neo::kUiFontFamily, "monospace", builtinDark);
+    check(beforeSave.h3LineHeight == afterSave.h3LineHeight &&
+              beforeSave.h3TextLineHeight == afterSave.h3TextLineHeight,
+          "saving without an H3 override preserves both default height metrics");
     const neo::EditorColors& reloaded = neo::editorColors(neo::ThemeMode::Dark);
     for (std::size_t index = 0; index < std::size(neo::kThemeColorFields); ++index) {
         const std::string field = neo::kThemeColorFields[index].name;
@@ -247,6 +252,10 @@ void testTypographyOverride() {
               themed.h1Size == baseline.h1Size,
           "标题字号与行盒不在主题可覆盖范围内（v1）");
     check(themed.blockGap == baseline.blockGap, "blockGap 没写时应回退内置");
+    const auto light = neo::markdownStyle(16.0f, neo::kUiFontFamily, "monospace",
+                                          neo::editorColors(neo::ThemeMode::Light), neo::ThemeMode::Light);
+    check(light.bodyLineHeight == baseline.bodyLineHeight && light.fontFamily != "Georgia",
+          "a dark v1 theme must not override typography or fonts on the light side");
 
     // 设置里自选过字体（传入的不是预设名）⇒ 主题字体让位。
     const components::MarkdownStyle customFont =

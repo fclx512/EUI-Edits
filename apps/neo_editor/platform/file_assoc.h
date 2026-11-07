@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,28 @@ struct TypeStatus {
     bool registered = false;
     DefaultApp defaultApp = DefaultApp::Unknown;
 };
+inline bool removalBlocked(const TypeStatus& type, bool clearingExisting) {
+    return type.defaultApp == DefaultApp::EUIEdits ||
+           (type.defaultApp == DefaultApp::Unknown && (type.registered || clearingExisting));
+}
+
+enum class QuickAction { Add, Repair, SetDefaults, ManageDefaults };
+
+inline QuickAction quickAction(bool healthy, const std::vector<TypeStatus>& statuses) {
+    if (!healthy && std::any_of(statuses.begin(), statuses.end(), [](const TypeStatus& type) {
+            return type.registered;
+        })) return QuickAction::Repair;
+    for (const char* extension : {"txt", "md"}) {
+        const auto found = std::find_if(statuses.begin(), statuses.end(), [extension](const TypeStatus& type) {
+            return type.extension == extension;
+        });
+        if (found == statuses.end() || !found->registered) return QuickAction::Add;
+    }
+    return std::all_of(statuses.begin(), statuses.end(), [](const TypeStatus& type) {
+        return (type.extension != "txt" && type.extension != "md") || type.defaultApp == DefaultApp::EUIEdits;
+    }) ? QuickAction::ManageDefaults : QuickAction::SetDefaults;
+}
+
 std::vector<std::string> registeredExtensions();
 // 查询全量已识别类型，包括不可新登记的脚本，以保护默认应用并清理旧版本遗留项。
 std::vector<TypeStatus> queryTypes();

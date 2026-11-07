@@ -55,6 +55,19 @@ inline eui::Color transparentColor() {
     return rgba(0.0f, 0.0f, 0.0f, 0.0f);
 }
 
+inline constexpr float kFileFormatPillHeight = 24.0f;
+
+inline void fileFormatPill(eui::Ui& ui, const std::string& id, const std::string& label,
+                           float x, float y, float width, const EditorColors& colors,
+                           eui::Color tint, const char* font, float fontSize) {
+    ui.rect(id + ".pill").position(x, y).size(width, kFileFormatPillHeight)
+        .radius(neo::corner(colors, kFileFormatPillHeight * .5f))
+        .color(rgba(tint.r, tint.g, tint.b, .12f)).border(1.0f, rgba(tint.r, tint.g, tint.b, .24f)).build();
+    ui.text(id + ".extension").position(x, y).size(width, kFileFormatPillHeight).text(label)
+        .fontFamily(font).fontSize(fontSize).fontWeight(600).color(tint)
+        .horizontalAlign(eui::HorizontalAlign::Center).verticalAlign(eui::VerticalAlign::Center).build();
+}
+
 // 竖分隔线，只做视觉分组。
 inline void dividerView(eui::Ui& ui, const std::string& id, float height) {
     ui.rect(id)

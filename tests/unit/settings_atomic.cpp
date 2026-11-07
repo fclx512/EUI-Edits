@@ -12,6 +12,7 @@
 
 #include "model/atomic_write.h"
 #include "model/settings.h"
+#include "model/update_check.h"
 #include "model/i18n.h"
 #include "model/text_file.h"
 
@@ -389,6 +390,33 @@ int main(int argc, char** argv) {
         // 清回已知状态，避免影响上面对 recovery.txt 的其他断言顺序。
         neo::settings::clearRecovery();
     }
+
+    check(neo::settings::current().automaticUpdateCheck && neo::settings::current().lastUpdateCheck == 0,
+          "existing settings default to update notices enabled and no last check");
+    data.automaticUpdateCheck = false;
+    data.lastUpdateCheck = 123456;
+    check(neo::settings::flush() &&
+              readBytes(settingsIni).find("automatic_update_check=0\nlast_update_check=123456\n") != std::string::npos,
+          "update opt-out and the last check are persisted together");
+
+    const std::string release = R"({"tag_name":"neoeditor-v0.2.10","draft":false,"prerelease":false,)"
+        R"("assets":[{"name":"EUI-Edits-0.2.10-windows-x64.exe","state":"uploaded"}]})";
+    check(neo::updates::newerStableRelease(release, "0.2.9") == "0.2.10" &&
+              neo::updates::newerStableRelease(release, "0.2.10-rc.1") == "0.2.10" &&
+              neo::updates::newerStableRelease(release, "0.2.10").empty() &&
+              neo::updates::newerStableRelease(release, "0.3.0").empty(),
+          "update notices compare numeric versions and stable beats its own prerelease");
+    auto other = release;
+    other.replace(other.find("\"prerelease\":false"), 18, "\"prerelease\":true");
+    check(neo::updates::newerStableRelease(other, "0.2.9").empty(), "prerelease response is ignored");
+    other = release;
+    other.replace(other.find("windows-x64"), 11, "windows-arm64");
+    check(neo::updates::newerStableRelease(other, "0.2.9").empty() &&
+              neo::updates::newerStableRelease("{broken", "0.2.9").empty(),
+          "an incompatible asset or malformed metadata produces no notice");
+    check(neo::updates::checkDue(0, 100) && neo::updates::checkDue(200, 100) &&
+              !neo::updates::checkDue(100, 86499) && neo::updates::checkDue(100, 86500),
+          "update checks are throttled across launches and handle a clock correction");
 
     fs::remove_all(root, error);
     if (failures != 0) {

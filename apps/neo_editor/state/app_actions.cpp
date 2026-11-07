@@ -518,21 +518,23 @@ bool convertDocumentToUtf8(AppState& state) {
     return true;
 }
 
-bool requestCloseDocument(AppState& state) {
+static bool requestWindowClose(AppState& state, bool discardAll) {
     if (state.closeApproved) return true;
     if (state.sessionClosePending) return false; // repeated WM_CLOSE must not reopen the editable tree
     if (documentModalOpen(state)) return false;
     state.settingsOpen = false;
-    state.exitClosing = true;
-    for (const auto id : state.tabOrder) {
-        const auto* document = documentTab(state, id);
-        if (!document || !document->dirty() || document->suppressRecovery) continue;
-        activateDocumentTabInternal(state, id);
-        state.pending = PendingAction::CloseWindow; state.confirmationTabId = id;
-        state.safetyChoice = 2; state.openMenu = MenuKind::None; state.tabListOpen = false;
-        app::requestUpdate(); return false;
+    if (!discardAll) {
+        for (const auto id : state.tabOrder) {
+            const auto* document = documentTab(state, id);
+            if (!document || !document->dirty() || document->suppressRecovery) continue;
+            state.exitClosing = true;
+            activateDocumentTabInternal(state, id);
+            state.pending = PendingAction::CloseWindow; state.confirmationTabId = id;
+            state.safetyChoice = 2; state.openMenu = MenuKind::None; state.tabListOpen = false;
+            app::requestUpdate();
+            return false;
+        }
     }
-    state.exitClosing = false;
     if (state.sessionStorageBlocked) {
         // Startup could not validate this recovery store. No writes are accepted
         // for it, and normal closing must not erase the only remaining manuscript
@@ -569,6 +571,17 @@ bool requestCloseDocument(AppState& state) {
     }
     app::requestUpdate();
     return state.closeApproved; // inline tests can complete before returning
+}
+
+bool requestCloseDocument(AppState& state) {
+    return requestWindowClose(state, false);
+}
+
+void discardAllAndClose(AppState& state) {
+    if (state.pending == PendingAction::CloseWindow && !state.saveConflictOpen) {
+        cancelPending(state);
+    }
+    requestWindowClose(state, true);
 }
 
 void resolveDocumentConfirmation(AppState& state, filesafety::UnsavedChoice choice) {
@@ -1648,7 +1661,7 @@ void performPending(AppState& state, PendingAction action) {
     }
 }
 
-void persistSettings(const AppState& state) {
+bool persistSettings(const AppState& state) {
     settings::Data& data = settings::current();
     // 文档库不是常驻仓库（2026-09-26 口径）：vault 由当前文档决定，不落盘。
     // 这里显式清空，免得早前版本残留在 settings.ini 里的旧库根继续误导启动逻辑。
@@ -1670,7 +1683,7 @@ void persistSettings(const AppState& state) {
     data.theme = state.themeFollowSystem ? 2 : static_cast<int>(state.theme);
     data.uiStyle = static_cast<int>(state.uiStyle);
     data.lastThemeFile = state.themeFile;
-    settings::flush();
+    return settings::flush();
 }
 
 void applyUiScale(AppState& state, float scale) {
@@ -1713,10 +1726,6 @@ void applyThemePreference(AppState& state, bool followSystem, ThemeMode mode) {
     // 颜色是画的时候烘进图元的，保留层里的旧色必须整屏作废——与换字体同理。
     app::requestUpdate();
     app::detail::requestFullPaint();
-    // 剩余项（T13 第一阶段不做，见报告）：Live Preview 的装饰缓存键
-    // lp::DecorationCache::theme 目前只吃 ThemeMode 枚举，还没吃 themeRevision() ——
-    // 深浅切换因此是好的，但"换主题文件、外观侧不变"时行内装饰要等下次键变才刷新。
-    // 补法是在 lp_decorations.h 的缓存键里加一列 themeRevision（那是 T5 在改的文件）。
 }
 
 void applyTheme(AppState& state, ThemeMode mode) {
@@ -1840,38 +1849,49 @@ void refreshFileAssocState(AppState& state) {
     for(const auto& type:state.associationStatuses) {if(type.extension=="txt") state.fileAssocDefaults.txt=type.defaultApp;if(type.extension=="md") state.fileAssocDefaults.md=type.defaultApp;}
 }
 
-void resetViewSettings(AppState& state) {
-    // 与 settings::Data 的默认值保持一处定义；只恢复视觉和编辑偏好。
-    // 文档、最近文件、恢复副本与 Windows 文件关联不属于此操作。
+void resetSettingsCategory(AppState& state, SettingsCategory category) {
+    if (category != SettingsCategory::Appearance && category != SettingsCategory::Editor) return;
     const settings::Data defaults;
-    state.mode = static_cast<EditorMode>(defaults.mode);
-    state.showStatusBar = defaults.showStatusBar;
-    state.showLineNumbers = defaults.lineNumbers;
-    state.readableWidth = defaults.readableWidth;
-    state.autoCompactWindow = defaults.autoCompactWindow;
-    state.compactWindow = false;
-    state.vaultWidth = defaults.vaultWidth;
-    state.editorFontSize = defaults.editorFontSize;
-    state.uiFontSize = defaults.uiFontSize;
-    state.uiScale = defaults.uiScale;
-    state.animations = defaults.animations;
-    state.editorFontFile = defaults.editorFontFile;
-    state.uiFontFile = defaults.uiFontFile;
-    state.codeFontFile = defaults.codeFontFile;
-    // 主题文件一并回内置。必须排在下面那句 clearColor 之前：editorColors() 按
-    // themeRevision() 失效，先 reset 才能取到内置配色的窗口底色。
-    themeloader::reset();
-    state.themeFile = defaults.lastThemeFile;
-    state.themeFollowSystem = defaults.theme == 2;
-    state.theme = defaults.theme == 1 ? ThemeMode::Light
-                : defaults.theme == 0 ? ThemeMode::Dark
-                                      : (settings::systemThemePrefersLight() ? ThemeMode::Light
-                                                                             : ThemeMode::Dark);
-    mutableAppConfig().uiScaleValue = state.uiScale;
-    mutableAppConfig().clearColorValue = editorColors().window;
-    // 界面字体一并回到框架默认。
-    core::TextPrimitive::setDefaultFontFiles(uiFontFamily(state), "");
-    persistSettings(state);
+    const bool appearance = category == SettingsCategory::Appearance;
+    settings::Data next = settings::current();
+    next.editorFontFile = appearance ? state.editorFontFile : defaults.editorFontFile;
+    next.codeFontFile = appearance ? state.codeFontFile : defaults.codeFontFile;
+    next.uiFontFile = appearance ? defaults.uiFontFile : state.uiFontFile;
+    std::string error;
+    if (!fontsafety::armSession(next, error)) {
+        showToast(state, i18n::tr("safety.font_unchanged"), error);
+        return;
+    }
+    if (appearance) {
+        i18n::setPreference(defaults.uiLanguage);
+        state.uiFontSize = defaults.uiFontSize;
+        state.uiScale = defaults.uiScale;
+        state.animations = defaults.animations;
+        state.uiFontFile = defaults.uiFontFile;
+        state.uiStyle = static_cast<UiStyle>(defaults.uiStyle);
+        setUiStyle(state.uiStyle);
+        platform::chrome::setSquareCorners(state.uiStyle == UiStyle::Square);
+        themeloader::reset();
+        state.themeFile = defaults.lastThemeFile;
+        state.themeFollowSystem = defaults.theme == 2;
+        state.theme = defaults.theme == 1 ? ThemeMode::Light
+                    : defaults.theme == 0 ? ThemeMode::Dark
+                    : (settings::systemThemePrefersLight() ? ThemeMode::Light : ThemeMode::Dark);
+        mutableAppConfig().uiScaleValue = state.uiScale;
+        mutableAppConfig().clearColorValue = editorColors().window;
+        core::TextPrimitive::setDefaultFontFiles(uiFontFamily(state), "");
+    } else {
+        state.mode = static_cast<EditorMode>(defaults.mode);
+        state.showStatusBar = defaults.showStatusBar;
+        state.showLineNumbers = defaults.lineNumbers;
+        state.readableWidth = defaults.readableWidth;
+        state.autoCompactWindow = defaults.autoCompactWindow;
+        state.compactWindow = false;
+        state.editorFontSize = defaults.editorFontSize;
+        state.editorFontFile = defaults.editorFontFile;
+        state.codeFontFile = defaults.codeFontFile;
+    }
+    if (!persistSettings(state)) showToast(state, i18n::tr("settings.reset_session_only"), {});
     app::requestUpdate();
     app::detail::requestFullPaint();
 }

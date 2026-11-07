@@ -13,6 +13,7 @@
 #include "eui/json.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -266,6 +267,14 @@ Data& current() {
                     loaded.readableWidth = value != "0";
                 } else if (key == "auto_compact_window") {
                     loaded.autoCompactWindow = value != "0";
+                } else if (key == "automatic_update_check") {
+                    loaded.automaticUpdateCheck = value != "0";
+                } else if (key == "last_update_check") {
+                    std::int64_t timestamp = 0;
+                    const auto end = value.data() + value.size();
+                    const auto parsed = std::from_chars(value.data(), end, timestamp);
+                    if (parsed.ec == std::errc{} && parsed.ptr == end && timestamp > 0)
+                        loaded.lastUpdateCheck = timestamp;
                 } else if (key == "animations") {
                     loaded.animations = value != "0";
                 } else if (key == "attachment_mode") {
@@ -329,6 +338,8 @@ bool flush() {
     if (!data.lastThemeFile.empty()) {
         output << "last_theme_file=" << data.lastThemeFile << '\n';
     }
+    if (!data.automaticUpdateCheck) output << "automatic_update_check=0\n";
+    if (data.lastUpdateCheck > 0) output << "last_update_check=" << data.lastUpdateCheck << '\n';
     return atomicwrite::writeFile(settingsFile(), output.str());
 }
 

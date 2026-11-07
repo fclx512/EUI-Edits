@@ -50,9 +50,9 @@ Markdown covers common writing syntax and some extensions; full Obsidian compati
 
 ## Getting started
 
-Download `EUI-Edits-<version>-windows-x64.exe` from the [releases page](https://github.com/fclx512/EUI-Edits/releases) and run it directly. No resource folder needs unpacking. This README describes the 0.2.3 source; available downloads are listed on the releases page. The unsigned app targets Windows 10/11 x64; The user reports successful testing on another Windows 10 computer; low-end hardware and mixed-DPI testing are no longer pending requirements for this menu work.
+Download `EUI-Edits-<version>-windows-x64.exe` from the [releases page](https://github.com/fclx512/EUI-Edits/releases) and run it directly. No resource folder needs unpacking. This README describes the 0.2.4 source; available downloads are listed on the releases page. The unsigned app targets Windows 10/11 x64; The user reports successful testing on another Windows 10 computer; low-end hardware and mixed-DPI testing are no longer pending requirements for this menu work.
 
-**0.2.3 update:** Images open in independent read-only tabs with switching, closing, reordering, and per-tab zoom/pan. Bottom controls provide zoom out, scale, zoom in, and Fit window. Plain-text and source-file context menus retain only general editing actions. Win10-style menus slide within a fixed clip and switch row highlights immediately; Win11 uses a short floating entrance and adjacent highlight motion. Direct2D reuses consecutive identical clip settings to avoid redundant operations. A local release candidate is being prepared; available downloads are listed on the releases page. See the [release notes](apps/neo_editor/RELEASE-NOTES.md).
+**0.2.4 pre-release:** Settings gain purpose-based groups, font search, actual-size samples, and category-specific defaults. This release also improves the theme workspace, file associations, background stable-release notices, and exit confirmation. See the [release notes](apps/neo_editor/RELEASE-NOTES.md) for details and scope.
 
 ### Common actions
 
@@ -62,6 +62,7 @@ Download `EUI-Edits-<version>-windows-x64.exe` from the [releases page](https://
 | New Markdown | "File → New → Markdown" |
 | Save / Save As | `Ctrl+S` / `Ctrl+Shift+S` |
 | Close current tab | `Ctrl+W`; modified content prompts for save, discard, or cancel |
+| Exit | Choose **Discard & exit** to drop all unsaved document and theme changes at once. Saving still prompts for each item. |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Go to tab | `Ctrl+1`–`Ctrl+8` select the matching tab, `Ctrl+9` the last |
 | Find / replace | `Ctrl+F` / `Ctrl+H`; enable selection scope in find options |
@@ -92,11 +93,15 @@ Settings live in the current Windows user's profile and do not move with the EXE
 
 After an abnormal exit, recovered content opens as separate drafts without automatically overwriting original files. A normal exit clears the recovery session after save or discard confirmations, so all tabs do not automatically reopen next time. Recovery copies are periodic, not per-keystroke saves; save important work yourself.
 
-"Settings → Files & system" registers Open-with entries for the current user, initially selecting TXT and Markdown. It shows selected, pending-add, and pending-remove counts; "Select recommended" excludes HTML, Shell, batch, and PowerShell files. Choose the default app separately in Windows. Moving or renaming the EXE requires registering associations again. Script files are edited as text; their code is not executed.
+Use Settings → Files & system to add TXT and Markdown to Open with. Choose other formats under Customize file types. Set double-click defaults in Windows. The editor refreshes the status when you return. After moving or renaming the EXE, launch it from its new location and choose Repair open path. Script files are edited as text.
 
 ## Appearance and personalization
 
 Most settings take effect immediately and persist across launches:
+
+Appearance and Editor settings are grouped by purpose, with row heights that fit their text. Find the interface font under Appearance → Interface size, and body and code fonts under Editor → Text & typography. Samples beside the size controls update with the current fonts and sizes.
+
+Search fonts by name or filename, clear the filter, and view the result count. Restore defaults in Appearance or Editor resets only that category, with its scope shown before confirmation. Documents, recent files, and file associations are kept.
 
 | Option | Choices |
 | --- | --- |
@@ -111,11 +116,15 @@ The status bar shows file location, syntax mode, encoding, line endings, line co
 
 Interface style and color are independent axes: switching light/dark or a theme file does not change the corners, and switching rounded/square does not change colors.
 
-**The local theme workspace is a beta feature.** Open "Settings → Appearance → Theme library" to view a sample on the left and edit colors or typography on the right. Each light/dark side has 26 colors. It supports local palette generation, per-color locks, undo/redo, comparison with the baseline, and saving a new theme. Typography controls include line spacing, paragraph spacing, and heading scales.
+**The local theme workspace is a beta feature.** Open "Settings → Appearance → Theme library" to view a sample on the left and edit colors or typography on the right. **Try another color** changes the seed hue and previews a candidate. Hue, saturation, and brightness affect the generated palettes. Select a candidate to adopt it. Each light/dark side has 26 colors. It supports local palette generation, per-color locks, undo/redo, comparison with the baseline, and saving a new theme. Typography controls include line spacing, paragraph spacing, and heading scales.
 
 JSON or CSS imports are reviewed before creating a draft; files can also be placed in the `themes` folder above. Saved themes persist across launches; unsaved drafts and their undo history do not.
 
 For Obsidian themes, select `manifest.json` with a sibling `theme.css`, or select CSS directly. Import maps recognizable colors only, never executes CSS, and does not promise the original layout or plugin styles. Built-in colors remain available.
+
+## Update notices
+
+The editor checks GitHub for a stable release about five seconds after launch, at most once every 24 hours. A notice offers **Open release page** and **Later**. Downloads are available from the release page. Turn off notices in **Settings → About**.
 
 ## Resource use
 

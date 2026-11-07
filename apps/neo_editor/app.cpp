@@ -27,6 +27,7 @@
 #include "ui/settings_transition.h"
 #include "ui/window_layout.h"
 #include "ui/status_bar.h"
+#include "ui/update_hint.h"
 #include "ui/vault_menu.h"
 #include "ui/vault_view.h"
 
@@ -284,7 +285,12 @@ void handleShortcut(neo::AppState& state, const eui::KeyEvent& event) {
                     state.markdownHeadingMenuOpen = false;
                     requestUpdate();
                 } else if (state.settingsOpen) {
-                    neo::popup_presentation::setSettingsOpen(state, false);
+                    if (state.associationCustomOpen) {
+                        state.associationCustomOpen = false;
+                        state.settingsScroll = 0.0f;
+                    } else {
+                        neo::popup_presentation::setSettingsOpen(state, false);
+                    }
                     requestUpdate();
                 } else if (state.contextMenuOpen || state.vaultContextMenuOpen) {
                     state.contextMenuOpen = false;
@@ -436,15 +442,7 @@ DslAppConfig& appConfigStorage() {
             // 设置面板那行照样显示它，用户可以"更换"或点"内置"清掉。
             state.themeFile = savedThemeFile;
             std::string themeError;
-            if (neo::themeloader::load(savedThemeFile, themeError)) {
-                // 主题只覆盖 base 那一侧的配色，外观跟着切过去（正常情况下
-                // persistSettings 落的 theme 已经等于它，这里兜住手改 settings.ini）。
-                if (!state.themeFollowSystem &&
-                    neo::activeTheme().version == neo::themeloader::kSchemaVersion) {
-                    state.theme = neo::activeTheme().baseLight ? neo::ThemeMode::Light
-                                                              : neo::ThemeMode::Dark;
-                }
-            } else {
+            if (!neo::themeloader::load(savedThemeFile, themeError)) {
                 neo::showToast(state, neo::i18n::tr("safety.theme_unavailable"), themeError);
             }
         }
@@ -485,8 +483,8 @@ DslAppConfig& appConfigStorage() {
                 // re-enter WM_CLOSE without requiring the theme decision again.
                 // Cancelling that transaction clears exitClosing, so a later
                 // independent close still checks retained theme drafts.
-                if (!state.closeApproved && !state.sessionClosePending && !state.exitClosing &&
-                    !neo::allowThemeWorkbenchWindowClose(state)) return false;
+                if (!state.closeApproved && neo::documentModalOpen(state)) return false;
+                if (!state.closeApproved && !neo::allowThemeWorkbenchWindowClose(state)) return false;
                 return neo::requestCloseDocument(state);
             })
             .onShutdown([] {
@@ -617,6 +615,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
     appearance.watch(core::window::nativeWindowInfo(core::window::mainWindowHandle()).platformWindow,
                      [] { app::requestUpdate(); });
     if (appearance.consumeChange()) neo::refreshSystemTheme(state);
+    if (std::exchange(state.associationRefreshPending, false)) neo::refreshFileAssocState(state);
     const neo::EditorColors& colors = neo::editorColors();
     const neo::UiMetrics metrics = neo::uiMetrics(state);
     if (state.sessionClosePending) {
@@ -895,6 +894,7 @@ void compose(eui::Ui& ui, const eui::Screen& screen) {
                 neo::languageOverlay(ui,state,screen);
             });
             neo::windowChromeView(ui,screen,chromeHeight);
+            neo::updateHint(ui, state, screen, neo::themeWorkbenchOpen());
         })
         .build();
     neo::protectWindowOverlayChrome(state, screen);

@@ -61,26 +61,6 @@ inline std::string aboutIconPath(float physicalSize) {
     return paths[selected];
 }
 
-inline const char* aboutWindowBackend() {
-#if defined(EUI_WINDOW_BACKEND_WIN32)
-    return "Win32";
-#elif defined(EUI_WINDOW_BACKEND_SDL2)
-    return "SDL2";
-#else
-    return "GLFW";
-#endif
-}
-
-inline const char* aboutRenderBackend() {
-#if defined(EUI_RENDER_BACKEND_D2D)
-    return "Direct2D";
-#elif defined(EUI_RENDER_BACKEND_VULKAN)
-    return "Vulkan";
-#else
-    return "OpenGL";
-#endif
-}
-
 inline void aboutPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
                       const UiMetrics& metrics, float width, float inset,
                       float availableHeight) {
@@ -89,7 +69,6 @@ inline void aboutPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
     const float labelSize = metrics.panelFontSize;
     const float hintSize = metrics.panelHintFontSize;
     const float brandSize = metrics.pageTitleFontSize;
-    const float sloganSize = metrics.panelLabelFontSize + 4.0f;
     const float padding = std::min(22.0f, width * .08f);
     const float inner = std::max(1.0f, width - padding * 2.0f);
     const float gap = 12.0f;
@@ -129,101 +108,134 @@ inline void aboutPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
             .onClick(std::move(action)).transition(quickTransition()).build();
     };
 
-    // Measure the localized text at the current UI font and available width. The
-    // same dimensions drive drawing and scroll extent, including enlarged fonts.
+    static constexpr char repository[] = "https://github.com/fclx512/EUI-Edits";
+    static constexpr char frameworkRepository[] = "https://github.com/sudoevolve/EUI-NEO";
+    const auto openLink = [&state](const char* url) {
+        if (!core::platform::openUrl(url)) {
+            showToast(state, i18n::tr("safety.link_failed"), url);
+            app::requestUpdate();
+        }
+    };
+
+    const std::string repositoryLabel = std::string(i18n::tr("about.repository")) + "  ↗";
+    const std::string slogan = i18n::tr("about.slogan");
     const float logoSize = std::max(48.0f, labelSize * 3.4f);
-    const bool stackedBrand = inner < logoSize + 16.0f + textWidth("EUI-Edits", brandSize, 600);
-    const float brandX = stackedBrand ? padding : padding + logoSize + 14.0f;
-    const float brandWidth = stackedBrand ? inner : std::max(1.0f, inner - logoSize - 14.0f);
-    const float brandY = padding + (stackedBrand ? logoSize + 10.0f : 0.0f);
+    const float repositoryW = buttonWidth(repositoryLabel);
+    const float brandTextW = std::max(textWidth("EUI-Edits", brandSize, 600), textWidth(slogan, labelSize, 600));
+    const bool logoAbove = inner < logoSize + 14.0f + textWidth("EUI-Edits", brandSize, 600);
+    const float logoSpace = logoAbove ? 0.0f : logoSize + 14.0f;
+    const bool repositoryBelow = logoAbove || inner < logoSpace + brandTextW + gap + repositoryW;
+    const float brandWidth = std::max(1.0f, inner - logoSpace - (repositoryBelow ? 0.0f : gap + repositoryW));
     const float nameHeight = textHeight("EUI-Edits", brandSize, brandWidth, 600);
-    const float platformY = brandY + nameHeight + 3.0f;
-    const float platformHeight = textHeight(i18n::tr("about.platform"), hintSize, brandWidth);
-    const float sloganY = std::max(padding + logoSize, platformY + platformHeight) + 18.0f;
-    const std::string lead = i18n::tr("about.slogan_lead"), end = i18n::tr("about.slogan_end");
-    const float leadW = textWidth(lead, sloganSize, 600) + 6.0f;
-    const bool stackedSlogan = leadW + textWidth(end, sloganSize, 600) > inner;
-    const float leadH = textHeight(lead, sloganSize, stackedSlogan ? inner : leadW, 600);
-    const float endW = stackedSlogan ? inner : std::max(1.0f, inner - leadW);
-    const float endH = textHeight(end, sloganSize, endW, 600);
-    const float sloganHeight = stackedSlogan ? leadH + endH : std::max(leadH, endH);
-    const float descriptionY = sloganY + sloganHeight + 8.0f;
-    const float heroHeight = descriptionY + textHeight(i18n::tr("about.description"), hintSize, inner) + padding;
+    const float brandHeight = nameHeight + 2.0f + textHeight(slogan, labelSize, brandWidth, 600);
+    const float heroHeaderH = logoAbove ? logoSize + gap + brandHeight : std::max(logoSize, brandHeight);
+    const float brandY = padding + (logoAbove ? logoSize + gap : (heroHeaderH - brandHeight) * .5f);
+    const float logoY = padding + (logoAbove ? 0.0f : (heroHeaderH - logoSize) * .5f);
+    const float repositoryY = padding + (repositoryBelow ? heroHeaderH + gap : (heroHeaderH - buttonHeight) * .5f);
+    const float heroHeight = padding * 2.0f + heroHeaderH + (repositoryBelow ? gap + buttonHeight : 0.0f);
 
-    struct Feature { const char* title; const char* hint; UiIcon icon; };
-    const std::array<Feature, 4> features{{
-        {"about.markdown", "about.markdown_hint", UiIcon::MarkdownFile},
-        {"about.text", "about.text_hint", UiIcon::CodeFile},
-        {"about.library", "about.library_hint", UiIcon::FolderOpen},
-        {"about.appearance", "about.appearance_hint", UiIcon::Sliders}
+    struct FileKind { UiIcon icon; eui::Color color; std::array<const char*, 3> formats; };
+    const std::array<FileKind, 6> fileKinds{{
+        {UiIcon::MarkdownFile, colors.iconMd, {".md", ".markdown"}},
+        {UiIcon::TextFile, colors.iconTxt, {".txt", ".log", ".csv"}},
+        {UiIcon::CodeFile, colors.iconCode, {".cpp", ".py", ".js"}},
+        {UiIcon::DataFile, colors.iconData, {".json", ".yaml", ".toml"}},
+        {UiIcon::ImageFile, colors.accent, {".png", ".jpg", ".bmp"}},
+        {UiIcon::File, colors.textMuted, {"README", "LICENSE"}}
     }};
-    float minFeatureWidth = 0;
-    for (const auto& feature : features) {
-        minFeatureWidth = std::max(minFeatureWidth, std::max(textWidth(i18n::tr(feature.title), labelSize),
-                                    textWidth(i18n::tr(feature.hint), hintSize)) + 24.0f);
+    constexpr float pillGap = 4.0f;
+    constexpr float iconGap = 7.0f;
+    const float minCellWidth = std::max(96.0f, textWidth(".markdown", hintSize, 600) + 24.0f);
+    const int columns = inner >= minCellWidth * 6 ? 6 : inner >= minCellWidth * 3 ? 3 : 2;
+    const int rows = static_cast<int>(fileKinds.size()) / columns;
+    const float cellW = inner / columns;
+    const float pillAreaW = std::max(1.0f, cellW - pillGap * 2.0f);
+    const float fileIconSize = std::max(30.0f, labelSize * 1.8f);
+
+    struct PillLayout { const char* label = nullptr; float x = 0, width = 0; int row = 0; };
+    std::array<std::array<PillLayout, 3>, 6> filePills{};
+    std::array<float, 3> rowHeights{};
+    for (std::size_t i = 0; i < fileKinds.size(); ++i) {
+        std::array<float, 3> lineWidths{};
+        int line = 0;
+        for (std::size_t j = 0; j < fileKinds[i].formats.size(); ++j) {
+            const char* format = fileKinds[i].formats[j];
+            if (!format) break;
+            const float pillW = std::min(pillAreaW, textWidth(format, hintSize, 600) + 12.0f);
+            if (lineWidths[line] > 0 && lineWidths[line] + pillGap + pillW > pillAreaW) ++line;
+            const float x = lineWidths[line] > 0 ? lineWidths[line] + pillGap : 0.0f;
+            filePills[i][j] = {format, x, pillW, line};
+            lineWidths[line] = x + pillW;
+        }
+        for (auto& pill : filePills[i]) {
+            if (pill.label) pill.x += (cellW - lineWidths[pill.row]) * .5f;
+        }
+        const float height = fileIconSize + iconGap + (line + 1) * kFileFormatPillHeight + line * pillGap;
+        auto& rowHeight = rowHeights[i / columns];
+        rowHeight = std::max(rowHeight, height);
     }
-    const int columns = width >= minFeatureWidth * 4 ? 4 : width >= minFeatureWidth * 2 ? 2 : 1;
-    const int rows = 4 / columns;
-    const float cellW = width / columns;
-    const float featureIconSize = std::max(22.0f, labelSize * 1.5f);
-    const float cellTextW = std::max(1.0f, cellW - 24.0f);
-    std::array<float, 4> rowHeights{};
-    for (int i = 0; i < 4; ++i) {
-        rowHeights[i / columns] = std::max(rowHeights[i / columns], featureIconSize + 9.0f +
-            textHeight(i18n::tr(features[i].title), labelSize, cellTextW) + 4.0f +
-            textHeight(i18n::tr(features[i].hint), hintSize, cellTextW));
+    const float filesY = heroHeight + gap;
+    const float filesGridY = filesY + padding;
+    float filesHeight = padding * 2.0f + (rows - 1) * gap;
+    for (int row = 0; row < rows; ++row) filesHeight += rowHeights[row];
+    const float versionY = filesY + filesHeight + gap;
+
+    struct RowLayout {
+        float height, textW, labelH, buttonX, buttonY, buttonW;
+    };
+    const auto layoutRow = [&](const std::string& label, const std::string& value, const std::string& action) {
+        const float actionW = buttonWidth(action);
+        const float labelW = std::max(textWidth(label, hintSize), textWidth(value, labelSize + 4.0f, 600));
+        const bool stacked = inner < actionW + labelW + gap;
+        const float available = stacked ? inner : inner - actionW - gap;
+        const float labelH = textHeight(label, hintSize, available);
+        const float textH = labelH + 4.0f + textHeight(value, labelSize + 4.0f, available, 600);
+        const float contentH = stacked ? textH + gap + buttonHeight : std::max(textH, buttonHeight);
+        return RowLayout{padding * 2.0f + contentH, available, labelH,
+                         stacked ? padding : width - padding - actionW,
+                         padding + (stacked ? textH + gap : (contentH - buttonHeight) * .5f), actionW};
+    };
+    const auto drawRow = [&](const std::string& id, float y, const std::string& label, const std::string& value,
+                             const std::string& action, const RowLayout& layout,
+                             std::function<void()> callback) {
+        card(id + ".card", y, layout.height);
+        text(id + ".label", label, padding, y + padding, layout.textW, hintSize, colors.textMuted);
+        text(id + ".value", value, padding, y + padding + layout.labelH + 4.0f, layout.textW,
+             labelSize + 4.0f, colors.text, 600);
+        button(id + ".action", action, layout.buttonX, y + layout.buttonY, layout.buttonW, std::move(callback));
+    };
+
+    const std::string versionLabel = i18n::tr("about.current_version");
+    const std::string updateLabel = i18n::tr(settings::current().automaticUpdateCheck
+        ? "about.update_on" : "about.update_off");
+    const auto versionLayout = layoutRow(versionLabel, version::kVersion, updateLabel);
+    const std::string licenseLabel = i18n::tr("about.licenses_title");
+    const std::string licenseAction = i18n::tr("about.licenses_button");
+    const auto licenseLayout = layoutRow(licenseLabel, "Apache-2.0", licenseAction);
+    const float licenseY = versionY + versionLayout.height + gap;
+
+    const std::string techTitle = i18n::tr("about.tech_title");
+    const std::string frameworkAction = std::string(i18n::tr("about.framework_link")) + "  ↗";
+    const float frameworkButtonW = buttonWidth(frameworkAction);
+    const bool frameworkButtonBelow = inner < textWidth(techTitle, labelSize + 4.0f, 600) + gap + frameworkButtonW;
+    const float techTitleW = frameworkButtonBelow ? inner : inner - frameworkButtonW - gap;
+    const float techTitleH = textHeight(techTitle, labelSize + 4.0f, techTitleW, 600);
+    const float techHeaderH = frameworkButtonBelow ? techTitleH + gap + buttonHeight : std::max(techTitleH, buttonHeight);
+    const float techY = licenseY + licenseLayout.height + gap;
+    const float techBodyY = techY + padding + techHeaderH + gap;
+    struct TechSection { const char* title; const char* body; };
+    const std::array<TechSection, 3> techSections{{
+        {i18n::tr("about.tech_native"), i18n::tr("about.tech_native_body")},
+        {i18n::tr("about.tech_render"), i18n::tr("about.tech_render_body")},
+        {i18n::tr("about.tech_markdown"), i18n::tr("about.tech_markdown_body")}
+    }};
+    float techBottom = techBodyY;
+    for (const auto& section : techSections) {
+        techBottom += textHeight(section.title, labelSize, inner, 600) + 3.0f
+            + textHeight(section.body, labelSize, inner) + gap;
     }
-    const float featureY = heroHeight + 22.0f;
-    float featureHeight = 0;
-    for (int row = 0; row < rows; ++row) featureHeight += rowHeights[row] + (row ? 16.0f : 0.0f);
-
-    const std::string frameworkStack = i18n::format("about.framework_stack", {
-        {"window_backend", aboutWindowBackend()}, {"render_backend", aboutRenderBackend()}});
-    const std::string frameworkBody = std::string(i18n::tr("about.framework_description")) + "\n" + frameworkStack;
-    const std::string euiLinkLabel = std::string(i18n::tr("about.framework_link")) + "  ↗";
-    const float euiButtonW = buttonWidth(euiLinkLabel);
-    const float euiHeadH = hintSize + 6.0f + 4.0f + textHeight("EUI-NEO", metrics.panelLabelFontSize, inner, 600);
-    const bool stackedEui = inner < euiButtonW + std::max(textWidth("EUI-NEO", metrics.panelLabelFontSize, 600),
-                                                 textWidth(i18n::tr("about.framework"), hintSize)) + 24.0f;
-    const float euiY = featureY + featureHeight + 22.0f;
-    const float euiBodyY = euiY + padding + std::max(euiHeadH, stackedEui ? 0.0f : buttonHeight) + 10.0f;
-    const float euiBodyH = textHeight(frameworkBody, hintSize, inner);
-    const float euiButtonY = stackedEui ? euiBodyY + euiBodyH + 12.0f
-                                      : euiY + padding + (euiHeadH - buttonHeight) * .5f;
-    const float euiHeight = (stackedEui ? euiButtonY + buttonHeight : euiBodyY + euiBodyH) - euiY + padding;
-
-    const std::string copyLabel = i18n::tr("about.copy_version");
-    const float copyW = buttonWidth(copyLabel);
-    const bool stackedVersion = inner < copyW + std::max(textWidth(version::kVersion, labelSize + 4.0f, 600),
-                                                  textWidth(i18n::tr("about.current_version"), hintSize)) + 24.0f;
-    const float versionY = euiY + euiHeight + gap;
-    const float versionTextW = stackedVersion ? inner : std::max(1.0f, inner - copyW - 20.0f);
-    const float versionLabelH = textHeight(i18n::tr("about.current_version"), hintSize, versionTextW);
-    const float versionValueH = textHeight(version::kVersion, labelSize + 4.0f, versionTextW, 600);
-    const float versionHeadH = versionLabelH + 4.0f + versionValueH;
-    const float copyY = versionY + padding + (stackedVersion ? versionHeadH + 12.0f : (versionHeadH-buttonHeight)*.5f);
-    const float versionHeight = padding * 2.0f + std::max(versionHeadH, buttonHeight) +
-                                (stackedVersion ? buttonHeight + 12.0f : 0.0f);
-
-    const std::string licenseLabel = i18n::tr("about.licenses_button");
-    const float licenseButtonW = buttonWidth(licenseLabel);
-    const float licenseY = versionY + versionHeight + gap;
-    const bool stackedLicense = inner < licenseButtonW + std::max(
-        textWidth(i18n::tr("about.licenses_title"), labelSize, 600),
-        textWidth(i18n::tr("about.licenses_hint"), hintSize)) + 24.0f;
-    const float licenseTextW = stackedLicense ? inner : inner-licenseButtonW-20.0f;
-    const float licenseTitleH = textHeight(i18n::tr("about.licenses_title"), labelSize, licenseTextW, 600);
-    const float licenseHintY = licenseY + padding + licenseTitleH + 5.0f;
-    const float licenseHintH = textHeight(i18n::tr("about.licenses_hint"), hintSize, licenseTextW);
-    const float licenseHeadH = licenseTitleH + 5.0f + licenseHintH;
-    const float licenseButtonY = licenseY + padding + (stackedLicense ? licenseHeadH + 14.0f
-                                                                     : (licenseHeadH-buttonHeight)*.5f);
-    const float licenseHeight = padding*2 + std::max(licenseHeadH, buttonHeight) +
-                                (stackedLicense ? buttonHeight+14.0f : 0.0f);
-    const float footerY = licenseY + licenseHeight + 18.0f;
-    const float footerHeight = textHeight(i18n::tr("about.footer"), hintSize, inner) +
-                               textHeight("EUI-Edits · Apache-2.0", hintSize, inner) + 4.0f;
-    const float contentHeight = footerY + footerHeight + 18.0f;
+    const float techHeight = techBottom - gap + padding - techY;
+    const float contentHeight = techY + techHeight + gap;
     const float scrollTop = 18.0f;
     const float scrollHeight = std::max(0.0f, availableHeight - scrollTop - 18.0f);
     const float maxOffset = std::max(0.0f, contentHeight - scrollHeight);
@@ -242,65 +254,73 @@ inline void aboutPage(eui::Ui& ui, AppState& state, const EditorColors& colors,
                     card("settings.about.hero", 0, heroHeight, true);
                     const auto logo = aboutIconPath(logoSize * effectiveWindowScale());
                     if (!logo.empty()) {
-                        ui.image("settings.about.icon").position(padding, padding).size(logoSize, logoSize)
+                        ui.image("settings.about.icon").position(padding, logoY).size(logoSize, logoSize)
                             .source(logo).contain().build();
                     } else {
-                        ui.svg("settings.about.icon").position(padding, padding).size(logoSize, logoSize)
+                        ui.svg("settings.about.icon").position(padding, logoY).size(logoSize, logoSize)
                             .source(application_icon::kSvg).build();
                     }
+                    const float brandX = padding + logoSpace;
                     text("settings.about.brand", "EUI-Edits", brandX, brandY, brandWidth, brandSize, colors.text, 600);
-                    text("settings.about.platform", i18n::tr("about.platform"), brandX, platformY, brandWidth, hintSize, colors.textMuted);
-                    text("settings.about.slogan.lead", lead, padding, sloganY, stackedSlogan ? inner : leadW, sloganSize, colors.accent, 600);
-                    text("settings.about.slogan.end", end, padding + (stackedSlogan ? 0 : leadW),
-                         sloganY + (stackedSlogan ? leadH : 0), endW, sloganSize, colors.text, 600);
-                    text("settings.about.description", i18n::tr("about.description"), padding, descriptionY, inner, hintSize, colors.textMuted);
-                    float rowY = featureY;
+                    text("settings.about.slogan", slogan, brandX, brandY + nameHeight + 2.0f,
+                         brandWidth, labelSize, colors.accent, 600);
+                    button("settings.about.repository", repositoryLabel, repositoryBelow ? padding : width - padding - repositoryW,
+                           repositoryY, repositoryW, [openLink] { openLink(repository); }, true);
+
+                    card("settings.about.files.card", filesY, filesHeight);
+                    float rowY = filesGridY;
                     for (int row = 0; row < rows; ++row) {
                         for (int col = 0; col < columns; ++col) {
                             const int i = row * columns + col;
-                            const float x = col * cellW;
-                            const std::string id = "settings.about.feature." + std::to_string(i);
-                            iconView(ui, id + ".icon", features[i].icon, x + (cellW-featureIconSize)*.5f, rowY, featureIconSize, colors.accent);
-                            const float titleY = rowY + featureIconSize + 9.0f;
-                            text(id + ".title", i18n::tr(features[i].title), x + 12, titleY, cellTextW, labelSize, colors.text, 400, eui::HorizontalAlign::Center);
-                            text(id + ".hint", i18n::tr(features[i].hint), x + 12,
-                                 titleY + textHeight(i18n::tr(features[i].title), labelSize, cellTextW) + 4,
-                                 cellTextW, hintSize, colors.textMuted, 400, eui::HorizontalAlign::Center);
-                            if (col + 1 < columns) ui.rect(id + ".rule").position(x + cellW, rowY + 4)
-                                .size(1, std::max(0.0f, rowHeights[row]-8)).color(colors.border).build();
+                            const auto& kind = fileKinds[i];
+                            const float x = padding + col * cellW;
+                            const std::string id = "settings.about.files." + std::to_string(i);
+                            iconView(ui, id + ".icon", kind.icon, x + (cellW - fileIconSize) * .5f,
+                                     rowY, fileIconSize, kind.color);
+                            for (std::size_t j = 0; j < filePills[i].size(); ++j) {
+                                const auto& pill = filePills[i][j];
+                                if (!pill.label) break;
+                                const float pillY = rowY + fileIconSize + iconGap
+                                    + pill.row * (kFileFormatPillHeight + pillGap);
+                                fileFormatPill(ui, id + ".format." + std::to_string(j), pill.label,
+                                               x + pill.x, pillY, pill.width, colors, kind.color, font, hintSize);
+                            }
                         }
-                        rowY += rowHeights[row] + 16.0f;
+                        rowY += rowHeights[row] + gap;
                     }
-                    card("settings.about.eui.card", euiY, euiHeight);
-                    text("settings.about.eui.label", i18n::tr("about.framework"), padding, euiY + padding, inner, hintSize, colors.textMuted);
-                    text("settings.about.eui.name", "EUI-NEO", padding, euiY + padding + hintSize + 10.0f, inner,
-                         metrics.panelLabelFontSize, colors.text, 600);
-                    text("settings.about.eui.body", frameworkBody, padding, euiBodyY, inner, hintSize, colors.textMuted);
-                    button("settings.about.eui.link", euiLinkLabel, stackedEui ? padding : width-padding-euiButtonW,
-                           euiButtonY, euiButtonW, [&state] {
-                               if (!core::platform::openUrl("https://github.com/sudoevolve/EUI-NEO")) {
-                                   showToast(state, i18n::tr("safety.link_failed"), "https://github.com/sudoevolve/EUI-NEO");
-                                   app::requestUpdate();
-                               }
-                           }, true);
-                    card("settings.about.version.card", versionY, versionHeight);
-                    text("settings.about.version.label", i18n::tr("about.current_version"), padding, versionY+padding, versionTextW, hintSize, colors.textMuted);
-                    text("settings.about.version", version::kVersion, padding, versionY+padding+versionLabelH+4,
-                         versionTextW, labelSize+4, colors.text, 600);
-                    button("settings.about.version.copy", copyLabel, stackedVersion ? padding : width-padding-copyW,
-                           copyY, copyW, [&state] {
-                               core::window::setClipboardText(version::kDisplayVersion);
-                               showToast(state, i18n::tr("about.version_copied"), version::kDisplayVersion);
-                               app::requestUpdate();
-                           });
-                    card("settings.about.licenses.card", licenseY, licenseHeight);
-                    text("settings.about.licenses.title", i18n::tr("about.licenses_title"), padding, licenseY+padding, licenseTextW, labelSize, colors.text, 600);
-                    text("settings.about.licenses.hint", i18n::tr("about.licenses_hint"), padding, licenseHintY, licenseTextW, hintSize, colors.textMuted);
-                    button("settings.about.licenses.button", licenseLabel, stackedLicense ? padding : width-padding-licenseButtonW, licenseButtonY, licenseButtonW,
-                           [] { core::platform::showEuiEditsLicenseExportDialog(); });
-                    text("settings.about.footer", i18n::tr("about.footer"), padding, footerY, inner, hintSize, colors.textMuted);
-                    text("settings.about.copyright", "EUI-Edits · Apache-2.0", padding,
-                         footerY + textHeight(i18n::tr("about.footer"), hintSize, inner) + 4.0f, inner, hintSize, colors.textMuted);
+
+                    drawRow("settings.about.version", versionY, versionLabel, version::kVersion, updateLabel,
+                            versionLayout, [&state] {
+                                auto& enabled = settings::current().automaticUpdateCheck;
+                                enabled = !enabled;
+                                if (!settings::flush()) {
+                                    enabled = !enabled;
+                                    showToast(state, i18n::tr("about.update_setting_failed"), {});
+                                }
+                                app::requestUpdate();
+                            });
+                    drawRow("settings.about.licenses", licenseY, licenseLabel, "Apache-2.0", licenseAction,
+                            licenseLayout, [] { core::platform::showEuiEditsLicenseExportDialog(); });
+
+                    card("settings.about.tech.card", techY, techHeight);
+                    const float techHeaderY = techY + padding;
+                    const float techTitleY = techHeaderY + (frameworkButtonBelow ? 0.0f : (techHeaderH - techTitleH) * .5f);
+                    const float frameworkButtonY = techHeaderY + (frameworkButtonBelow
+                        ? techTitleH + gap : (techHeaderH - buttonHeight) * .5f);
+                    text("settings.about.tech.title", techTitle, padding, techTitleY,
+                         techTitleW, labelSize + 4.0f, colors.text, 600);
+                    button("settings.about.tech.framework", frameworkAction,
+                           frameworkButtonBelow ? padding : width - padding - frameworkButtonW,
+                           frameworkButtonY, frameworkButtonW, [openLink] { openLink(frameworkRepository); }, true);
+                    float sectionY = techBodyY;
+                    for (std::size_t i = 0; i < techSections.size(); ++i) {
+                        const auto& section = techSections[i];
+                        const std::string id = "settings.about.tech." + std::to_string(i);
+                        text(id + ".title", section.title, padding, sectionY, inner, labelSize, colors.text, 600);
+                        const float bodyY = sectionY + textHeight(section.title, labelSize, inner, 600) + 3.0f;
+                        text(id + ".body", section.body, padding, bodyY, inner, labelSize, colors.textMuted);
+                        sectionY = bodyY + textHeight(section.body, labelSize, inner) + gap;
+                    }
                 }).build();
         }).build();
     if (maxOffset > 0.0f) {

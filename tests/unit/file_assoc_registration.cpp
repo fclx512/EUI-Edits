@@ -31,6 +31,14 @@ int main() {
           std::find_if(neo::filetypes::associationTypes().begin(),neo::filetypes::associationTypes().end(),[](const auto& t){return std::string(t.extension)=="bat";})!=neo::filetypes::associationTypes().end(),
           "central association type list includes recognized scripts");
     check(!isRegistered() && !hasRegistrationEntries(), "empty hive must report unregistered");
+    check(quickAction(false, {}) == QuickAction::Add, "first run offers the TXT/MD shortcut");
+    check(quickAction(true, {{"json", true, DefaultApp::Other}}) == QuickAction::Add,
+          "registered custom types alone still offer the TXT/MD shortcut");
+    std::vector<TypeStatus> quick{{"txt", true, DefaultApp::EUIEdits}, {"md", true, DefaultApp::Unknown}};
+    check(quickAction(false, quick) == QuickAction::Repair, "stale registration takes precedence");
+    check(quickAction(true, quick) == QuickAction::SetDefaults, "unknown MD default must not appear confirmed");
+    quick[1].defaultApp = DefaultApp::EUIEdits;
+    check(quickAction(true, quick) == QuickAction::ManageDefaults, "a refreshed pair of defaults changes the primary action");
     const auto recommended = neo::filetypes::recommendedAssociations();
     const std::vector<std::string> excluded = {"html","htm","sh","bash","bat","cmd","ps1"};
     for (const auto& type : neo::filetypes::associationTypes()) {

@@ -22,6 +22,26 @@ struct Entry {
     bool italic = false;       // post.italicAngle 非零
 };
 
+// Family names and file basenames are searchable without loading any font.
+// Keep UTF-8 bytes intact; only ASCII capitals are folded for English names.
+inline bool matchesSearch(const Entry& entry, const std::string& query) {
+    const auto fold = [](std::string value) {
+        for (char& c : value) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+        return value;
+    };
+    const auto slash = entry.path.find_last_of("/\\");
+    const std::string name = fold(entry.displayName + " " + entry.path.substr(slash == std::string::npos ? 0 : slash + 1));
+    const std::string words = fold(query);
+    std::size_t start = 0;
+    while ((start = words.find_first_not_of(" \t\r\n", start)) != std::string::npos) {
+        const auto end = words.find_first_of(" \t\r\n", start);
+        if (name.find(words.substr(start, end - start)) == std::string::npos) return false;
+        if (end == std::string::npos) break;
+        start = end;
+    }
+    return true;
+}
+
 // 扫描系统字体目录（`%WINDIR%\Fonts` 与 `%LOCALAPPDATA%\Microsoft\Windows\Fonts`），
 // 按 (rank, 字体族名) 排序。首次调用扫描并缓存，之后返回同一份。
 const std::vector<Entry>& catalog();

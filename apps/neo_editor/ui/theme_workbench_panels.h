@@ -76,9 +76,19 @@ inline void paletteLayer(eui::Ui& ui,AppState& state,float w,const EditorColors&
         paragraph(ui,"themeWorkbench.palette.help",tr("theme_wb.palette_help"),pad,y,inner,d.hint*3.2f,c.textMuted,d.hint);y+=d.hint*3.2f+d.gap;
         eui::Color seed;parseHex(s.seedHex,seed);swatch(ui,"themeWorkbench.seed.swatch",pad,y,d.control,d.control,seed,c);
         components::input(ui,"themeWorkbench.seed.hex").position(pad+d.control+d.gap,y).size(inner-d.control-d.gap,d.control).value(s.seedHex).placeholder("#RRGGBB").fontSize(d.font).theme(c.tokens)
-            .onChange([](const std::string& v){session().seedHex=v;generateCandidates();}).build();y+=d.control+d.gap;
-        ghostButton(ui,"themeWorkbench.seed.edit",tr("theme_wb.seed_picker"),pad,y,inner*.5f,d.control,c,d.font,[]{auto& a=session();a.seedEditing=!a.seedEditing;eui::Color col;parseHex(a.seedHex,col);const auto h=toHsv(col);a.pickH=h.h;a.pickS=h.s;a.pickV=h.v;a.pickA=1;app::requestUpdate();},s.seedEditing,s.compare);
-        ghostButton(ui,"themeWorkbench.seed.shuffle",tr("theme_wb.shuffle"),pad+inner*.5f,y,inner*.5f,d.control,c,d.font,[]{session().autoRound=(session().autoRound+1)%7;generateCandidates();},false,s.compare);y+=d.control+d.gap;
+            .onChange([](const std::string& v) {
+                auto& a = session();
+                a.seedHex = v;
+                a.useSeedIntensity = true;
+                eui::Color color{};
+                if (parseHex(v, color)) {
+                    const auto hsv = toHsv(color);
+                    a.pickH = hsv.h; a.pickS = hsv.s; a.pickV = hsv.v;
+                }
+                generateCandidates(true);
+            }).build();y+=d.control+d.gap;
+        ghostButton(ui,"themeWorkbench.seed.edit",tr("theme_wb.seed_picker"),pad,y,inner*.5f,d.control,c,d.font,[]{auto& a=session();a.seedEditing=!a.seedEditing;if(!a.seedEditing)a.trial=-1;eui::Color col{};parseHex(a.seedHex,col);const auto h=toHsv(col);a.pickH=h.h;a.pickS=h.s;a.pickV=h.v;a.pickA=1;app::requestUpdate();},s.seedEditing,s.compare);
+        ghostButton(ui,"themeWorkbench.seed.shuffle",tr("theme_wb.shuffle"),pad+inner*.5f,y,inner*.5f,d.control,c,d.font,[]{shuffleSeed();},false,s.compare);y+=d.control+d.gap;
         if(s.seedEditing){picker(ui,"themeWorkbench.seed.picker",pad,y,inner,c,d,true);y+=(d.row+6)*3+d.gap;}
         if(hasImportedColors()){toggle(ui,"themeWorkbench.palette.missing",pad,y,inner,d.row,c,d.hint,tr("theme_wb.keep_imported"),s.missingOnly,[](bool value){session().missingOnly=value;app::requestUpdate();});y+=d.row+d.gap;}
         for(int i=0;i<static_cast<int>(s.candidates.size());++i){
@@ -92,6 +102,11 @@ inline void paletteLayer(eui::Ui& ui,AppState& state,float w,const EditorColors&
             label(ui,id+".text",std::string(variantLabel(i))+" · "+tr("theme_wb.adopt"),pad+88,y,inner-98,d.row+10,c.text,d.font);y+=d.row+18;
         }
         paragraph(ui,"themeWorkbench.palette.candidate_hint",tr("theme_wb.candidate_help"),pad,y,inner,d.row*1.5f,c.textMuted,d.hint);y+=d.row*1.5f+d.gap;
+        if (s.trial >= 0) {
+            ghostButton(ui, "themeWorkbench.seed.end_preview", tr("theme_wb.current"), pad, y, inner, d.row, c, d.hint,
+                        [] { session().trial = -1; app::requestUpdate(); });
+            y += d.row;
+        }
         hairline(ui,"themeWorkbench.palette.line",pad,y,inner,1,c);y+=d.gap;
         for(int g=0;g<4;++g){
             ghostButton(ui,"themeWorkbench.group."+std::to_string(g),groupLabel(g),pad,y,inner,d.row,c,d.font,[g]{session().expandedGroup=session().expandedGroup==g?-1:g;app::requestUpdate();},s.expandedGroup==g,false,s.expandedGroup==g?UiIcon::ChevronDown:UiIcon::ChevronRight);y+=d.row;

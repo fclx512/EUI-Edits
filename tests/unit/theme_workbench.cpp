@@ -170,6 +170,15 @@ void testCssReportAndScope() {
           "global-only CSS colors are valid for both modes");
     check(rootOnly.light.colors.count("text") && rootOnly.dark.colors.count("text") &&
           rootOnly.importReport.size() == 52, "root-only import reports both palettes completely");
+    neo::ThemeFileData mixed;
+    check(neo::obsidiantheme::parse(
+              "\xef\xbb\xbf@charset \"UTF-8\"; :root, .theme-dark { --text-normal: #123456; }"
+              "@media print { .theme-light { --text-normal: #ff0000; } }",
+              "mixed selectors", mixed, error) &&
+              mixed.light.colors.count("text") && mixed.dark.colors.count("text") &&
+              same(mixed.light.colors.at("text"), byteColor(0x12, 0x34, 0x56)) &&
+              same(mixed.dark.colors.at("text"), byteColor(0x12, 0x34, 0x56)),
+          "statement at-rules and BOM preserve the next rule, mixed selectors reach both sides, print is skipped");
 }
 
 void testReadAndDraftIsolation(const fs::path& root) {
